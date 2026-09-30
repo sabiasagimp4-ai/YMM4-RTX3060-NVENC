@@ -12,6 +12,8 @@
 #include <condition_variable>
 #include <thread>
 #include <atomic>
+#include <chrono>
+#include <cmath>
 
 #include <mfapi.h>
 #include <mfidl.h>
@@ -182,12 +184,25 @@ namespace
         NVENCSTATUS(NVENCAPI* createInstance)(NV_ENCODE_API_FUNCTION_LIST*) = nullptr;
         NV_ENCODE_API_FUNCTION_LIST funcs{};
         void* session = nullptr;
+        bool encoderInitialized = false;
+        bool encoderFlushAttempted = false;
+        bool encoderFlushed = false;
+        bool discardOutput = false;
+        bool syncPending = false;
+        HANDLE eosEvent = nullptr;
         NV_ENC_INITIALIZE_PARAMS initParams{};
         NV_ENC_CONFIG config{};
         NV_ENC_OUTPUT_PTR bitstream = nullptr;
         std::vector<NV_ENC_OUTPUT_PTR> asyncBitstreams;
         std::vector<HANDLE> asyncEvents;
         std::vector<bool> asyncPending;
+        struct InputResource
+        {
+            ID3D11Texture2D* texture = nullptr;
+            NV_ENC_REGISTERED_PTR registered = nullptr;
+            NV_ENC_INPUT_PTR mapped = nullptr;
+        };
+        std::vector<InputResource> inputs;
         uint32_t asyncDepth = 0;
         size_t asyncIndex = 0;
         bool asyncEnabled = false;
@@ -202,10 +217,6 @@ namespace
         ID3D11VideoProcessor* videoProcessor = nullptr;
         ID3D11Texture2D* nv12Texture = nullptr;
         ID3D11VideoProcessorOutputView* vpOutputView = nullptr;
-        NV_ENC_REGISTERED_PTR registeredNv12 = nullptr;
-        ID3D11Texture2D* rgbTexture = nullptr;
-        NV_ENC_REGISTERED_PTR registeredRgb = nullptr;
-        std::mutex fileMutex;
         std::mutex logMutex;
         std::mutex writerMutex;
         std::condition_variable writerCv;
@@ -221,6 +232,7 @@ namespace
             uint32_t audioDuration = 0;
         };
         std::deque<EncodedSample> sampleQueue;
+        size_t queuedBytes = 0;
         int width = 0;
         int height = 0;
         int fps = 30;
@@ -232,6 +244,7 @@ namespace
         uint64_t mdatHeaderOffset = 0;
         uint64_t mdatLargeSizeOffset = 0;
         uint64_t mdatDataOffset = 0;
+        // ponytail: MP4 sample tables grow with export length; use fragmented MP4 for very long recordings.
         std::vector<uint32_t> sampleSizes;
         std::vector<uint64_t> sampleOffsets;
         std::vector<uint32_t> syncSamples;
@@ -245,7 +258,6 @@ namespace
         uint64_t audioSampleTotal = 0;
         uint64_t audioFrameIndex = 0;
         std::vector<int16_t> audioPcmBuffer;
-        size_t audioPcmRead = 0;
         std::vector<uint32_t> audioSampleSizes;
         std::vector<uint64_t> audioSampleOffsets;
         std::vector<uint32_t> audioSampleDurations;
@@ -253,6 +265,7 @@ namespace
         IMFTransform* aacEncoder = nullptr;
         std::wstring outputPath;
         std::wstring lastError;
+        std::mutex errorMutex;
         bool logEnabled = false;
         HANDLE logFile = INVALID_HANDLE_VALUE;
     };
@@ -284,7 +297,7 @@ namespace
     bool ProcessAudioOutput(EncoderState* state);
     bool EncodeAudioFrame(EncoderState* state, const int16_t* pcm, uint32_t frameSamplesPerChannel);
     bool FlushAudio(EncoderState* state);
-    bool EnsureRgbResource(EncoderState* state, ID3D11Texture2D* texture);
+    bool EnsureInputResource(EncoderState* state, ID3D11Texture2D* texture, size_t slot);
     bool EnsureVideoProcessor(EncoderState* state);
     ID3D11Texture2D* ConvertToNv12(EncoderState* state, ID3D11Texture2D* texture);
     void StartWriterThread(EncoderState* state);
@@ -294,9 +307,47 @@ namespace
     {
         if (state)
         {
-            state->lastError = message;
+            {
+                std::lock_guard<std::mutex> lock(state->errorMutex);
+                if (state->lastError.empty())
+                    state->lastError = message;
+            }
             LogLine(state, L"[error] " + message);
         }
+    }
+
+    bool QueueSample(EncoderState* state, EncoderState::EncodedSample sample)
+    {
+        constexpr size_t maxBytes = 64 * 1024 * 1024;
+        constexpr size_t maxSamples = 256;
+        if (sample.data.size() > maxBytes)
+        {
+            SetError(state, L"Encoded sample exceeds the writer queue limit.");
+            return false;
+        }
+        StartWriterThread(state);
+        if (!state->writerStarted) return false;
+        std::unique_lock<std::mutex> lock(state->writerMutex);
+        if (!state->writerCv.wait_for(lock, std::chrono::seconds(30), [&]()
+            {
+                return state->writerError || state->writerStop ||
+                    (state->sampleQueue.size() < maxSamples &&
+                     state->queuedBytes <= maxBytes - sample.data.size());
+            }))
+        {
+            SetError(state, L"Writer queue timed out.");
+            return false;
+        }
+        if (state->writerError || state->writerStop)
+        {
+            SetError(state, L"Writer is unavailable.");
+            return false;
+        }
+        state->sampleQueue.push_back(std::move(sample));
+        state->queuedBytes += state->sampleQueue.back().data.size();
+        lock.unlock();
+        state->writerCv.notify_all();
+        return true;
     }
 
     bool CheckStatus(EncoderState* state, NVENCSTATUS status, const wchar_t* message)
@@ -348,6 +399,7 @@ namespace
         {
             return;
         }
+        std::lock_guard<std::mutex> lock(state->logMutex);
         if (state->logFile == INVALID_HANDLE_VALUE)
         {
             OpenLog(state);
@@ -375,7 +427,6 @@ namespace
         std::string utf8(bytesNeeded, '\0');
         WideCharToMultiByte(CP_UTF8, 0, full.c_str(), static_cast<int>(full.size()), &utf8[0], bytesNeeded, nullptr, nullptr);
 
-        std::lock_guard<std::mutex> lock(state->logMutex);
         DWORD written = 0;
         WriteFile(state->logFile, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
     }
@@ -389,6 +440,7 @@ namespace
 
     float ClampFloat(float value, float minValue, float maxValue)
     {
+        if (std::isnan(value)) return 0.0f;
         if (value < minValue) return minValue;
         if (value > maxValue) return maxValue;
         return value;
@@ -638,6 +690,7 @@ namespace
             info.cbSize = 4096;
         }
 
+        int noProgress = 0;
         while (true)
         {
             IMFSample* outSample = nullptr;
@@ -664,15 +717,24 @@ namespace
             output.pSample = outSample;
             DWORD status = 0;
             hr = state->aacEncoder->ProcessOutput(0, 1, &output, &status);
+            if (output.pEvents) output.pEvents->Release();
             if (hr == MF_E_TRANSFORM_STREAM_CHANGE)
             {
                 IMFMediaType* newType = nullptr;
-                if (SUCCEEDED(state->aacEncoder->GetOutputAvailableType(0, 0, &newType)))
+                hr = state->aacEncoder->GetOutputAvailableType(0, 0, &newType);
+                if (SUCCEEDED(hr))
                 {
-                    state->aacEncoder->SetOutputType(0, newType, 0);
+                    hr = state->aacEncoder->SetOutputType(0, newType, 0);
                     newType->Release();
                 }
                 outSample->Release();
+                if (FAILED(hr) || ++noProgress > 8 ||
+                    FAILED(state->aacEncoder->GetOutputStreamInfo(0, &info)))
+                {
+                    SetError(state, L"AAC output format negotiation failed.");
+                    return false;
+                }
+                if (info.cbSize == 0) info.cbSize = 4096;
                 continue;
             }
             if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT)
@@ -711,30 +773,26 @@ namespace
 
             if (curLen > 0)
             {
-                if (!state->writerStarted)
-                {
-                    StartWriterThread(state);
-                }
-                if (state->writerError)
+                noProgress = 0;
+                std::vector<uint8_t> payload(data, data + curLen);
+                const bool queued = QueueSample(state, { std::move(payload), false, true, 1024 });
+                if (!queued)
                 {
                     outBuffer->Unlock();
                     outBuffer->Release();
                     outSample->Release();
-                    SetError(state, L"Writer thread error.");
                     return false;
                 }
-
-                std::vector<uint8_t> payload(data, data + curLen);
-                {
-                    std::lock_guard<std::mutex> lock(state->writerMutex);
-                    state->sampleQueue.push_back({ std::move(payload), false, true, 1024 });
-                }
-                state->writerCv.notify_one();
             }
 
             outBuffer->Unlock();
             outBuffer->Release();
             outSample->Release();
+            if (curLen == 0 && ++noProgress > 8)
+            {
+                SetError(state, L"AAC encoder made no progress.");
+                return false;
+            }
         }
 
         return true;
@@ -786,8 +844,9 @@ namespace
         sample->AddBuffer(buffer);
         buffer->Release();
 
-        const LONGLONG duration = static_cast<LONGLONG>(frameSamplesPerChannel) * 10000000LL / state->audioSampleRate;
-        const LONGLONG time = static_cast<LONGLONG>(state->audioFrameIndex) * duration;
+        const LONGLONG time = static_cast<LONGLONG>(state->audioFrameIndex) * frameSamplesPerChannel * 10000000LL / state->audioSampleRate;
+        const LONGLONG nextTime = static_cast<LONGLONG>(state->audioFrameIndex + 1) * frameSamplesPerChannel * 10000000LL / state->audioSampleRate;
+        const LONGLONG duration = nextTime - time;
         sample->SetSampleTime(time);
         sample->SetSampleDuration(duration);
         state->audioFrameIndex++;
@@ -830,17 +889,15 @@ namespace
         const uint32_t channels = static_cast<uint32_t>(state->audioChannels);
         const uint32_t frameCount = frameSamples * channels;
 
-        if (state->audioPcmBuffer.size() > state->audioPcmRead)
+        if (!state->audioPcmBuffer.empty())
         {
-            size_t remain = state->audioPcmBuffer.size() - state->audioPcmRead;
             std::vector<int16_t> frame(frameCount, 0);
-            size_t toCopy = std::min<size_t>(remain, frameCount);
-            memcpy(frame.data(), state->audioPcmBuffer.data() + state->audioPcmRead, toCopy * sizeof(int16_t));
+            memcpy(frame.data(), state->audioPcmBuffer.data(), state->audioPcmBuffer.size() * sizeof(int16_t));
             if (!EncodeAudioFrame(state, frame.data(), frameSamples))
             {
                 return false;
             }
-            state->audioPcmRead += toCopy;
+            state->audioPcmBuffer.clear();
         }
 
         state->aacEncoder->ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, 0);
@@ -990,16 +1047,18 @@ namespace
         const uint64_t duration = state->audioSampleTotal;
         const uint32_t sampleCount = static_cast<uint32_t>(state->audioSampleSizes.size());
         const uint32_t channels = static_cast<uint32_t>(state->audioChannels);
+        const uint32_t movieTimescale = static_cast<uint32_t>(state->fps);
+        const uint64_t movieDuration = (duration * movieTimescale + timescale - 1) / timescale;
 
         size_t trakStart = moov.BeginBox("trak");
 
         size_t tkhdStart = moov.BeginBox("tkhd");
-        moov.WriteU32(0x00000007);
-        moov.WriteU32(0);
-        moov.WriteU32(0);
+        moov.WriteU32(0x01000007); // version 1: 64-bit duration
+        moov.WriteU64(0);
+        moov.WriteU64(0);
         moov.WriteU32(trackId);
         moov.WriteU32(0);
-        moov.WriteU32(static_cast<uint32_t>(duration));
+        moov.WriteU64(movieDuration);
         moov.WriteU32(0);
         moov.WriteU32(0);
         moov.WriteU16(0);
@@ -1014,11 +1073,11 @@ namespace
         size_t mdiaStart = moov.BeginBox("mdia");
 
         size_t mdhdStart = moov.BeginBox("mdhd");
-        moov.WriteU32(0);
-        moov.WriteU32(0);
-        moov.WriteU32(0);
+        moov.WriteU32(0x01000000);
+        moov.WriteU64(0);
+        moov.WriteU64(0);
         moov.WriteU32(timescale);
-        moov.WriteU32(static_cast<uint32_t>(duration));
+        moov.WriteU64(duration);
         moov.WriteU16(0);
         moov.WriteU16(0);
         moov.EndBox(mdhdStart);
@@ -1135,26 +1194,26 @@ namespace
     {
         Mp4Buffer moov;
 
-        const uint32_t timescale = 90000;
         const uint32_t fps = state->fps > 0 ? static_cast<uint32_t>(state->fps) : 30;
-        const uint32_t frameDuration = timescale / fps;
+        const uint32_t timescale = fps;
+        const uint32_t frameDuration = 1;
         const uint32_t sampleCount = static_cast<uint32_t>(state->sampleSizes.size());
         const uint64_t videoDuration = static_cast<uint64_t>(frameDuration) * sampleCount;
         uint64_t audioDuration = 0;
         if (state->audioSampleRate > 0)
         {
-            audioDuration = state->audioSampleTotal * timescale / static_cast<uint64_t>(state->audioSampleRate);
+            audioDuration = (state->audioSampleTotal * timescale + state->audioSampleRate - 1) / static_cast<uint64_t>(state->audioSampleRate);
         }
         const uint64_t duration = MaxU64(videoDuration, audioDuration);
 
         size_t moovStart = moov.BeginBox("moov");
 
         size_t mvhdStart = moov.BeginBox("mvhd");
-        moov.WriteU32(0);
-        moov.WriteU32(0);
-        moov.WriteU32(0);
+        moov.WriteU32(0x01000000);
+        moov.WriteU64(0);
+        moov.WriteU64(0);
         moov.WriteU32(timescale);
-        moov.WriteU32(static_cast<uint32_t>(duration));
+        moov.WriteU64(duration);
         moov.WriteU32(0x00010000);
         moov.WriteU16(0);
         moov.WriteU16(0);
@@ -1172,12 +1231,12 @@ namespace
         size_t trakStart = moov.BeginBox("trak");
 
         size_t tkhdStart = moov.BeginBox("tkhd");
-        moov.WriteU32(0x00000007);
-        moov.WriteU32(0);
-        moov.WriteU32(0);
+        moov.WriteU32(0x01000007);
+        moov.WriteU64(0);
+        moov.WriteU64(0);
         moov.WriteU32(1);
         moov.WriteU32(0);
-        moov.WriteU32(static_cast<uint32_t>(duration));
+        moov.WriteU64(videoDuration);
         moov.WriteU32(0);
         moov.WriteU32(0);
         moov.WriteU16(0);
@@ -1192,11 +1251,11 @@ namespace
         size_t mdiaStart = moov.BeginBox("mdia");
 
         size_t mdhdStart = moov.BeginBox("mdhd");
-        moov.WriteU32(0);
-        moov.WriteU32(0);
-        moov.WriteU32(0);
+        moov.WriteU32(0x01000000);
+        moov.WriteU64(0);
+        moov.WriteU64(0);
         moov.WriteU32(timescale);
-        moov.WriteU32(static_cast<uint32_t>(duration));
+        moov.WriteU64(videoDuration);
         moov.WriteU16(0);
         moov.WriteU16(0);
         moov.EndBox(mdhdStart);
@@ -1370,10 +1429,7 @@ namespace
         StopWriterThread(state);
         if (state->writerError)
         {
-            if (state->lastError.empty())
-            {
-                SetError(state, L"Writer thread error.");
-            }
+            SetError(state, L"Writer thread error.");
             return false;
         }
 
@@ -2108,17 +2164,18 @@ namespace
         return !out.empty();
     }
 
-    std::vector<uint8_t> ConvertToLengthPrefixed(const std::vector<NalUnit>& units, bool keepParameterSets)
+    std::vector<uint8_t> ConvertToLengthPrefixed(const std::vector<NalUnit>& units, bool hevc)
     {
         std::vector<uint8_t> output;
+        size_t capacity = 0;
+        for (const auto& unit : units) capacity += unit.size + 4;
+        output.reserve(capacity);
         for (const auto& unit : units)
         {
-            if (!keepParameterSets)
+            if (hevc ? (unit.type == 32 || unit.type == 33 || unit.type == 34)
+                     : (unit.type == 7 || unit.type == 8))
             {
-                if (unit.type == 7 || unit.type == 8 || unit.type == 32 || unit.type == 33 || unit.type == 34)
-                {
-                    continue;
-                }
+                continue;
             }
             uint32_t len = static_cast<uint32_t>(unit.size);
             output.push_back(static_cast<uint8_t>((len >> 24) & 0xFF));
@@ -2137,11 +2194,11 @@ namespace
             return true;
         }
 
-        std::vector<uint8_t> buffer(data, data + size);
         const bool hevc = IsHevc(state);
         const bool av1 = IsAv1(state);
         if (av1)
         {
+            std::vector<uint8_t> buffer(data, data + size);
             // AV1 uses OBU bitstream; do not parse as Annex B.
             bool isKeyframe = picType == NV_ENC_PIC_TYPE_IDR
                 || picType == NV_ENC_PIC_TYPE_I
@@ -2164,23 +2221,10 @@ namespace
                 }
             }
 
-            if (!state->writerStarted)
-            {
-                StartWriterThread(state);
-            }
-            if (state->writerError)
-            {
-                return false;
-            }
-            {
-                std::lock_guard<std::mutex> lock(state->writerMutex);
-                state->sampleQueue.push_back({ std::move(buffer), isKeyframe, false, 0 });
-            }
-            state->writerCv.notify_one();
-            return true;
+            return QueueSample(state, { std::move(buffer), isKeyframe, false, 0 });
         }
 
-        auto units = ParseAnnexB(buffer.data(), buffer.size(), hevc);
+        auto units = ParseAnnexB(data, size, hevc);
 
         std::vector<uint8_t> sps;
         std::vector<uint8_t> pps;
@@ -2217,7 +2261,7 @@ namespace
                 {
                     pps.assign(unit.data, unit.data + unit.size);
                 }
-                else if (unit.type == 19 || unit.type == 20)
+                else if (unit.type >= 16 && unit.type <= 21)
                 {
                     isKeyframe = true;
                 }
@@ -2245,26 +2289,13 @@ namespace
             }
         }
 
-        auto sampleData = ConvertToLengthPrefixed(units, false);
+        auto sampleData = ConvertToLengthPrefixed(units, hevc);
         if (sampleData.empty())
         {
             return true;
         }
 
-        if (!state->writerStarted)
-        {
-            StartWriterThread(state);
-        }
-        if (state->writerError)
-        {
-            return false;
-        }
-        {
-            std::lock_guard<std::mutex> lock(state->writerMutex);
-            state->sampleQueue.push_back({ std::move(sampleData), isKeyframe, false, 0 });
-        }
-        state->writerCv.notify_one();
-        return true;
+        return QueueSample(state, { std::move(sampleData), isKeyframe, false, 0 });
     }
 
     bool ConsumeAsyncBitstream(EncoderState* state, size_t index)
@@ -2307,7 +2338,7 @@ namespace
             {
                 LogLine(state, L"async bitstream lock ok slot=" + std::to_wstring(index));
                 bool ok = true;
-                if (lockBitstream.bitstreamSizeInBytes > 0)
+                if (!state->discardOutput && lockBitstream.bitstreamSizeInBytes > 0)
                 {
                     ok = ProcessEncodedBitstream(state,
                         static_cast<uint8_t*>(lockBitstream.bitstreamBufferPtr),
@@ -2322,6 +2353,14 @@ namespace
                 }
 
                 state->asyncPending[index] = false;
+                auto& input = state->inputs[index];
+                if (input.mapped)
+                {
+                    const auto unmapStatus = state->funcs.nvEncUnmapInputResource(state->session, input.mapped);
+                    input.mapped = nullptr;
+                    if (!CheckStatus(state, unmapStatus, L"nvEncUnmapInputResource failed"))
+                        return false;
+                }
                 return ok;
             }
             if (status != NV_ENC_ERR_LOCK_BUSY)
@@ -2476,6 +2515,54 @@ namespace
 
         SetError(state, std::wstring(context) + L" failed.");
         return false;
+    }
+
+    bool FlushEncoder(EncoderState* state)
+    {
+        if (!state->encoderInitialized) return true;
+        if (!state->encoderFlushed)
+        {
+            // Never resubmit EOS after a driver failure or timeout.
+            if (state->encoderFlushAttempted) return false;
+            state->encoderFlushAttempted = true;
+            NV_ENC_PIC_PARAMS pic{};
+            pic.version = NV_ENC_PIC_PARAMS_VER;
+            pic.encodePicFlags = NV_ENC_PIC_FLAG_EOS;
+            if (state->initParams.enableEncodeAsync)
+            {
+                // EOS gets its own event: every ring slot may still be in flight.
+                HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+                if (!event) return false;
+                NV_ENC_EVENT_PARAMS params{};
+                params.version = NV_ENC_EVENT_PARAMS_VER;
+                params.completionEvent = event;
+                if (!CheckStatus(state, state->funcs.nvEncRegisterAsyncEvent(state->session, &params),
+                    L"nvEncRegisterAsyncEvent (EOS) failed"))
+                {
+                    CloseHandle(event);
+                    return false;
+                }
+                state->eosEvent = event;
+                pic.completionEvent = event;
+            }
+            if (!CheckStatus(state, state->funcs.nvEncEncodePicture(state->session, &pic),
+                L"nvEncEncodePicture (EOS) failed")) return false;
+            if (!WaitForAsyncEvent(state, state->eosEvent, L"nvEnc async EOS wait")) return false;
+            state->encoderFlushed = true;
+        }
+        if (!DrainAsyncBitstreams(state)) return false;
+        if (state->syncPending)
+        {
+            NV_ENC_LOCK_BITSTREAM output{};
+            output.version = NV_ENC_LOCK_BITSTREAM_VER;
+            output.outputBitstream = state->bitstream;
+            if (!CheckStatus(state, state->funcs.nvEncLockBitstream(state->session, &output),
+                L"nvEncLockBitstream (flush) failed")) return false;
+            if (!CheckStatus(state, state->funcs.nvEncUnlockBitstream(state->session, state->bitstream),
+                L"nvEncUnlockBitstream (flush) failed")) return false;
+            state->syncPending = false;
+        }
+        return true;
     }
 
     bool TryInitAv1CodecPrivate(EncoderState* state)
@@ -2691,6 +2778,7 @@ namespace
         {
             return false;
         }
+        state->encoderInitialized = true;
 
         if (!TryInitAv1CodecPrivate(state))
         {
@@ -2728,22 +2816,11 @@ namespace
 
             if (!InitializeAsyncResources(state, asyncDepth))
             {
-                state->initParams.enableEncodeAsync = 0;
-                state->asyncEnabled = false;
-            if (codec == kCodecHevc)
-            {
-                LogLine(state, L"HEVC async failed, fallback to sync");
-            }
-                NV_ENC_CREATE_BITSTREAM_BUFFER createBitstream{};
-                createBitstream.version = NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
-                status = state->funcs.nvEncCreateBitstreamBuffer(state->session, &createBitstream);
-                if (!CheckStatus(state, status, L"nvEncCreateBitstreamBuffer failed"))
-                {
-                    return false;
-                }
-                state->bitstream = createBitstream.bitstreamBuffer;
+                // Changing this struct cannot change an already initialized NVENC session.
+                return false;
             }
         }
+        state->inputs.resize(state->asyncEnabled ? state->asyncDepth : 1);
         return true;
     }
 
@@ -2754,59 +2831,48 @@ namespace
             return false;
         }
 
-        NV_ENC_REGISTERED_PTR registered = nullptr;
-        NV_ENC_BUFFER_FORMAT usedBufferFormat = state->bufferFormat;
+        D3D11_TEXTURE2D_DESC source{};
+        texture->GetDesc(&source);
+        const bool rgbFormat = state->originalBufferFormat == NV_ENC_BUFFER_FORMAT_ARGB
+            ? (source.Format == DXGI_FORMAT_B8G8R8A8_UNORM || source.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB)
+            : (source.Format == DXGI_FORMAT_R8G8B8A8_UNORM || source.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB);
+        ID3D11Device* sourceDevice = nullptr;
+        texture->GetDevice(&sourceDevice);
+        const bool sameDevice = sourceDevice == state->device;
+        if (sourceDevice) sourceDevice->Release();
+        if (!sameDevice || source.Width != static_cast<UINT>(state->width) ||
+            source.Height != static_cast<UINT>(state->height) || !rgbFormat ||
+            source.MipLevels != 1 || source.ArraySize != 1 || source.SampleDesc.Count != 1)
+        {
+            SetError(state, L"Input texture device, size or format does not match the encoder.");
+            return false;
+        }
+
+        size_t slot = state->asyncEnabled ? state->asyncIndex % state->asyncBitstreams.size() : 0;
+        if (state->asyncEnabled && state->asyncPending[slot] && !ConsumeAsyncBitstream(state, slot))
+            return false;
+
         if (state->fastPreset != 0)
         {
             auto* converted = ConvertToNv12(state, texture);
             if (!converted)
             {
-                // Fall back to RGB path when NV12 conversion is unavailable.
-                state->fastPreset = 0;
-                state->bufferFormat = state->originalBufferFormat;
-            }
-            else
-            {
-                texture = converted;
-
-                if (!state->registeredNv12)
-                {
-                    NV_ENC_REGISTER_RESOURCE registerRes{};
-                    registerRes.version = NV_ENC_REGISTER_RESOURCE_VER;
-                    registerRes.resourceType = NV_ENC_INPUT_RESOURCE_TYPE_DIRECTX;
-                    registerRes.resourceToRegister = texture;
-                    registerRes.width = state->width;
-                    registerRes.height = state->height;
-                    registerRes.bufferFormat = state->bufferFormat;
-                    registerRes.bufferUsage = NV_ENC_INPUT_IMAGE;
-                    auto status = state->funcs.nvEncRegisterResource(state->session, &registerRes);
-                    if (!CheckStatus(state, status, L"nvEncRegisterResource failed"))
-                    {
-                        return false;
-                    }
-                    state->registeredNv12 = registerRes.registeredResource;
-                }
-                registered = state->registeredNv12;
-                usedBufferFormat = state->bufferFormat;
-            }
-        }
-
-        if (!registered)
-        {
-            if (!EnsureRgbResource(state, texture))
-            {
-                SetError(state, L"Failed to prepare RGB input resource.");
+                SetError(state, L"NV12 conversion failed.");
                 return false;
             }
-
-            state->deviceContext->CopyResource(state->rgbTexture, texture);
-            registered = state->registeredRgb;
-            usedBufferFormat = state->bufferFormat;
+            texture = converted;
         }
+
+        if (!EnsureInputResource(state, texture, slot))
+        {
+            return false;
+        }
+        auto& input = state->inputs[slot];
+        state->deviceContext->CopyResource(input.texture, texture);
 
         NV_ENC_MAP_INPUT_RESOURCE map{};
         map.version = NV_ENC_MAP_INPUT_RESOURCE_VER;
-        map.registeredResource = registered;
+        map.registeredResource = input.registered;
         auto status = state->funcs.nvEncMapInputResource(state->session, &map);
         if (!CheckStatus(state, status, L"nvEncMapInputResource failed"))
         {
@@ -2816,23 +2882,14 @@ namespace
         NV_ENC_PIC_PARAMS pic{};
         pic.version = NV_ENC_PIC_PARAMS_VER;
         pic.inputBuffer = map.mappedResource;
-        pic.bufferFmt = usedBufferFormat;
+        input.mapped = map.mappedResource;
+        pic.bufferFmt = state->bufferFormat;
         pic.inputWidth = state->width;
         pic.inputHeight = state->height;
-        size_t asyncSlot = 0;
         if (state->asyncEnabled)
         {
-            asyncSlot = state->asyncIndex % state->asyncBitstreams.size();
-            if (state->asyncPending[asyncSlot])
-            {
-                if (!ConsumeAsyncBitstream(state, asyncSlot))
-                {
-                    state->funcs.nvEncUnmapInputResource(state->session, map.mappedResource);
-                    return false;
-                }
-            }
-            pic.outputBitstream = state->asyncBitstreams[asyncSlot];
-            pic.completionEvent = state->asyncEvents[asyncSlot];
+            pic.outputBitstream = state->asyncBitstreams[slot];
+            pic.completionEvent = state->asyncEvents[slot];
         }
         else
         {
@@ -2843,27 +2900,29 @@ namespace
         pic.inputDuration = 1;
 
         status = state->funcs.nvEncEncodePicture(state->session, &pic);
-        state->funcs.nvEncUnmapInputResource(state->session, map.mappedResource);
-        if (status == NV_ENC_ERR_NEED_MORE_INPUT)
-        {
-            LogLine(state, L"encode needs more input");
-            return true;
-        }
-        if (!CheckStatus(state, status, L"nvEncEncodePicture failed"))
+        if (status != NV_ENC_ERR_NEED_MORE_INPUT && !CheckStatus(state, status, L"nvEncEncodePicture failed"))
         {
             return false;
         }
 
         if (state->asyncEnabled)
         {
-            state->asyncPending[asyncSlot] = true;
-            state->asyncIndex = (asyncSlot + 1) % state->asyncBitstreams.size();
+            state->asyncPending[slot] = true;
+            state->asyncIndex = (slot + 1) % state->asyncBitstreams.size();
             return true;
+        }
+        if (status == NV_ENC_ERR_NEED_MORE_INPUT)
+        {
+            state->syncPending = true;
+            // No B frames/lookahead are configured; the single sync input cannot be reused safely.
+            SetError(state, L"Unexpected delayed output in synchronous mode.");
+            return false;
         }
 
         NV_ENC_LOCK_BITSTREAM lockBitstream{};
         lockBitstream.version = NV_ENC_LOCK_BITSTREAM_VER;
         lockBitstream.outputBitstream = state->bitstream;
+        state->syncPending = true;
         status = state->funcs.nvEncLockBitstream(state->session, &lockBitstream);
         if (!CheckStatus(state, status, L"nvEncLockBitstream failed"))
         {
@@ -2881,10 +2940,13 @@ namespace
             return false;
         }
 
-        return ok;
+        const auto unmapStatus = state->funcs.nvEncUnmapInputResource(state->session, input.mapped);
+        state->syncPending = false;
+        input.mapped = nullptr;
+        return CheckStatus(state, unmapStatus, L"nvEncUnmapInputResource failed") && ok;
     }
 
-    bool EnsureRgbResource(EncoderState* state, ID3D11Texture2D* texture)
+    bool EnsureInputResource(EncoderState* state, ID3D11Texture2D* texture, size_t slot)
     {
         if (!state || !state->device || !texture)
         {
@@ -2902,35 +2964,9 @@ namespace
 
         D3D11_TEXTURE2D_DESC srcDesc{};
         texture->GetDesc(&srcDesc);
-
-        bool recreate = false;
-        if (!state->rgbTexture)
+        auto& input = state->inputs[slot];
+        if (!input.texture)
         {
-            recreate = true;
-        }
-        else
-        {
-            D3D11_TEXTURE2D_DESC dstDesc{};
-            state->rgbTexture->GetDesc(&dstDesc);
-            if (dstDesc.Width != srcDesc.Width || dstDesc.Height != srcDesc.Height || dstDesc.Format != srcDesc.Format)
-            {
-                recreate = true;
-            }
-        }
-
-        if (recreate)
-        {
-            if (state->registeredRgb)
-            {
-                state->funcs.nvEncUnregisterResource(state->session, state->registeredRgb);
-                state->registeredRgb = nullptr;
-            }
-            if (state->rgbTexture)
-            {
-                state->rgbTexture->Release();
-                state->rgbTexture = nullptr;
-            }
-
             D3D11_TEXTURE2D_DESC desc = srcDesc;
             desc.MipLevels = 1;
             desc.ArraySize = 1;
@@ -2941,18 +2977,19 @@ namespace
             desc.CPUAccessFlags = 0;
             desc.MiscFlags = 0;
 
-            if (FAILED(state->device->CreateTexture2D(&desc, nullptr, &state->rgbTexture)) || !state->rgbTexture)
+            if (FAILED(state->device->CreateTexture2D(&desc, nullptr, &input.texture)) || !input.texture)
             {
+                SetError(state, L"Failed to create owned input texture.");
                 return false;
             }
         }
 
-        if (!state->registeredRgb)
+        if (!input.registered)
         {
             NV_ENC_REGISTER_RESOURCE registerRes{};
             registerRes.version = NV_ENC_REGISTER_RESOURCE_VER;
             registerRes.resourceType = NV_ENC_INPUT_RESOURCE_TYPE_DIRECTX;
-            registerRes.resourceToRegister = state->rgbTexture;
+            registerRes.resourceToRegister = input.texture;
             registerRes.width = state->width;
             registerRes.height = state->height;
             registerRes.bufferFormat = state->bufferFormat;
@@ -2963,7 +3000,7 @@ namespace
             {
                 return false;
             }
-            state->registeredRgb = registerRes.registeredResource;
+            input.registered = registerRes.registeredResource;
         }
 
         return true;
@@ -3066,10 +3103,10 @@ namespace
         D3D11_VIDEO_PROCESSOR_STREAM stream{};
         stream.Enable = TRUE;
         stream.pInputSurface = inputView;
-        state->videoContext->VideoProcessorBlt(state->videoProcessor, state->vpOutputView, 0, 1, &stream);
+        const auto result = state->videoContext->VideoProcessorBlt(state->videoProcessor, state->vpOutputView, 0, 1, &stream);
         inputView->Release();
 
-        return state->nv12Texture;
+        return SUCCEEDED(result) ? state->nv12Texture : nullptr;
     }
 
     void StartWriterThread(EncoderState* state)
@@ -3081,58 +3118,71 @@ namespace
         LogLine(state, L"writer thread start");
         state->writerStop = false;
         state->writerError = false;
-        state->writerStarted = true;
-        state->writerThread = std::thread([state]()
+        try
         {
-            for (;;)
+            state->writerThread = std::thread([state]()
             {
-                EncoderState::EncodedSample sample;
+                try
                 {
-                    std::unique_lock<std::mutex> lock(state->writerMutex);
-                    state->writerCv.wait(lock, [state]()
+                    for (;;)
                     {
-                        return state->writerStop || !state->sampleQueue.empty();
-                    });
-                    if (state->writerStop && state->sampleQueue.empty())
-                    {
-                        break;
+                        EncoderState::EncodedSample sample;
+                        {
+                            std::unique_lock<std::mutex> lock(state->writerMutex);
+                            state->writerCv.wait(lock, [state]()
+                            {
+                                return state->writerStop || !state->sampleQueue.empty();
+                            });
+                            if (state->writerStop && state->sampleQueue.empty())
+                                break;
+                            sample = std::move(state->sampleQueue.front());
+                            state->sampleQueue.pop_front();
+                            state->queuedBytes -= sample.data.size();
+                        }
+                        state->writerCv.notify_all();
+
+                        if (sample.data.empty())
+                            continue;
+
+                        uint64_t offset = state->file.Tell();
+                        if (!state->file.Write(sample.data.data(), sample.data.size()))
+                        {
+                            SetError(state, L"Failed to write sample data.");
+                            state->writerError = true;
+                            state->writerCv.notify_all();
+                            break;
+                        }
+                        if (sample.isAudio)
+                        {
+                            state->audioSampleOffsets.push_back(offset);
+                            state->audioSampleSizes.push_back(static_cast<uint32_t>(sample.data.size()));
+                            state->audioSampleDurations.push_back(sample.audioDuration);
+                            state->audioSampleTotal += sample.audioDuration;
+                        }
+                        else
+                        {
+                            state->sampleOffsets.push_back(offset);
+                            state->sampleSizes.push_back(static_cast<uint32_t>(sample.data.size()));
+                            if (sample.keyframe)
+                                state->syncSamples.push_back(static_cast<uint32_t>(state->sampleSizes.size()));
+                        }
                     }
-                    sample = std::move(state->sampleQueue.front());
-                    state->sampleQueue.pop_front();
                 }
-
-                if (sample.data.empty())
+                catch (...)
                 {
-                    continue;
-                }
-
-                std::lock_guard<std::mutex> fileLock(state->fileMutex);
-                uint64_t offset = state->file.Tell();
-                if (!state->file.Write(sample.data.data(), sample.data.size()))
-                {
-                    SetError(state, L"Failed to write sample data.");
                     state->writerError = true;
-                    break;
+                    SetError(state, L"Writer thread failed.");
+                    state->writerCv.notify_all();
                 }
-                if (sample.isAudio)
-                {
-                    state->audioSampleOffsets.push_back(offset);
-                    state->audioSampleSizes.push_back(static_cast<uint32_t>(sample.data.size()));
-                    state->audioSampleDurations.push_back(sample.audioDuration);
-                    state->audioSampleTotal += sample.audioDuration;
-                }
-                else
-                {
-                    state->sampleOffsets.push_back(offset);
-                    state->sampleSizes.push_back(static_cast<uint32_t>(sample.data.size()));
-                    if (sample.keyframe)
-                    {
-                        state->syncSamples.push_back(static_cast<uint32_t>(state->sampleSizes.size()));
-                    }
-                }
-            }
-            LogLine(state, L"writer thread exit");
-        });
+                LogLine(state, L"writer thread exit");
+            });
+            state->writerStarted = true;
+        }
+        catch (const std::exception&)
+        {
+            state->writerError = true;
+            SetError(state, L"Failed to start writer thread.");
+        }
     }
 
     void StopWriterThread(EncoderState* state)
@@ -3164,6 +3214,14 @@ void* NvencCreate(ID3D11Device* device, int width, int height, int fps, int bitr
     }
 
     auto* state = new EncoderState();
+    if (width < 2 || height < 2 || width > 8192 || height > 8192 || (width & 1) || (height & 1) ||
+        fps < 1 || fps > 240 || bitrateKbps < 100 || bitrateKbps > 200000 ||
+        codec < kCodecH264 || codec > kCodecAv1 || quality < 0 || quality > 2 ||
+        (bufferFormat != NV_ENC_BUFFER_FORMAT_ARGB && bufferFormat != NV_ENC_BUFFER_FORMAT_ABGR))
+    {
+        SetError(state, L"Invalid encoder configuration.");
+        return state;
+    }
     state->outputPath = outputPath;
     state->logEnabled = enableDebugLog != 0;
     OpenLog(state);
@@ -3191,6 +3249,12 @@ int NvencEncode(void* handle, ID3D11Texture2D* texture)
     {
         return 0;
     }
+    if (!state->writerInitialized || state->mp4Finalized || state->writerError)
+        return 0;
+    {
+        std::lock_guard<std::mutex> lock(state->errorMutex);
+        if (!state->lastError.empty()) return 0;
+    }
 
     if (!EncodeTexture(state, texture))
     {
@@ -3203,9 +3267,21 @@ int NvencEncode(void* handle, ID3D11Texture2D* texture)
 int NvencWriteAudio(void* handle, const float* samples, int sampleCount, int sampleRate, int channels)
 {
     auto* state = reinterpret_cast<EncoderState*>(handle);
-    if (!state || !samples || sampleCount <= 0)
+    if (!state)
     {
-        return 1;
+        return 0;
+    }
+    if (!state->writerInitialized || state->mp4Finalized || state->writerError)
+        return 0;
+    {
+        std::lock_guard<std::mutex> lock(state->errorMutex);
+        if (!state->lastError.empty()) return 0;
+    }
+    if (sampleCount == 0) return 1;
+    if (!samples || sampleCount < 0 || (sampleRate != 44100 && sampleRate != 48000) || channels < 1 || channels > 2)
+    {
+        SetError(state, L"Invalid AAC input (44100/48000 Hz, mono/stereo required).");
+        return 0;
     }
 
     if (!InitializeAudioEncoder(state, sampleRate, channels))
@@ -3214,31 +3290,19 @@ int NvencWriteAudio(void* handle, const float* samples, int sampleCount, int sam
     }
 
     const uint32_t frameSamples = 1024;
-    state->audioPcmBuffer.reserve(state->audioPcmBuffer.size() + static_cast<size_t>(sampleCount));
-    for (int i = 0; i < sampleCount; ++i)
+    const size_t frameCount = static_cast<size_t>(frameSamples) * channels;
+    state->audioPcmBuffer.reserve(frameCount);
+    for (int offset = 0; offset < sampleCount;)
     {
-        float v = samples[i];
-        v = ClampFloat(v, -1.0f, 1.0f);
-        int16_t s = static_cast<int16_t>(v * 32767.0f);
-        state->audioPcmBuffer.push_back(s);
-    }
-
-    const uint32_t channelsCount = static_cast<uint32_t>(channels);
-    const size_t frameCount = static_cast<size_t>(frameSamples) * channelsCount;
-    while (state->audioPcmBuffer.size() - state->audioPcmRead >= frameCount)
-    {
-        const int16_t* frame = state->audioPcmBuffer.data() + state->audioPcmRead;
-        if (!EncodeAudioFrame(state, frame, frameSamples))
+        const auto count = std::min(frameCount - state->audioPcmBuffer.size(), static_cast<size_t>(sampleCount - offset));
+        for (size_t i = 0; i < count; ++i)
+            state->audioPcmBuffer.push_back(static_cast<int16_t>(ClampFloat(samples[offset++], -1.0f, 1.0f) * 32767.0f));
+        if (state->audioPcmBuffer.size() == frameCount)
         {
-            return 0;
+            if (!EncodeAudioFrame(state, state->audioPcmBuffer.data(), frameSamples))
+                return 0;
+            state->audioPcmBuffer.clear();
         }
-        state->audioPcmRead += frameCount;
-    }
-
-    if (state->audioPcmRead > 0 && state->audioPcmRead > 8192)
-    {
-        state->audioPcmBuffer.erase(state->audioPcmBuffer.begin(), state->audioPcmBuffer.begin() + static_cast<long long>(state->audioPcmRead));
-        state->audioPcmRead = 0;
     }
 
     return 1;
@@ -3251,56 +3315,15 @@ int NvencFinalize(void* handle)
     {
         return 0;
     }
-
-    NV_ENC_PIC_PARAMS pic{};
-    pic.version = NV_ENC_PIC_PARAMS_VER;
-    pic.encodePicFlags = NV_ENC_PIC_FLAG_EOS;
-    if (state->asyncEnabled)
+    if (state->mp4Finalized) return 1;
+    if (!state->writerInitialized || !state->session || state->writerError)
+        return 0;
     {
-        if (state->asyncBitstreams.empty())
-        {
-            SetError(state, L"NVENC async resources are unavailable.");
-            return 0;
-        }
-
-        const size_t asyncSlot = state->asyncIndex % state->asyncBitstreams.size();
-        if (state->asyncPending[asyncSlot] && !ConsumeAsyncBitstream(state, asyncSlot))
-        {
-            return 0;
-        }
-
-        pic.outputBitstream = state->asyncBitstreams[asyncSlot];
-        pic.completionEvent = state->asyncEvents[asyncSlot];
-        auto status = state->funcs.nvEncEncodePicture(state->session, &pic);
-        if (status != NV_ENC_SUCCESS)
-        {
-            SetError(state, L"nvEncEncodePicture (EOS) failed");
-            return 0;
-        }
-
-        state->asyncIndex = (asyncSlot + 1) % state->asyncBitstreams.size();
-        LogLine(state, L"encode EOS submitted (async)");
-        state->asyncPending[asyncSlot] = false;
-        if (!WaitForAsyncEvent(state, state->asyncEvents[asyncSlot], L"nvEnc async EOS wait"))
-        {
-            return 0;
-        }
-        if (!DrainAsyncBitstreams(state))
-        {
-            return 0;
-        }
+        std::lock_guard<std::mutex> lock(state->errorMutex);
+        if (!state->lastError.empty()) return 0;
     }
-    else
-    {
-        pic.outputBitstream = state->bitstream;
-        auto status = state->funcs.nvEncEncodePicture(state->session, &pic);
-        if (status != NV_ENC_SUCCESS)
-        {
-            SetError(state, L"nvEncEncodePicture (EOS) failed");
-            return 0;
-        }
-        LogLine(state, L"encode EOS submitted");
-    }
+
+    if (!FlushEncoder(state)) return 0;
 
     if (!FinalizeMp4(state))
     {
@@ -3319,27 +3342,51 @@ void NvencDestroy(void* handle)
     }
 
     LogLine(state, L"destroy");
+    state->discardOutput = true;
+    const bool drained = !state->session || FlushEncoder(state);
+    StopWriterThread(state);
     if (state->session)
     {
+        // On a driver failure, destroy the session before releasing resources that
+        // may still be in flight. Never unmap or unregister an uncompleted input.
+        if (!drained)
+        {
+            state->funcs.nvEncDestroyEncoder(state->session);
+            state->session = nullptr;
+        }
+    }
+    if (state->session)
+    {
+        for (auto& input : state->inputs)
+        {
+            if (input.mapped)
+                state->funcs.nvEncUnmapInputResource(state->session, input.mapped);
+            if (input.registered)
+                state->funcs.nvEncUnregisterResource(state->session, input.registered);
+        }
         ReleaseAsyncResources(state);
-        if (state->registeredRgb)
-        {
-            state->funcs.nvEncUnregisterResource(state->session, state->registeredRgb);
-            state->registeredRgb = nullptr;
-        }
-        if (state->registeredNv12)
-        {
-            state->funcs.nvEncUnregisterResource(state->session, state->registeredNv12);
-            state->registeredNv12 = nullptr;
-        }
         if (state->bitstream)
         {
             state->funcs.nvEncDestroyBitstreamBuffer(state->session, state->bitstream);
             state->bitstream = nullptr;
         }
+        if (state->eosEvent)
+        {
+            NV_ENC_EVENT_PARAMS params{};
+            params.version = NV_ENC_EVENT_PARAMS_VER;
+            params.completionEvent = state->eosEvent;
+            state->funcs.nvEncUnregisterAsyncEvent(state->session, &params);
+        }
         state->funcs.nvEncDestroyEncoder(state->session);
         state->session = nullptr;
     }
+    else
+    {
+        for (HANDLE event : state->asyncEvents)
+            if (event) CloseHandle(event);
+    }
+    // Session destruction unregisters the EOS event, including timeout paths.
+    if (state->eosEvent) CloseHandle(state->eosEvent);
 
     if (state->aacEncoder)
     {
@@ -3370,11 +3417,8 @@ void NvencDestroy(void* handle)
         state->vpOutputView->Release();
         state->vpOutputView = nullptr;
     }
-    if (state->rgbTexture)
-    {
-        state->rgbTexture->Release();
-        state->rgbTexture = nullptr;
-    }
+    for (auto& input : state->inputs)
+        if (input.texture) input.texture->Release();
     if (state->nv12Texture)
     {
         state->nv12Texture->Release();
@@ -3411,7 +3455,6 @@ void NvencDestroy(void* handle)
         state->device = nullptr;
     }
 
-    StopWriterThread(state);
     // Ensure output file handle is released even if finalize failed or was skipped.
     state->file.Close();
 
@@ -3426,5 +3469,8 @@ const wchar_t* NvencGetLastError(void* handle)
     {
         return L"";
     }
-    return state->lastError.c_str();
+    thread_local std::wstring error;
+    std::lock_guard<std::mutex> lock(state->errorMutex);
+    error = state->lastError;
+    return error.c_str();
 }
