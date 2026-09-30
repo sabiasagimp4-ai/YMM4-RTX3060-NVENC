@@ -59,6 +59,8 @@
    - (f) `VideoFileWriter.CreateFileAsync` の frame loop 範囲と `EncodeFrom`/`EncodeTo` の包含・範囲指定 flag（`HostExportScope.ExpectedFrames` が一致しないと、全出力が `.partial` のまま公開されません）
    - (g) `TimelineVideoPlayer.Draw` が `TimelineSource.Update` を BeginDraw の内側で呼ぶか（プレビューで見たフレームを保存する機能の実装可否）
    - (h) 小さい Update が JIT で inline 化されてフックを迂回しないか（Harmony/MonoMod は patch 対象の inline を抑止しますが、既に JIT 済みの呼出し側は要注意です）
+   - (i) `TimelineFrameCache.Hit()` の `CacheProvider.Clear()` が、直前のフレームで使ったデコーダーなどの遊休リソースまで破棄しないか。破棄する場合、ヒット→ミスの切替えごとにデコーダーを作り直して再生が引っかかります。host の Update がリソースをいつ返却・破棄するかを確認してください。
+   - (j) idle 先読みの `TimelineSourceAndDevices` が live と同じ GPU adapter を使うか。キーに adapter を含めたため、異なる場合は先読み結果がヒットしません（単一 GPU の対象 PC では同一のはずです）。
 3. decoder 失敗を注入する実 host 回帰試験（MF2 の読込を timeout させ、保存されないことを確認）を追加する。
 
 ### 以前の状態（2026-10-01 checkpoint 時点）
