@@ -28,8 +28,12 @@
 - `IdleFramePreRenderer`: viewport 比較から LastDrawTimestamp を除外しました（同じ view の再描画で batch が毎回中断され、device を作り直していた問題の修正）。prime には最新の viewport を使います。
 - `KeyDependencyTracker.TryCapture(..., settle: true)`（描画経路のみ）を追加しました。編集後 250 ms 以内はモデルを再記述せず bypass します（連続編集で毎フレーム全体を JSON 化していた問題の修正）。親や reader の変化検出は、未無効化のときだけ行うようにしました。
 - 状態・理由文字列を日本語化しました。
+- `tools/HostShapeReport`（新規）: host の形状と binder の分類予測を出力します（`ShapeRules.cs` を ReadinessChecks と共有）。
+- `FrameTimeKey`: フレーム境界から 1/8 フレーム（最大 1 ms）以内の時刻は、フレーム番号＋fps でキーにします（host と idle の時刻の丸め差で、先読みがヒットしない問題の対策）。
+- `FrameCacheStore.PutOwned`: キャプチャ直後の配列は複製せずに保存します。
 - テスト
   - `tests/ReadinessChecks`（新規、host 非依存。emit した実 DLL で遅延読込も検証）を追加しました。
+  - `tests/StoreChecksHarness/TimeKeyChecks.cs`: 1〜240 fps で、整数・double・ms の丸め差、衝突、フレーム途中の時刻を検査します。
   - StoreChecks に「hit は 64 KiB 未満の確保」を追加し、Windows 専用のロック区間は他 OS で skip します。
   - HostCacheProbe: `PreviewViewport` の15引数へ追従しました。また Clear 後に一度再描画されて再利用が再開すること、`Render readiness coverage` の出力と MF2 認識の検査、組込み reader DLL の事前読込を追加しました。
 
@@ -49,6 +53,7 @@
   - host の item 型の知識が必要なので、DLL 到着後に実装する想定です。
 
 **host DLL / Windows で最初に確認すること**
+0. `dotnet run --project tools/HostShapeReport -- 'D:\YukkuriMovieMaker_v4_Lite' > host-shapes.txt` を実行します（MetadataLoadContext で読むだけで、YMM4 のコードは実行しません。出力は名前とシグネチャのみです）。各 `IVideoFileSource` 実装の `predicted:` が、実ホストでの分類になります（ReadinessChecks で binder と一致することを検査済み）。MF2 が `unverified` と予測された場合は、形状が想定と違います。
 1. `dotnet build ... -c Release` が通ること。次に `ReadinessChecks` → `StoreChecks` → `CacheChecks` → `HostCacheProbe --gpu` の順で実行します。HostCacheProbe の `Render readiness coverage` 出力を ILSpy と照合してください。
 2. ILSpy で確認する内容:
    - (a) MF2 の `decodedFrame.SampleTime/SampleDuration` の単位と、t（Update 引数）との関係
