@@ -4,6 +4,17 @@
 
 ## 最初に読むこと
 
+### 2026-09-30 追記（Claude Code クラウドセッション、branch `claude/frame-render-readiness`）
+
+- `FrameRenderReadiness.cs` の汎用部を実装しました。`TimelineSource.Update` の AsyncLocal scope（Prefix: Priority.First / Finalizer: Priority.Last）を使います。decoder の Finalizer で「要求時刻を含む sample を保持しているか」を判定し、失敗は親 scope へ伝搬します。帰属を失った decode（EC 非 flow、完了済み scope）は処理中の全 frame を失敗扱いにします。インストール途中で失敗した場合は、自分が追加した patch だけを戻します。
+- 呼出し側 API は `IsUpdateReady(source)`（Postfix 用、scope の source 一致も確認）と `WasLastUpdateReady(source, time)`（時刻一致も確認）に変更しました。
+- **host の decoder 形状（MF2 / legacy / CachedVideoFileSource）はまだ結び付けていません。** `BindHostDecoders` は NotSupportedException を投げるため、実 host ではキャッシュ接続が理由付きで拒否されます（fail-closed。成功 stub ではありません）。
+- 検証: `tests/ReadinessChecks`（net10.0、偽 host 型 + Harmony 2.4.2）を Linux で Debug/Release 実行し、15 回連続で成功、0 warnings。対象は帰属、Parallel.ForEach、入れ子伝搬、例外保持、skip 時の scope、非帰属 decode、並行 render の分離、外部 owner と途中失敗の rollback、uninstall です。
+- **YMM4 DLL を使う Release ビルドは未再確認**です（クラウド環境に host DLL がないため）。CS0103 はソース上解消済みですが、他の compile error がないことは Windows で確認が必要です。
+- Linux では StoreChecks の「ロック中ファイルは削除できない」前提（65行目）が OS 差で失敗します。Windows 専用の前提で、回帰ではありません。
+
+### 以前の状態（2026-10-01 checkpoint 時点）
+
 - 最新ソースの Release ビルドは失敗しています。引継ぎ作成時にも再確認しました。
 - `TimelineFrameCache.cs` の129・255・325行で CS0103: `FrameRenderReadiness` が未定義。0 warnings / 3 errors。
 - 呼出し側だけ接続され、`FrameRenderReadiness.cs` は未実装です。常に成功するstubでビルドを通してはいけません。

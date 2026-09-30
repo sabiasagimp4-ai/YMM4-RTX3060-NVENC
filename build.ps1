@@ -76,6 +76,8 @@ if ($Smoke) {
     if ($LASTEXITCODE -ne 0) { throw 'Managed smoke failed.' }
     & dotnet run --project (Join-Path $root 'tests\StoreChecksHarness\StoreChecks.csproj') -c Release --no-launch-profile
     if ($LASTEXITCODE -ne 0) { throw 'Frame store checks failed.' }
+    & dotnet run --project (Join-Path $root 'tests\ReadinessChecks\ReadinessChecks.csproj') -c Release --no-launch-profile
+    if ($LASTEXITCODE -ne 0) { throw 'Render readiness checks failed.' }
     & dotnet run --project (Join-Path $root 'tests\FileLeaseChecks\FileLeaseChecks.csproj') -c Release --no-launch-profile
     if ($LASTEXITCODE -ne 0) { throw 'External file lease checks failed.' }
     & dotnet run --project (Join-Path $root 'tests\CacheChecks\CacheChecks.csproj') -c Release "-p:YMM4DirPath=$hostDir" --no-launch-profile -- $hostDir

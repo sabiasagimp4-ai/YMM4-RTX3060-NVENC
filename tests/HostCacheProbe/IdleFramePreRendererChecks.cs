@@ -76,8 +76,11 @@ internal static class IdleFramePreRendererChecks
             var cache = assembly.GetType("NVEncVideoWriterPlugin.TimelineFrameCache", true)!;
             var viewportType = cache.GetNestedType("PreviewViewport", BindingFlags.NonPublic)!;
             var viewport = viewportType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Single()
-                .Invoke([321, 181, Matrix3x2.Identity, Vector2.Zero, 96f, 96f, liveScene.ID, liveScene.Timeline.ID,
-                    Stopwatch.GetTimestamp(), false]);
+                .Invoke([321, 181, Matrix3x2.Identity, Vector2.Zero, 96f, 96f,
+                    new Vortice.DCommon.PixelFormat(Vortice.DXGI.Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),
+                    Vortice.Direct2D1.AntialiasMode.PerPrimitive, Vortice.Direct2D1.TextAntialiasMode.Default,
+                    Vortice.Direct2D1.PrimitiveBlend.SourceOver, Vortice.Direct2D1.UnitMode.Dips,
+                    liveScene.ID, liveScene.Timeline.ID, Stopwatch.GetTimestamp(), false]);
             var prime = cache.GetMethod("TryPrimePreview", BindingFlags.Static | BindingFlags.NonPublic)!;
             var harmony = new Harmony("ymm.tests.idle-pre-renderer.cancel");
             primeCalls = 0;

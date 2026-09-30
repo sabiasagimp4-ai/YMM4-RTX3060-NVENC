@@ -1,6 +1,6 @@
 # YMM4 RTX 3060 NVENC 出力
 
-> **開発途中のcheckpointです（2026-10-01）。** 最新ソースは `FrameRenderReadiness` 未実装によりビルドが失敗します。プレビュー・idleの最終変更も未統合検証です。既存 `dist` は最新ソースに対応しません。続きは [Claude引継ぎ資料](CLAUDE_HANDOFF.md) を参照してください。
+> **開発途中のcheckpointです。** `FrameRenderReadiness` は汎用部のみ実装済みで、YMM4 の decoder 形状への接続が未完了です。そのため実 host では自動キャッシュが接続されません（理由を表示して無効化します）。YMM4 DLL を使う Release ビルドとプレビュー・idle の最終変更は未統合検証です。既存 `dist` は最新ソースに対応しません。続きは [Claude引継ぎ資料](CLAUDE_HANDOFF.md) を参照してください。
 
 RTX 3060 を搭載したこの PC 向けの、ゆっくりMovieMaker4 動画出力・描画キャッシュプラグインです。YMM4 の GPU フレームを Direct3D 11 経由で NVENC に渡し、MP4（H.264 または HEVC、AAC 音声）を出力します。対応版では合成済みフレームを RAM・ディスクへ保存し、変更のないフレームを再利用します。
 

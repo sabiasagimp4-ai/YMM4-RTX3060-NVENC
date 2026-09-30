@@ -91,7 +91,13 @@ internal static class FramePixelChecks
             Check(TimelineFrameCache.GpuBytes == 0, "Source disposal leaked global GPU reservation");
             Console.WriteLine("Actual host automatic source cache: hit/parity/invalidation/GPU cleanup OK");
         }
-        finally { TimelineFrameCache.Enabled = false; TimelineFrameCache.Clear(); harmony.UnpatchAll(harmony.Id); }
+        finally
+        {
+            TimelineFrameCache.Enabled = false;
+            TimelineFrameCache.Clear();
+            FrameRenderReadiness.Uninstall(harmony);
+            harmony.UnpatchAll(harmony.Id);
+        }
     }
     private static bool SkipLoader() => false;
 
@@ -110,7 +116,10 @@ internal static class FramePixelChecks
         var scale = new Vector2(width / visible.X, height / visible.Y);
         var transform = Matrix3x2.CreateScale(scale, half) * Matrix3x2.CreateTranslation(-viewCenter * scale);
         var viewport = new TimelineFrameCache.PreviewViewport(width, height, transform, half,
-            dc.Dpi.Width, dc.Dpi.Height, Guid.NewGuid(), Guid.NewGuid(), System.Diagnostics.Stopwatch.GetTimestamp(), false);
+            dc.Dpi.Width, dc.Dpi.Height,
+            new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),
+            dc.AntialiasMode, dc.TextAntialiasMode, dc.PrimitiveBlend, dc.UnitMode,
+            Guid.NewGuid(), Guid.NewGuid(), System.Diagnostics.Stopwatch.GetTimestamp(), false);
         var saved = TimelineFrameCache.CapturePreview(dc, original, viewport)!;
         using var savedImage = TimelineFrameCache.UploadPreview(dc, saved, viewport);
         var direct = CapturePreview(dc, original, width, height, transform);

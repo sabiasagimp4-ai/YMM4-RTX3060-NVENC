@@ -252,7 +252,7 @@ internal static class TimelineFrameCache
         {
             if (__state.CacheHit) return;
             __state.State.Released(); // The host update disposed the previous source-owned output.
-            if (!FrameRenderReadiness.IsReady || !StillCurrent(__state)) return;
+            if (!FrameRenderReadiness.IsUpdateReady(__instance) || !StillCurrent(__state)) return;
             var output = (ID2D1CommandList)outputField.GetValue(__instance)!;
             if (__state.CacheKey is not null && __state.Viewport is null)
             {
@@ -322,7 +322,7 @@ internal static class TimelineFrameCache
         try
         {
             timelineSource = GetTimelineSource(timelineSource);
-            if (!FrameRenderReadiness.WasLastUpdateReady(timelineSource)) return false;
+            if (!FrameRenderReadiness.WasLastUpdateReady(timelineSource, time)) return false;
             var scene = (Scene)sceneField.GetValue(timelineSource)!;
             if (scene.ParentScenes.Length != 0 || (bool)needRects.GetValue(timelineSource)!) return false;
             string usageName = usage.ToString() ?? string.Empty;
