@@ -3319,12 +3319,6 @@ void NvencDestroy(void* handle)
     }
 
     LogLine(state, L"destroy");
-    if (!state->mp4Finalized)
-    {
-        DrainAsyncBitstreams(state);
-        FinalizeMp4(state);
-    }
-
     if (state->session)
     {
         ReleaseAsyncResources(state);

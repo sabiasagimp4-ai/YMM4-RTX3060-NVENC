@@ -30,11 +30,10 @@ internal sealed class NvencConfigView : UserControl
         _codecComboBox = new ComboBox
         {
             Margin = new Thickness(0, 0, 0, 12),
-            ItemsSource = new[] { "H.264", "H.265 (HEVC)", "AV1" },
+            ItemsSource = new[] { "H.264", "H.265 (HEVC)" },
             SelectedIndex = _settings.Codec switch
             {
                 NvencCodec.H265 => 1,
-                NvencCodec.AV1 => 2,
                 _ => 0,
             },
         };
@@ -56,7 +55,6 @@ internal sealed class NvencConfigView : UserControl
             _settings.Codec = _codecComboBox.SelectedIndex switch
             {
                 1 => NvencCodec.H265,
-                2 => NvencCodec.AV1,
                 _ => NvencCodec.H264,
             };
             _hevcAsyncCheckBox.IsEnabled = _settings.Codec == NvencCodec.H265;

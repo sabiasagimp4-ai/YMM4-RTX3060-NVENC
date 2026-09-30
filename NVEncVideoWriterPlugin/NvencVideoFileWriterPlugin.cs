@@ -11,11 +11,11 @@ public sealed class NvencVideoFileWriterPlugin : IVideoFileWriterPlugin
     private readonly NvencSettings _settings = new();
     private readonly PluginDetailsAttribute _details = new()
     {
-        AuthorName = "NVEncC GUI Plugin",
-        ContentId = "NVEncVideoFileWriterPlugin",
+        AuthorName = "sabiasagimp4-ai (based on tarutaru247)",
+        ContentId = "sabiasagimp4-ai.YMM4Rtx3060Nvenc",
     };
 
-    public string Name => "NVENC プラグイン出力";
+    public string Name => "RTX 3060 NVENC 出力";
 
     public PluginDetailsAttribute Details => _details;
 

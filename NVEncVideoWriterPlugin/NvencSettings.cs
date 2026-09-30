@@ -14,7 +14,6 @@ internal enum NvencCodec
 {
     H264,
     H265,
-    AV1,
 }
 
 internal enum NvencQuality

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.InteropServices;
 using Vortice.Direct2D1;
 using Vortice.Direct3D11;
@@ -11,16 +12,20 @@ namespace NVEncVideoWriterPlugin;
 internal sealed class NvencVideoFileWriter : IVideoFileWriter2, IDisposable
 {
     private readonly string _outputPath;
+    private readonly string _stagingPath;
     private readonly VideoInfo _videoInfo;
     private readonly NvencSettings _settings;
     private readonly int _audioChannels;
     private IntPtr _encoderHandle = IntPtr.Zero;
     private bool _disposed;
+    private bool _failed;
     private readonly object _encodeLock = new();
 
     public NvencVideoFileWriter(string outputPath, VideoInfo videoInfo, NvencSettings settings)
     {
-        _outputPath = outputPath;
+        _outputPath = Path.GetFullPath(outputPath);
+        _stagingPath = Path.Combine(Path.GetDirectoryName(_outputPath)!,
+            $".{Path.GetFileName(_outputPath)}.{Guid.NewGuid():N}.partial");
         _videoInfo = videoInfo;
         _settings = settings;
         _audioChannels = ResolveAudioChannels(videoInfo);
@@ -32,84 +37,102 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter2, IDisposable
 
     public void WriteAudio(float[] samples)
     {
-        EnsureNotDisposed();
-        if (samples == null || samples.Length == 0)
-        {
-            return;
-        }
-
         lock (_encodeLock)
         {
-            if (_encoderHandle == IntPtr.Zero)
+            EnsureNotDisposed();
+            if (samples == null || samples.Length == 0)
             {
-                _pendingAudio.AddRange(samples);
                 return;
             }
-
-            WriteAudioInternal(samples);
+            try
+            {
+                if (_encoderHandle == IntPtr.Zero)
+                    _pendingAudio.AddRange(samples);
+                else
+                    WriteAudioInternal(samples);
+            }
+            catch
+            {
+                _failed = true;
+                throw;
+            }
         }
     }
 
     public void WriteVideo(byte[] frame)
     {
-        // Not used in IVideoFileWriter2 mode.
+        lock (_encodeLock)
+        {
+            EnsureNotDisposed();
+            _failed = true;
+            throw new NotSupportedException("このプラグインは YMM4 の GPU フレーム出力が必要です。");
+        }
     }
 
     public void WriteVideo(ID2D1Bitmap1 frame)
     {
-        EnsureNotDisposed();
-
-        if (_videoInfo.HasErrors || _videoInfo.Width <= 0 || _videoInfo.Height <= 0)
-        {
-            return;
-        }
-
-        using var surface = frame.Surface;
-        using var texture = surface.QueryInterface<ID3D11Texture2D>();
-        if (texture is null)
-        {
-            throw new InvalidOperationException("D3D11 テクスチャを取得できませんでした。");
-        }
-
         lock (_encodeLock)
         {
-            if (_encoderHandle == IntPtr.Zero)
+            EnsureNotDisposed();
+            try
             {
-                InitializeEncoder(texture);
-            }
+                if (_videoInfo.HasErrors || _videoInfo.Width <= 0 || _videoInfo.Height <= 0)
+                    throw new InvalidOperationException("YMM4 の出力設定にエラーがあります。");
 
-            var result = NvencNativeMethods.NvencEncode(_encoderHandle, texture.NativePointer);
-            if (result == 0)
+                using var surface = frame.Surface;
+                using var texture = surface.QueryInterface<ID3D11Texture2D>();
+                if (texture is null)
+                    throw new InvalidOperationException("D3D11 テクスチャを取得できませんでした。");
+
+                if (_encoderHandle == IntPtr.Zero)
+                    InitializeEncoder(texture);
+
+                if (NvencNativeMethods.NvencEncode(_encoderHandle, texture.NativePointer) == 0)
+                    throw new InvalidOperationException(GetNativeError());
+            }
+            catch
             {
-                throw new InvalidOperationException(GetNativeError());
+                _failed = true;
+                throw;
             }
         }
     }
 
     public void Dispose()
     {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-
         lock (_encodeLock)
         {
-            if (_encoderHandle != IntPtr.Zero)
+            if (_disposed)
+                return;
+            _disposed = true;
+            var hadEncoder = _encoderHandle != IntPtr.Zero;
+            try
             {
-                var finalizeResult = NvencNativeMethods.NvencFinalize(_encoderHandle);
-                var finalizeError = finalizeResult == 0 ? GetNativeError() : string.Empty;
-                NvencNativeMethods.NvencDestroy(_encoderHandle);
-                _encoderHandle = IntPtr.Zero;
-                if (finalizeResult == 0)
+                if (!_failed && !hadEncoder && _pendingAudio.Count > 0)
+                    throw new InvalidOperationException("YMM4 から映像フレームが届かなかったため、音声を保存できませんでした。");
+                if (!_failed && _encoderHandle != IntPtr.Zero && NvencNativeMethods.NvencFinalize(_encoderHandle) == 0)
                 {
-                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(finalizeError)
-                        ? "NVENC 出力の終了処理に失敗しました。"
-                        : finalizeError);
+                    var error = GetNativeError();
+                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(error)
+                        ? "NVENC 出力の終了処理に失敗しました。" : error);
                 }
             }
+            catch
+            {
+                _failed = true;
+                throw;
+            }
+            finally
+            {
+                if (_encoderHandle != IntPtr.Zero)
+                    NvencNativeMethods.NvencDestroy(_encoderHandle);
+                _encoderHandle = IntPtr.Zero;
+            }
+
+            if (!_failed && hadEncoder && !File.Exists(_stagingPath))
+                throw new IOException($"NVENC の出力ファイルが見つかりません: {_stagingPath}");
+            if (!_failed && hadEncoder)
+                File.Move(_stagingPath, _outputPath, true);
         }
     }
 
@@ -131,7 +154,6 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter2, IDisposable
         var codec = _settings.Codec switch
         {
             NvencCodec.H265 => 1,
-            NvencCodec.AV1 => 2,
             _ => 0,
         };
         var quality = (int)_settings.Quality;
@@ -159,7 +181,7 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter2, IDisposable
             bufferFormat,
             _settings.HevcAsync && _settings.Codec == NvencCodec.H265 ? 1 : 0,
             _settings.EnableDebugLog ? 1 : 0,
-            _outputPath);
+            _stagingPath);
 
         if (_encoderHandle == IntPtr.Zero)
         {
@@ -211,7 +233,7 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter2, IDisposable
             Format.B8G8R8A8_UNorm_SRgb => NvencBufferFormat.ARGB,
             Format.R8G8B8A8_UNorm => NvencBufferFormat.ABGR,
             Format.R8G8B8A8_UNorm_SRgb => NvencBufferFormat.ABGR,
-            _ => NvencBufferFormat.ARGB,
+            _ => throw new NotSupportedException($"NVENC が対応していないフレーム形式です: {format}"),
         };
     }
 
@@ -254,6 +276,10 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter2, IDisposable
         if (_disposed)
         {
             throw new ObjectDisposedException(nameof(NvencVideoFileWriter));
+        }
+        if (_failed)
+        {
+            throw new InvalidOperationException("NVENC 出力は既に失敗しています。");
         }
     }
 
