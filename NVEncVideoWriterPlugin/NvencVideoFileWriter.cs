@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.InteropServices;
 using Vortice.Direct2D1;
@@ -9,7 +9,7 @@ using YukkuriMovieMaker.Project;
 
 namespace NVEncVideoWriterPlugin;
 
-internal sealed class NvencVideoFileWriter : IVideoFileWriter2, IDisposable
+internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
 {
     private readonly string _outputPath;
     private readonly string _stagingPath;
@@ -20,6 +20,9 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter2, IDisposable
     private bool _disposed;
     private bool _failed;
     private readonly object _encodeLock = new();
+    private readonly EncoderThread _encoderThread;
+    private readonly HostExportScope.Snapshot? _exportScope;
+    private long _acceptedVideoFrames;
 
     public NvencVideoFileWriter(string outputPath, VideoInfo videoInfo, NvencSettings settings)
     {
@@ -29,33 +32,50 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter2, IDisposable
         _videoInfo = videoInfo;
         _settings = settings;
         _audioChannels = ResolveAudioChannels(videoInfo);
+        _exportScope = HostExportScope.GetCurrent();
+        _encoderThread = new EncoderThread();
     }
 
     public VideoFileWriterSupportedStreams SupportedStreams => VideoFileWriterSupportedStreams.Audio | VideoFileWriterSupportedStreams.Video;
+    public bool IsGpuFrameSupported => true;
 
-    private readonly List<float> _pendingAudio = new();
+    private FileStream? _pendingAudio;
 
     public void WriteAudio(float[] samples)
     {
         lock (_encodeLock)
         {
             EnsureNotDisposed();
-            if (samples == null || samples.Length == 0)
+            _encoderThread.Invoke(() => WriteAudioCore(samples));
+        }
+    }
+
+    private void WriteAudioCore(float[] samples)
+    {
+        if (samples == null || samples.Length == 0)
+        {
+            return;
+        }
+        try
+        {
+            _exportScope?.CancellationToken.ThrowIfCancellationRequested();
+            if (_encoderHandle == IntPtr.Zero)
             {
-                return;
+                // The host can deliver all audio before its first video frame.
+                // Spool to disk instead of retaining a project-sized float array.
+                _pendingAudio ??= new FileStream(Path.Combine(Path.GetTempPath(),
+                    $"ymm4-nvenc-audio-{Guid.NewGuid():N}.tmp"), FileMode.CreateNew,
+                    FileAccess.ReadWrite, FileShare.None, 65536,
+                    FileOptions.DeleteOnClose | FileOptions.SequentialScan);
+                _pendingAudio.Write(MemoryMarshal.AsBytes(samples.AsSpan()));
             }
-            try
-            {
-                if (_encoderHandle == IntPtr.Zero)
-                    _pendingAudio.AddRange(samples);
-                else
-                    WriteAudioInternal(samples);
-            }
-            catch
-            {
-                _failed = true;
-                throw;
-            }
+            else
+                WriteAudioInternal(samples);
+        }
+        catch
+        {
+            _failed = true;
+            throw;
         }
     }
 
@@ -74,27 +94,35 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter2, IDisposable
         lock (_encodeLock)
         {
             EnsureNotDisposed();
-            try
-            {
-                if (_videoInfo.HasErrors || _videoInfo.Width <= 0 || _videoInfo.Height <= 0)
-                    throw new InvalidOperationException("YMM4 の出力設定にエラーがあります。");
+            // Invocation is synchronous: the host still owns the bitmap until it returns.
+            _encoderThread.Invoke(() => WriteVideoCore(frame));
+        }
+    }
 
-                using var surface = frame.Surface;
-                using var texture = surface.QueryInterface<ID3D11Texture2D>();
-                if (texture is null)
-                    throw new InvalidOperationException("D3D11 テクスチャを取得できませんでした。");
+    private void WriteVideoCore(ID2D1Bitmap1 frame)
+    {
+        try
+        {
+            _exportScope?.CancellationToken.ThrowIfCancellationRequested();
+            if (_videoInfo.HasErrors || _videoInfo.Width <= 0 || _videoInfo.Height <= 0)
+                throw new InvalidOperationException("YMM4 の出力設定にエラーがあります。");
 
-                if (_encoderHandle == IntPtr.Zero)
-                    InitializeEncoder(texture);
+            using var surface = frame.Surface;
+            using var texture = surface.QueryInterface<ID3D11Texture2D>();
+            if (texture is null)
+                throw new InvalidOperationException("D3D11 テクスチャを取得できませんでした。");
 
-                if (NvencNativeMethods.NvencEncode(_encoderHandle, texture.NativePointer) == 0)
-                    throw new InvalidOperationException(GetNativeError());
-            }
-            catch
-            {
-                _failed = true;
-                throw;
-            }
+            if (_encoderHandle == IntPtr.Zero)
+                InitializeEncoder(texture);
+
+            if (NvencNativeMethods.NvencEncode(_encoderHandle, texture.NativePointer) == 0)
+                throw new InvalidOperationException(GetNativeError());
+            ++_acceptedVideoFrames;
+        }
+        catch
+        {
+            _failed = true;
+            throw;
         }
     }
 
@@ -105,22 +133,44 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter2, IDisposable
             if (_disposed)
                 return;
             _disposed = true;
-            var hadEncoder = _encoderHandle != IntPtr.Zero;
             try
             {
-                if (!_failed && !hadEncoder && _pendingAudio.Count > 0)
-                    throw new InvalidOperationException("YMM4 から映像フレームが届かなかったため、音声を保存できませんでした。");
-                if (!_failed && _encoderHandle != IntPtr.Zero && NvencNativeMethods.NvencFinalize(_encoderHandle) == 0)
-                {
-                    var error = GetNativeError();
-                    throw new InvalidOperationException(string.IsNullOrWhiteSpace(error)
-                        ? "NVENC 出力の終了処理に失敗しました。" : error);
-                }
+                _encoderThread.Invoke(DisposeCore);
             }
-            catch
+            finally
             {
-                _failed = true;
-                throw;
+                _encoderThread.Dispose();
+            }
+        }
+    }
+
+    private void DisposeCore()
+    {
+        var hadEncoder = _encoderHandle != IntPtr.Zero;
+        if (_exportScope is not null && !_exportScope.CanPublish(_acceptedVideoFrames))
+            _failed = true;
+        try
+        {
+            if (!_failed && !hadEncoder && _pendingAudio is { Length: > 0 })
+                throw new InvalidOperationException("YMM4 から映像フレームが届かなかったため、音声を保存できませんでした。");
+            if (!_failed && _encoderHandle != IntPtr.Zero && NvencNativeMethods.NvencFinalize(_encoderHandle) == 0)
+            {
+                var error = GetNativeError();
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(error)
+                    ? "NVENC 出力の終了処理に失敗しました。" : error);
+            }
+        }
+        catch
+        {
+            _failed = true;
+            throw;
+        }
+        finally
+        {
+            try
+            {
+                _pendingAudio?.Dispose();
+                _pendingAudio = null;
             }
             finally
             {
@@ -128,12 +178,15 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter2, IDisposable
                     NvencNativeMethods.NvencDestroy(_encoderHandle);
                 _encoderHandle = IntPtr.Zero;
             }
-
-            if (!_failed && hadEncoder && !File.Exists(_stagingPath))
-                throw new IOException($"NVENC の出力ファイルが見つかりません: {_stagingPath}");
-            if (!_failed && hadEncoder)
-                File.Move(_stagingPath, _outputPath, true);
         }
+
+        // Cancellation may arrive while native finalization is draining its queue.
+        if (_exportScope is not null && !_exportScope.CanPublish(_acceptedVideoFrames))
+            _failed = true;
+        if (!_failed && hadEncoder && !File.Exists(_stagingPath))
+            throw new IOException($"NVENC の出力ファイルが見つかりません: {_stagingPath}");
+        if (!_failed && hadEncoder)
+            File.Move(_stagingPath, _outputPath, true);
     }
 
     private void InitializeEncoder(ID3D11Texture2D texture)
@@ -196,18 +249,26 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter2, IDisposable
             throw new InvalidOperationException(error);
         }
 
-        if (_pendingAudio.Count > 0)
+        if (_pendingAudio is not null)
         {
-            var buffer = _pendingAudio.ToArray();
-            _pendingAudio.Clear();
-            WriteAudioInternal(buffer);
+            using var pending = _pendingAudio;
+            _pendingAudio = null;
+            pending.Position = 0;
+            var buffer = new float[16384];
+            var bytes = MemoryMarshal.AsBytes(buffer.AsSpan());
+            while (pending.Position < pending.Length)
+            {
+                var count = (int)Math.Min(bytes.Length, pending.Length - pending.Position);
+                pending.ReadExactly(bytes[..count]);
+                WriteAudioInternal(buffer, count / sizeof(float));
+            }
         }
     }
 
-    private void WriteAudioInternal(float[] samples)
+    private void WriteAudioInternal(float[] samples, int? sampleCount = null)
     {
         var sampleRate = Math.Max(8000, _videoInfo.Hz);
-        var result = NvencNativeMethods.NvencWriteAudio(_encoderHandle, samples, samples.Length, sampleRate, _audioChannels);
+        var result = NvencNativeMethods.NvencWriteAudio(_encoderHandle, samples, sampleCount ?? samples.Length, sampleRate, _audioChannels);
         if (result == 0)
         {
             throw new InvalidOperationException(GetNativeError());
@@ -289,5 +350,42 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter2, IDisposable
         public const int ABGR = 0x10000000;
     }
 
-    
+    // The host dispatches video, audio and Dispose on different threads. A lock alone
+    // cannot pair native CoInitializeEx/CoUninitialize or preserve COM thread ownership.
+    private sealed class EncoderThread : IDisposable
+    {
+        private readonly BlockingCollection<Action> _requests = new(1);
+        private readonly Thread _thread;
+
+        public EncoderThread()
+        {
+            _thread = new Thread(() =>
+            {
+                foreach (var request in _requests.GetConsumingEnumerable())
+                    request();
+            })
+            { IsBackground = true, Name = "YMM4 NVENC encoder" };
+            _thread.SetApartmentState(ApartmentState.MTA);
+            try { _thread.Start(); }
+            catch { _requests.Dispose(); throw; }
+        }
+
+        public void Invoke(Action action)
+        {
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _requests.Add(() =>
+            {
+                try { action(); completion.SetResult(); }
+                catch (Exception error) { completion.SetException(error); }
+            });
+            completion.Task.GetAwaiter().GetResult();
+        }
+
+        public void Dispose()
+        {
+            _requests.CompleteAdding();
+            _thread.Join();
+            _requests.Dispose();
+        }
+    }
 }

@@ -1,0 +1,152 @@
+using System.Reflection;
+using System.Numerics;
+using HarmonyLib;
+using NVEncVideoWriterPlugin;
+using Vortice.Direct2D1;
+using Vortice.DXGI;
+using Vortice.Mathematics;
+using YukkuriMovieMaker.Commons;
+using YukkuriMovieMaker.Plugin;
+using YukkuriMovieMaker.Project;
+using YukkuriMovieMaker.Project.Items;
+using YukkuriMovieMaker.Player.Video;
+
+internal static class FramePixelChecks
+{
+    internal static void Run(Assembly host)
+    {
+        var bootstrap = new Harmony("ymm.tests.pixel-builtin-loader");
+        var loader = typeof(PluginAssemblyLoader);
+        bootstrap.Patch(loader.TypeInitializer!, prefix: new HarmonyMethod(typeof(FramePixelChecks), nameof(SkipLoader)));
+        AccessTools.StaticFieldRefAccess<IEnumerable<Assembly>>(AccessTools.Field(loader, "<Assemblies>k__BackingField"))() = [host, typeof(CacheProvider).Assembly];
+        using var devices = new GraphicsDevices();
+        using var context = devices.CreateContext();
+        var dc = context.DeviceContext;
+        using (var original = dc.CreateCommandList())
+        {
+            dc.Target = original;
+            dc.BeginDraw();
+            using var brush = dc.CreateSolidColorBrush(new Color4(0.8f, 0.3f, 0.7f, 0.37f));
+            dc.FillRectangle(new Vortice.RawRectF(-81.25f, -40.75f, 82.125f, 43.5f), brush);
+            dc.EndDraw().CheckError(); dc.Target = null; original.Close().CheckError();
+            foreach (int width in new[] { 320, 321 })
+            {
+                const int height = 181;
+                var half = new Vector2(width / 2f, height / 2f);
+                var bounds = dc.GetImageLocalBounds(original);
+                var origin = new Vector2(MathF.Floor(bounds.Left + half.X) - half.X, MathF.Floor(bounds.Top + half.Y) - half.Y);
+                int fullWidth = (int)(MathF.Ceiling(bounds.Right + half.X) - half.X - origin.X);
+                int fullHeight = (int)(MathF.Ceiling(bounds.Bottom + half.Y) - half.Y - origin.Y);
+                var saved = TimelineFrameCache.Capture(dc, original, fullWidth, fullHeight, origin)!;
+                using var uploaded = TimelineFrameCache.Upload(dc, saved);
+                var baseline = TimelineFrameCache.Capture(dc, original, width, height, -half)!;
+                var cached = TimelineFrameCache.Capture(dc, uploaded, width, height, -half)!;
+                Check(baseline.SequenceEqual(cached), $"BGRA alpha/negative bounds/odd-size parity failed at width={width}");
+            }
+        }
+        CheckLatePreviewTransformParity(dc);
+        Console.WriteLine("GPU pixel parity: alpha edges, negative bounds, even/odd scene size OK");
+
+        var harmony = new Harmony("ymm.tests.frame-cache");
+        try
+        {
+            Check(TimelineFrameCache.TryInstall(host, harmony, out var reason), reason);
+            var timeline = new Timeline();
+            timeline.VideoInfo.Width = 321; timeline.VideoInfo.Height = 181;
+            timeline.VideoInfo.BackgroundColor = System.Windows.Media.Color.FromArgb(137, 123, 76, 231);
+            var scenes = new Scenes(false); scenes.AddScene(timeline);
+            var shape = new ShapeItem { Frame = 0, Length = 100 };
+            shape.X.SetFirstValue(-12.25); shape.Y.SetFirstValue(8.75); shape.Opacity.SetFirstValue(43);
+            timeline.Items = timeline.Items.Add(shape);
+            var scene = new Scene(timeline, scenes, []);
+            var source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [context, scene, null], null)!;
+            using (source)
+            {
+                TimelineFrameCache.Enabled = false;
+                source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                var baseline = TimelineFrameCache.Capture(dc, source.Output, 321, 181, new(-160.5f, -90.5f))!;
+                var baselineClock = System.Diagnostics.Stopwatch.StartNew();
+                for (int i = 0; i < 3; i++) source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                baselineClock.Stop();
+                TimelineFrameCache.Enabled = true;
+                TimelineFrameCache.Clear();
+                source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                long oldHits = TimelineFrameCache.Hits;
+                source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                Check(TimelineFrameCache.Hits > oldHits, "Actual source did not hit: " + TimelineFrameCache.Status);
+                oldHits = TimelineFrameCache.Hits;
+                var reuseClock = System.Diagnostics.Stopwatch.StartNew();
+                for (int i = 0; i < 8; i++) source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                reuseClock.Stop();
+                Check(TimelineFrameCache.Hits - oldHits == 8, "Repeated source cache hit count changed during timing sample");
+                Console.WriteLine($"Measured TimelineSource.Update: baseline {baselineClock.Elapsed.TotalMilliseconds / 3:F2} ms/update; live reuse {reuseClock.Elapsed.TotalMilliseconds / 8:F2} ms/update (3/8 samples; no performance threshold)");
+                var cached = TimelineFrameCache.Capture(dc, source.Output, 321, 181, new(-160.5f, -90.5f))!;
+                Check(baseline.SequenceEqual(cached), "Actual background/ShapeItem source pixel parity failed");
+                timeline.VideoInfo.BackgroundColor = System.Windows.Media.Colors.Red;
+                oldHits = TimelineFrameCache.Hits;
+                source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                Check(TimelineFrameCache.Hits == oldHits, "Background edit reused stale output");
+            }
+            Check(TimelineFrameCache.GpuBytes == 0, "Source disposal leaked global GPU reservation");
+            Console.WriteLine("Actual host automatic source cache: hit/parity/invalidation/GPU cleanup OK");
+        }
+        finally { TimelineFrameCache.Enabled = false; TimelineFrameCache.Clear(); harmony.UnpatchAll(harmony.Id); }
+    }
+    private static bool SkipLoader() => false;
+
+    private static void CheckLatePreviewTransformParity(ID2D1DeviceContext dc)
+    {
+        const int width = 321, height = 181;
+        using var original = dc.CreateCommandList();
+        dc.Target = original;
+        dc.BeginDraw();
+        using (var brush = dc.CreateSolidColorBrush(new Color4(0.8f, 0.3f, 0.7f, 0.37f)))
+            dc.FillRectangle(new Vortice.RawRectF(-81.25f, -40.75f, 82.125f, 43.5f), brush);
+        dc.EndDraw().CheckError(); dc.Target = null; original.Close().CheckError();
+        var half = new Vector2(width / 2f, height / 2f);
+        var visible = new Vector2(271f, 137f);
+        var viewCenter = new Vector2(13f, -9f);
+        var scale = new Vector2(width / visible.X, height / visible.Y);
+        var transform = Matrix3x2.CreateScale(scale, half) * Matrix3x2.CreateTranslation(-viewCenter * scale);
+        var viewport = new TimelineFrameCache.PreviewViewport(width, height, transform, half,
+            dc.Dpi.Width, dc.Dpi.Height, Guid.NewGuid(), Guid.NewGuid(), System.Diagnostics.Stopwatch.GetTimestamp(), false);
+        var saved = TimelineFrameCache.CapturePreview(dc, original, viewport)!;
+        using var savedImage = TimelineFrameCache.UploadPreview(dc, saved, viewport);
+        var direct = CapturePreview(dc, original, width, height, transform);
+        var cached = CapturePreview(dc, savedImage, width, height, transform);
+        Check(direct.SequenceEqual(cached), "Viewport cache changed pixels under TimelineVideoPlayer's late zoom/pan transform");
+        var makeKey = typeof(TimelineFrameCache).GetMethod("MakeKey", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var key = (string)makeKey.Invoke(null, ["model", TimeSpan.Zero, TimelineSourceUsage.Playing, dc, viewport])!;
+        var changed = (string)makeKey.Invoke(null, ["model", TimeSpan.Zero, TimelineSourceUsage.Playing, dc,
+            viewport with { Transform = Matrix3x2.CreateTranslation(1, 0) * transform }])!;
+        Check(key != changed, "Preview cache key ignored the view transform");
+        Console.WriteLine("Late preview zoom/pan parity and transform-key invalidation OK");
+    }
+
+    private static byte[] CapturePreview(ID2D1DeviceContext dc, ID2D1Image source, int width, int height, Matrix3x2 transform)
+    {
+        using var target = dc.CreateBitmap(new SizeI(width, height), new BitmapProperties1(
+            new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied), 96, 96, BitmapOptions.Target));
+        using var oldTarget = dc.Target;
+        var oldTransform = dc.Transform;
+        try
+        {
+            dc.Target = target;
+            dc.BeginDraw();
+            dc.Clear(new Color4(0, 0, 0, 1));
+            dc.Transform = transform;
+            dc.DrawImage(source, new Vector2(width / 2f, height / 2f));
+            dc.EndDraw().CheckError();
+            dc.Target = null;
+            return TimelineFrameCache.Capture(dc, target, width, height, Vector2.Zero)!;
+        }
+        finally
+        {
+            dc.Target = oldTarget;
+            dc.Transform = oldTransform;
+        }
+    }
+
+    private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
+}

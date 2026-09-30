@@ -8,6 +8,8 @@ namespace NVEncVideoWriterPlugin;
 
 public sealed class NvencVideoFileWriterPlugin : IVideoFileWriterPlugin
 {
+    public NvencVideoFileWriterPlugin() => HostIntegration.EnsureInstalled();
+
     private readonly NvencSettings _settings = new();
     private readonly PluginDetailsAttribute _details = new()
     {
@@ -25,6 +27,7 @@ public sealed class NvencVideoFileWriterPlugin : IVideoFileWriterPlugin
 
     public IVideoFileWriter CreateVideoFileWriter(string path, VideoInfo videoInfo)
     {
+        HostIntegration.RequireExportScope();
         var snapshot = new NvencSettings
         {
             Codec = _settings.Codec,

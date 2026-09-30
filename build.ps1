@@ -28,6 +28,7 @@ $managed = Join-Path $root 'NVEncVideoWriterPlugin\bin\Release\net10.0-windows10
 $native = Join-Path $root 'NvencNative\bin\Release\NvencNative.dll'
 $dist = Join-Path $root 'dist'
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
+function Write-PluginPackage {
 $package = Join-Path $dist 'YMM4-RTX3060-NVENC.ymme'
 $partial = "$package.partial"
 if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
@@ -40,6 +41,7 @@ try {
         $entries = [ordered]@{
             'YMM4Rtx3060Nvenc.dll' = $managed
             'NvencNative.dll' = $native
+            '0Harmony.dll' = (Join-Path (Split-Path -Parent $managed) '0Harmony.dll')
             'README.md' = (Join-Path $root 'README.md')
             'LICENSE' = (Join-Path $root 'LICENSE')
             'THIRD_PARTY_NOTICES.txt' = (Join-Path $root 'THIRD_PARTY_NOTICES.txt')
@@ -55,8 +57,7 @@ try {
             } finally { $input.Dispose() }
         }
     } finally { $archive.Dispose() }
-    if (Test-Path -LiteralPath $package) { Remove-Item -LiteralPath $package -Force }
-    Move-Item -LiteralPath $partial -Destination $package
+    [IO.File]::Move($partial, $package, $true)
 } finally {
     if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
 }
@@ -64,16 +65,46 @@ $hash = (Get-FileHash -LiteralPath $package -Algorithm SHA256).Hash.ToLowerInvar
 [IO.File]::WriteAllText("$package.sha256", "$hash  YMM4-RTX3060-NVENC.ymme`n", [Text.Encoding]::ASCII)
 Write-Output "Package: $package"
 Write-Output "SHA256: $hash"
+}
 
 if ($Smoke) {
-    & dotnet run --project (Join-Path $root 'tests\ManagedSmoke\ManagedSmoke.csproj') -c Release "-p:YMM4DirPath=$hostDir" --no-launch-profile
+    & $msbuild (Join-Path $root 'tests\NativeChecks.vcxproj') /t:Build /p:Configuration=Release /p:Platform=x64 /m /nologo /v:minimal
+    if ($LASTEXITCODE -ne 0) { throw 'Native invariant checks build failed.' }
+    & (Join-Path $root 'tests\bin\Release\NativeChecks.exe')
+    if ($LASTEXITCODE -ne 0) { throw 'Native invariant checks failed.' }
+    & dotnet run --project (Join-Path $root 'tests\ManagedSmoke\ManagedSmoke.csproj') -c Release "-p:YMM4DirPath=$hostDir" --no-launch-profile -- $dist
     if ($LASTEXITCODE -ne 0) { throw 'Managed smoke failed.' }
+    & dotnet run --project (Join-Path $root 'tests\StoreChecksHarness\StoreChecks.csproj') -c Release --no-launch-profile
+    if ($LASTEXITCODE -ne 0) { throw 'Frame store checks failed.' }
+    & dotnet run --project (Join-Path $root 'tests\FileLeaseChecks\FileLeaseChecks.csproj') -c Release --no-launch-profile
+    if ($LASTEXITCODE -ne 0) { throw 'External file lease checks failed.' }
+    & dotnet run --project (Join-Path $root 'tests\CacheChecks\CacheChecks.csproj') -c Release "-p:YMM4DirPath=$hostDir" --no-launch-profile -- $hostDir
+    if ($LASTEXITCODE -ne 0) { throw 'Cache dependency checks failed.' }
+    & dotnet run --project (Join-Path $root 'tests\HostCacheProbe\HostCacheProbe.csproj') -c Release "-p:YMM4DirPath=$hostDir" --no-launch-profile -- $hostDir --gpu
+    if ($LASTEXITCODE -ne 0) { throw 'Host integration and pixel checks failed.' }
     & $msbuild (Join-Path $root 'tests\NativeSmoke.vcxproj') /t:Build /p:Configuration=Release /p:Platform=x64 /m /nologo /v:minimal
     if ($LASTEXITCODE -ne 0) { throw 'Smoke test build failed.' }
     $testDir = Join-Path $root 'tests\bin\Release'
     Copy-Item -LiteralPath $native -Destination (Join-Path $testDir 'NvencNative.dll') -Force
     $ffprobe = (Get-Command ffprobe -ErrorAction Stop).Source
     $ffmpeg = (Get-Command ffmpeg -ErrorAction Stop).Source
+    $audioFirst = Join-Path $dist 'managed-audio-first.mp4'
+    $probe = (& $ffprobe -v error -show_entries stream=codec_name,nb_frames -of json $audioFirst | ConvertFrom-Json)
+    if ($LASTEXITCODE -ne 0 -or @($probe.streams | Where-Object { $_.codec_name -eq 'h264' -and $_.nb_frames -eq '30' }).Count -ne 1 -or
+        @($probe.streams | Where-Object codec_name -EQ 'aac').Count -ne 1) { throw 'Audio-first output streams are invalid.' }
+    & $ffmpeg -v error -i $audioFirst -f null NUL
+    if ($LASTEXITCODE -ne 0) { throw 'Audio-first output decode failed.' }
+    $pcmPath = Join-Path $dist 'managed-audio-first.s16le'
+    & $ffmpeg -v error -i $audioFirst -vn -ac 1 -ar 48000 -f s16le -y $pcmPath
+    if ($LASTEXITCODE -ne 0) { throw 'Audio-first PCM decode failed.' }
+    $pcm = [IO.File]::ReadAllBytes($pcmPath)
+    $peak = 0
+    for ($i = 0; $i -lt $pcm.Length; $i += 2) {
+        $peak = [Math]::Max($peak, [Math]::Abs([int][BitConverter]::ToInt16($pcm, $i)))
+    }
+    if ($pcm.Length -lt 96000 -or $pcm.Length -gt 100000 -or $peak -lt 2000 -or $peak -gt 5000) {
+        throw "Audio spool replay lost samples or changed their values: $($pcm.Length) bytes, peak $peak"
+    }
     foreach ($case in @(@('h264', 0), @('hevc', 1))) {
         $output = Join-Path $dist ("smoke-{0}.mp4" -f $case[0])
         & (Join-Path $testDir 'NativeSmoke.exe') $output $case[1]
@@ -86,5 +117,13 @@ if ($Smoke) {
         & $ffmpeg -v error -i $output -f null NUL
         if ($LASTEXITCODE -ne 0) { throw "MP4 decode failed: $($case[0])" }
         Write-Output "Smoke OK: $($case[0]) + aac"
+        foreach ($mode in @('cancel', 'failure')) {
+            $aborted = Join-Path $dist ("smoke-{0}-{1}.partial" -f $case[0], $mode)
+            & (Join-Path $testDir 'NativeSmoke.exe') $aborted $case[1] $mode
+            if ($LASTEXITCODE -ne 0) { throw "NVENC cleanup failed: $($case[0]), $mode" }
+        }
     }
 }
+
+# Publish only after all requested checks have passed.
+Write-PluginPackage
