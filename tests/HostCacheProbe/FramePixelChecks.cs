@@ -53,7 +53,8 @@ internal static class FramePixelChecks
             // The real plugin loader loads the built-in readers; this probe bypasses it, so load them here
             // (metadata only, no host code runs) so that readiness coverage matches the real host.
             foreach (var reader in System.IO.Directory.GetFiles(System.IO.Path.GetDirectoryName(host.Location)!, "YukkuriMovieMaker.Plugin.FileSource.*.dll"))
-                System.Runtime.Loader.AssemblyLoadContext.Default.LoadFromAssemblyPath(reader);
+                if (!AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == System.IO.Path.GetFileNameWithoutExtension(reader)))
+                    System.Runtime.Loader.AssemblyLoadContext.Default.LoadFromAssemblyPath(reader);
             Check(TimelineFrameCache.TryInstall(host, harmony, out var reason), reason);
             Console.WriteLine("Render readiness coverage (verify against host code):");
             foreach (var line in FrameRenderReadiness.Coverage) Console.WriteLine("  " + line);
