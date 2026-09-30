@@ -79,7 +79,12 @@ internal sealed class FrameCacheStore : IDisposable
         }
     }
 
-    internal void Put(string key, byte[] pixels)
+    internal void Put(string key, byte[] pixels) => Put(key, pixels, owned: false);
+
+    // For a freshly captured array the caller never touches again: stored without a snapshot copy.
+    internal void PutOwned(string key, byte[] pixels) => Put(key, pixels, owned: true);
+
+    private void Put(string key, byte[] pixels, bool owned)
     {
         ArgumentNullException.ThrowIfNull(pixels);
         lock (_gate)
@@ -95,7 +100,7 @@ internal sealed class FrameCacheStore : IDisposable
                 }
                 return;
             }
-            var snapshot = (byte[])pixels.Clone();
+            var snapshot = owned ? pixels : (byte[])pixels.Clone();
             AddRam(key, snapshot);
             // ponytail: async disk reads only promote frames that fit RAM; streaming hits need a separate delivery API.
             if (_diskWorker is not null && !_workerFailed && !Volatile.Read(ref _diskBlocked)

@@ -144,6 +144,12 @@ internal static class StoreChecks
             long allocated = GC.GetAllocatedBytesForCurrentThread();
             Check(cache.TryGet(Key(1), out var shared) && shared.Span[5] == 7, "Put must snapshot pixels before hits share them");
             Check(GC.GetAllocatedBytesForCurrentThread() - allocated < 64 * 1024, "RAM hits must share, not copy, stored pixels");
+            byte[] owned = new byte[1024 * 1024];
+            allocated = GC.GetAllocatedBytesForCurrentThread();
+            cache.PutOwned(Key(2), owned);
+            Check(GC.GetAllocatedBytesForCurrentThread() - allocated < 64 * 1024, "PutOwned must not copy the handed-over pixels");
+            Check(cache.TryGet(Key(2), out var ownedHit) && System.Runtime.InteropServices.MemoryMarshal.TryGetArray(ownedHit, out var segment)
+                && ReferenceEquals(segment.Array, owned), "PutOwned must store the handed-over array");
         }
         bool rejectedDiskOnly = false;
         try { using var _ = new FrameCacheStore(Path.Combine(tempPath, "disk-only-store"), 0, 64); }

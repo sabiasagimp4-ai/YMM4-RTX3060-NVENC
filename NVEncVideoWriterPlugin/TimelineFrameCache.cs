@@ -215,8 +215,8 @@ internal static class TimelineFrameCache
             if (!state.Tracker.TryCapture(out capture, out var reason, settle: true)) return Bypass(reason);
             PreviewViewport? viewport = playing && TryGetPreviewViewportForSource(__instance, out var currentViewport)
                 && currentViewport.SceneId == scene.ID && currentViewport.TimelineId == scene.Timeline.ID ? currentViewport : null;
-            string liveKey = MakeKey(capture!.Key, time, usage, context, null);
-            string? cacheKey = exporting ? liveKey : viewport is { } value ? MakeKey(capture.Key, time, usage, context, value) : null;
+            string liveKey = MakeKey(capture!.Key, time, scene.FPS, usage, context, null);
+            string? cacheKey = exporting ? liveKey : viewport is { } value ? MakeKey(capture.Key, time, scene.FPS, usage, context, value) : null;
             long currentGeneration = Interlocked.Read(ref generation);
             var previousOutput = (ID2D1CommandList?)outputField.GetValue(__instance);
             pending = new Pending(state, scene, devices, previousOutput, capture, liveKey, cacheKey,
@@ -269,7 +269,7 @@ internal static class TimelineFrameCache
                 var record = CaptureScene(__state.Devices.DeviceContext, output, __state.Scene);
                 lock (cacheGate) if (record != null && StillCurrent(__state))
                 {
-                    store.Value.Put(__state.CacheKey, record);
+                    store.Value.PutOwned(__state.CacheKey, record);
                     status = "描画したフレームを保存しました。";
                 }
             }
@@ -289,12 +289,12 @@ internal static class TimelineFrameCache
     private static Exception? Finalizer(Exception? __exception, Pending? __state) { __state?.Dispose(); return __exception; }
 
     private static bool StillCurrent(Pending value) => Enabled && value.Generation == Interlocked.Read(ref generation)
-        && value.Capture.Validate() && MakeKey(value.Capture.Key, value.Time, value.Usage, value.Devices.DeviceContext, null) == value.LiveKey
-        && (value.Viewport is null || value.CacheKey == MakeKey(value.Capture.Key, value.Time, value.Usage, value.Devices.DeviceContext, value.Viewport.Value));
+        && value.Capture.Validate() && MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.Usage, value.Devices.DeviceContext, null) == value.LiveKey
+        && (value.Viewport is null || value.CacheKey == MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.Usage, value.Devices.DeviceContext, value.Viewport.Value));
 
-    private static string MakeKey(string model, TimeSpan time, object usage, ID2D1DeviceContext context, PreviewViewport? viewport)
+    private static string MakeKey(string model, TimeSpan time, int fps, object usage, ID2D1DeviceContext context, PreviewViewport? viewport)
     {
-        string value = $"pixels-v4|{RenderEnvironment(context)}|{model}|{time.Ticks}|{usage}|{context.AntialiasMode}|{context.TextAntialiasMode}|{context.PrimitiveBlend}";
+        string value = $"pixels-v4|{RenderEnvironment(context)}|{model}|{FrameTimeKey.For(time, fps)}|{usage}|{context.AntialiasMode}|{context.TextAntialiasMode}|{context.PrimitiveBlend}";
         if (viewport is { } view)
             value += $"|{view.SceneId:N}|{view.TimelineId:N}|{view.Width}|{view.Height}|{Bits(view.Transform.M11)}|{Bits(view.Transform.M12)}|{Bits(view.Transform.M21)}|{Bits(view.Transform.M22)}|{Bits(view.Transform.M31)}|{Bits(view.Transform.M32)}|{Bits(view.TargetOffset.X)}|{Bits(view.TargetOffset.Y)}|{Bits(view.DpiX)}|{Bits(view.DpiY)}|{view.BackBufferFormat.Format}|{view.BackBufferFormat.AlphaMode}|{view.AntialiasMode}|{view.TextAntialiasMode}|{view.PrimitiveBlend}|{view.UnitMode}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
@@ -369,13 +369,13 @@ internal static class TimelineFrameCache
             using (capture)
             {
                 if (expectedModelKey is not null && capture!.Key != expectedModelKey) return false;
-                var key = MakeKey(capture!.Key, time, usage, context, viewport);
+                var key = MakeKey(capture!.Key, time, scene.FPS, usage, context, viewport);
                 var output = (ID2D1CommandList)outputField.GetValue(timelineSource)!;
                 var record = viewport is { } view ? CapturePreview(context, output, view) : CaptureScene(context, output, scene);
                 lock (cacheGate)
                 {
                     if (record is null || !capture.Validate() || !Enabled) return false;
-                    store.Value.Put(key, record);
+                    store.Value.PutOwned(key, record);
                     status = viewport is null ? "出力フレームを先読みしました。" : "プレビューのフレームを先読みしました。";
                     return true;
                 }
