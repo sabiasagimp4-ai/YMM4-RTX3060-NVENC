@@ -247,6 +247,14 @@ internal static class Program
         Expect(typeof(CachedVideoFileSource), "wrapper");
         Expect(typeof(OddSource), "unverified");
         Check(coverage.Count == 7, "Unexpected video source coverage: " + string.Join(" | ", coverage));
+        // The offline shape report must predict exactly what the binder decided.
+        foreach (var line in coverage)
+        {
+            string typeName = line[..line.IndexOf(": ", StringComparison.Ordinal)];
+            string kind = line[(typeName.Length + 2)..].Split(' ')[0];
+            var type = typeof(Program).Assembly.GetType(typeName, true)!;
+            Check(ShapeRules.Predict(type, typeof(IVideoFileSource)) == kind, $"Shape report predicts {ShapeRules.Predict(type, typeof(IVideoFileSource))} for {line}");
+        }
         foreach (var method in VideoSourceUpdates)
             Check(Harmony.GetPatchInfo(method)?.Finalizers.Count == 1, $"{method.DeclaringType?.Name}.Update was not hooked exactly once");
     }
