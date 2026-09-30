@@ -26,6 +26,7 @@
   - 保存を見送った理由を状態表示に出します。
 - `FrameCacheStore.TryGet` を `out ReadOnlyMemory<byte>` に変更しました（snapshot は挿入後に不変）。
 - `IdleFramePreRenderer`: viewport 比較から LastDrawTimestamp を除外しました（同じ view の再描画で batch が毎回中断され、device を作り直していた問題の修正）。prime には最新の viewport を使います。
+- `KeyDependencyTracker.TryCapture(..., settle: true)`（描画経路のみ）を追加しました。編集後 250 ms 以内はモデルを再記述せず bypass します（連続編集で毎フレーム全体を JSON 化していた問題の修正）。親や reader の変化検出は、未無効化のときだけ行うようにしました。
 - 状態・理由文字列を日本語化しました。
 - テスト
   - `tests/ReadinessChecks`（新規、host 非依存。emit した実 DLL で遅延読込も検証）を追加しました。
@@ -37,6 +38,15 @@
 - StoreChecks: Windows 専用区間以外はすべて成功しました。hit 時の複製を戻す変異も検出しました。
 - Vortice 依存コード（Capture/Upload/RenderEnvironment ほか）を抜き出してコンパイル: **3.5.0 で 0 errors**。3.3.4 は SizeI がなく、3.6 以降は `CopyFromMemory` の引数が uint になるため失敗します。このことから YMM4 同梱の Vortice は 3.5.x と推定しています（要確認）。
 - 注意: YMM4 参照なしのプラグイン全体ビルドは、宣言の CS0246 で止まり、メソッド本体を検査しません。**YMM4 DLL を使う Release ビルドは未確認**です。
+
+**性能上の懸念と設計案（要判断、実測待ち）**
+- 描画経路では、`KeyDependencyTracker.TryCapture` が依存ファイルの metadata lease（budget 0）を毎フレーム取り、Postfix の `Validate()` でも再検証します。ファイル1つあたり `CreateFile` 2回と祖先ディレクトリの属性取得などで、既存計測では 0.6 ms/ファイル（1ファイル時）でした。`tests/FileLeaseChecks` に 10/50/200 ファイルの計測を追加したので、Windows で実測してください。
+- 依存ファイルが 256 を超えると bypass します。台詞ごとに wav がある一般的なゆっくり動画では、キャッシュが効かないか、毎フレームの負担が大きくなる可能性があります。
+- キーはプロジェクト全体のモデルなので、どこか1か所を編集すると全フレームが無効になります（AE は編集した layer の時間範囲だけを無効化します）。今回、連続編集中の毎フレーム再直列化は抑えました（settle 250 ms）。
+- 設計案: フレーム f のキーを「global（VideoInfo/LayerSettings/設定/reader/characters）＋ f に重なるアイテム（layer 順）の状態ハッシュ＋それらのファイル指紋」にします。状態ハッシュはアイテム単位でキャッシュし、変更通知の sender 単位で無効化します。これで編集範囲外のフレームは再利用でき、lease も重なるアイテムのファイルだけで済みます。
+  - SceneItem は参照 timeline 全体を含めます。
+  - 他アイテムの描画結果や音声を参照する可能性がある型（音声波形、画面の複製など）は、ILSpy で確認して whitelist 外なら全体キーに戻します。
+  - host の item 型の知識が必要なので、DLL 到着後に実装する想定です。
 
 **host DLL / Windows で最初に確認すること**
 1. `dotnet build ... -c Release` が通ること。次に `ReadinessChecks` → `StoreChecks` → `CacheChecks` → `HostCacheProbe --gpu` の順で実行します。HostCacheProbe の `Render readiness coverage` 出力を ILSpy と照合してください。

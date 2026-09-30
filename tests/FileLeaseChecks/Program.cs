@@ -86,6 +86,23 @@ try
         warm!.Dispose();
     }
     Console.WriteLine($"64MiB fingerprint cold={coldMs:F2}ms, warm average={elapsed.Elapsed.TotalMilliseconds / 20:F3}ms (20 runs)");
+    // The render path takes a metadata-only lease (budget 0) and validates it again per frame; this cost
+    // scales with the number of project files (voice-heavy projects have one file per line).
+    foreach (int count in new[] { 10, 50, 200 })
+    {
+        string[] files = many.Take(count).ToArray();
+        Check(Acquire(files, null, out var seed), $"{count}-file seed acquire");
+        var seeded = seed!.Fingerprints;
+        seed.Dispose();
+        elapsed.Restart();
+        for (int i = 0; i < 10; ++i)
+        {
+            Check(FileDependencyLease.TryAcquire(files, seeded, 0, out var frame), $"{count}-file warm acquire");
+            Check(frame!.VerifyPaths(), $"{count}-file verify");
+            frame.Dispose();
+        }
+        Console.WriteLine($"Per-frame lease + verify with {count} files: {elapsed.Elapsed.TotalMilliseconds / 10:F2}ms (10 runs; no threshold)");
+    }
     Console.WriteLine("FileLeaseChecks: passed (write exclusion, parallel leases, restored mtime, replacement, failure cleanup, limits, cancellation, UNC, ancestor junction)");
 }
 finally { Directory.Delete(dir, true); }
