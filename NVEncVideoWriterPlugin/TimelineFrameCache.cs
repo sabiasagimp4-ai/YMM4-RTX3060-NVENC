@@ -67,12 +67,16 @@ internal static class TimelineFrameCache
     }
     internal static void Clear()
     {
+        // The generation bump alone invalidates every in-flight capture (StillCurrent). The disk purge can
+        // take seconds, and the render thread takes cacheGate on every Update, so never wait for it inside.
         lock (cacheGate)
         {
             Interlocked.Increment(ref generation);
-            if (store.IsValueCreated) store.Value.Clear();
-            status = "キャッシュを消去しました";
+            status = "キャッシュを消去しています…";
         }
+        try { if (store.IsValueCreated) store.Value.Clear(); }
+        catch { status = "キャッシュを完全には消去できませんでした"; throw; }
+        status = "キャッシュを消去しました";
     }
 
     internal static bool TryInstall(Assembly host, Harmony harmony, out string reason)
@@ -623,9 +627,9 @@ internal static class TimelineFrameCache
         }
     }
 
-    private static bool TryReplaceFrame(object source, Pending pending, byte[] record)
+    private static bool TryReplaceFrame(object source, Pending pending, ReadOnlyMemory<byte> record)
     {
-        if (!StillCurrent(pending) || !ParseRecord(record, out int width, out int height, out var origin, out int version, out float dpiX, out float dpiY))
+        if (!StillCurrent(pending) || !ParseRecord(record.Span, out int width, out int height, out var origin, out int version, out float dpiX, out float dpiY))
             return false;
         bool exporting = pending.Usage.ToString() == "Exporting";
         if (exporting && version != 1) return false;
@@ -642,7 +646,7 @@ internal static class TimelineFrameCache
         try
         {
             var context = pending.Devices.DeviceContext;
-            replacement = version == 1 ? Upload(context, record) : UploadPreview(context, record, pending.Viewport!.Value);
+            replacement = version == 1 ? Upload(context, record.Span) : UploadPreview(context, record.Span, pending.Viewport!.Value);
             lock (cacheGate)
             {
                 if (!StillCurrent(pending) || !sources.TryGetValue(source, out var currentState)
@@ -669,13 +673,13 @@ internal static class TimelineFrameCache
         }
     }
 
-    internal static ID2D1CommandList Upload(ID2D1DeviceContext context, byte[] record)
+    internal static ID2D1CommandList Upload(ID2D1DeviceContext context, ReadOnlySpan<byte> record)
     {
         if (!ParseRecord(record, out int width, out int height, out var origin, out int version, out _, out _) || version != 1)
             throw new InvalidDataException("Invalid scene pixel record");
         using var bitmap = context.CreateBitmap(new SizeI(width, height), new BitmapProperties1(
             new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied), 96, 96));
-        bitmap.CopyFromMemory(record.AsSpan(RecordHeader), width * 4).CheckError();
+        bitmap.CopyFromMemory(record[RecordHeader..], width * 4).CheckError();
         var command = context.CreateCommandList();
         using var oldTarget = context.Target;
         var drawing = false;
@@ -697,7 +701,7 @@ internal static class TimelineFrameCache
         }
     }
 
-    internal static ID2D1CommandList UploadPreview(ID2D1DeviceContext context, byte[] record, PreviewViewport viewport)
+    internal static ID2D1CommandList UploadPreview(ID2D1DeviceContext context, ReadOnlySpan<byte> record, PreviewViewport viewport)
     {
         if (!ParseRecord(record, out int width, out int height, out _, out int version, out float dpiX, out float dpiY) || version != 2
             || width != viewport.Width || height != viewport.Height
@@ -706,7 +710,7 @@ internal static class TimelineFrameCache
             || !IsValidViewport(viewport, context.MaximumBitmapSize)) throw new InvalidDataException("Invalid preview pixel record");
         using var bitmap = context.CreateBitmap(new SizeI(width, height), new BitmapProperties1(
             viewport.BackBufferFormat, dpiX, dpiY));
-        bitmap.CopyFromMemory(record.AsSpan(PreviewRecordHeader), width * 4).CheckError();
+        bitmap.CopyFromMemory(record[PreviewRecordHeader..], width * 4).CheckError();
         var command = context.CreateCommandList();
         using var oldTarget = context.Target;
         var oldTransform = context.Transform;
@@ -745,24 +749,24 @@ internal static class TimelineFrameCache
         }
     }
 
-    internal static bool ParseRecord(byte[] record, out int width, out int height, out Vector2 origin)
+    internal static bool ParseRecord(ReadOnlySpan<byte> record, out int width, out int height, out Vector2 origin)
         => ParseRecord(record, out width, out height, out origin, out _, out _, out _);
 
-    internal static bool ParseRecord(byte[] record, out int width, out int height, out Vector2 origin,
+    internal static bool ParseRecord(ReadOnlySpan<byte> record, out int width, out int height, out Vector2 origin,
         out int version, out float dpiX, out float dpiY)
     {
         width = height = version = 0; origin = default; dpiX = dpiY = 96;
-        if (record.Length < RecordHeader || !record.AsSpan(0, 4).SequenceEqual("YMPX"u8)) return false;
-        width = BinaryPrimitives.ReadInt32LittleEndian(record.AsSpan(4));
-        height = BinaryPrimitives.ReadInt32LittleEndian(record.AsSpan(8));
-        origin = new(BinaryPrimitives.ReadSingleLittleEndian(record.AsSpan(12)), BinaryPrimitives.ReadSingleLittleEndian(record.AsSpan(16)));
-        version = BinaryPrimitives.ReadInt32LittleEndian(record.AsSpan(20));
+        if (record.Length < RecordHeader || !record[..4].SequenceEqual("YMPX"u8)) return false;
+        width = BinaryPrimitives.ReadInt32LittleEndian(record[4..]);
+        height = BinaryPrimitives.ReadInt32LittleEndian(record[8..]);
+        origin = new(BinaryPrimitives.ReadSingleLittleEndian(record[12..]), BinaryPrimitives.ReadSingleLittleEndian(record[16..]));
+        version = BinaryPrimitives.ReadInt32LittleEndian(record[20..]);
         int header = version switch { 1 => RecordHeader, 2 => PreviewRecordHeader, _ => 0 };
         if (header == 0 || record.Length < header) return false;
         if (version == 2)
         {
-            dpiX = BinaryPrimitives.ReadSingleLittleEndian(record.AsSpan(24));
-            dpiY = BinaryPrimitives.ReadSingleLittleEndian(record.AsSpan(28));
+            dpiX = BinaryPrimitives.ReadSingleLittleEndian(record[24..]);
+            dpiY = BinaryPrimitives.ReadSingleLittleEndian(record[28..]);
         }
         return width > 0 && height > 0 && float.IsFinite(origin.X) && float.IsFinite(origin.Y)
             && float.IsFinite(dpiX) && float.IsFinite(dpiY) && dpiX > 0 && dpiY > 0

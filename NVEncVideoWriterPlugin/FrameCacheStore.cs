@@ -6,7 +6,8 @@ using System.Text;
 
 namespace NVEncVideoWriterPlugin;
 
-// Pixel arrays cross the API boundary as copies: callers may reuse or mutate theirs.
+// Put snapshots the caller's array; stored snapshots are never mutated afterwards, so hits share them
+// read-only instead of copying a whole frame per hit.
 internal sealed class FrameCacheStore : IDisposable
 {
     internal const int MaxFrameBytes = 128 * 1024 * 1024;
@@ -57,17 +58,17 @@ internal sealed class FrameCacheStore : IDisposable
     internal long Misses { get { lock (_gate) return _misses; } }
 
     // Disk misses warm RAM in the background; this method never waits for file I/O.
-    internal bool TryGet(string key, out byte[] pixels)
+    internal bool TryGet(string key, out ReadOnlyMemory<byte> pixels)
     {
         lock (_gate)
         {
-            pixels = [];
+            pixels = ReadOnlyMemory<byte>.Empty;
             if (_disposed || !ValidKey(key)) { _misses++; return false; }
             key = key.ToLowerInvariant();
             if (_ram.TryGetValue(key, out var memory))
             {
                 Touch(_ramLru, memory.Node);
-                pixels = (byte[])memory.Pixels.Clone();
+                pixels = memory.Pixels;
                 _hits++;
                 return true;
             }

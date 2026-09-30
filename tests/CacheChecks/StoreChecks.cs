@@ -16,9 +16,8 @@ internal static class StoreChecks
         {
             cache.Put(Key(1), frame);
             frame[0] = 200;
-            Check(cache.TryGet(Key(1), out var first) && first[0] == 0, "Put must snapshot pixels");
-            first[0] = 100;
-            Check(cache.TryGet(Key(1), out first) && first[0] == 0, "RAM hits must return independent pixels");
+            Check(cache.TryGet(Key(1), out var first) && first.Span[0] == 0, "Put must snapshot pixels");
+            Check(cache.TryGet(Key(1), out first) && first.Span[0] == 0, "RAM hits must return the stored snapshot");
             cache.Put(Key(2), frame);
             cache.Put(Key(3), frame);
             WaitFor(() => Directory.Exists(directory) && Directory.EnumerateFiles(directory, Key(3) + ".ymmframe", SearchOption.AllDirectories).Any(), "background writes establish disk ownership");
@@ -33,11 +32,10 @@ internal static class StoreChecks
         using (var cache = new FrameCacheStore(root, 32, 128))
         {
             Check(!cache.TryGet(Key(2), out _), "first disk miss is nonblocking");
-            byte[] restored = [];
+            ReadOnlyMemory<byte> restored = default;
             WaitFor(() => cache.TryGet(Key(2), out restored), "background disk read warms RAM");
-            Check(restored.SequenceEqual(frame), "restart disk reuse");
-            restored[0] = 4;
-            Check(cache.TryGet(Key(2), out restored) && restored.SequenceEqual(frame), "disk promotion must preserve ownership");
+            Check(restored.Span.SequenceEqual(frame), "restart disk reuse");
+            Check(cache.TryGet(Key(2), out restored) && restored.Span.SequenceEqual(frame), "disk promotion keeps the verified pixels");
         }
         string corruptRecord = Record(2);
         using (var file = new FileStream(corruptRecord, FileMode.Open, FileAccess.Write))
@@ -53,22 +51,31 @@ internal static class StoreChecks
             WaitFor(() => Directory.Exists(directory)
                 && Directory.EnumerateFiles(directory, Key(4) + ".ymmframe", SearchOption.AllDirectories).Any()
                 && cache.DiskBytes == 128, "queued write is persisted asynchronously");
-            string path = Record(4);
-            using (var held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            // Deleting an open file fails only on Windows; elsewhere the purge simply succeeds.
+            if (OperatingSystem.IsWindows())
+            {
+                string path = Record(4);
+                using (var held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    cache.Clear();
+                    Check(!cache.TryGet(Key(4), out _), "Clear logically purges even a locked file");
+                    Check(cache.DiskBytes <= 128, "failed deletion retains budget accounting");
+                    cache.Dispose();
+                    using (var restarted = new FrameCacheStore(root, 16, 64))
+                    {
+                        WaitFor(() => restarted.DiskBytes == 64, "restart accounts locked retired physical bytes");
+                        Check(!restarted.TryGet(Key(4), out _), "locked retired frame cannot resurrect after restart");
+                        restarted.Put(Key(5), frame);
+                    }
+                    using var reopened = new FrameCacheStore(root, 16, 64);
+                    WaitFor(() => reopened.DiskBytes == 64, "disk budget remains full after queued write drains");
+                    Check(!reopened.TryGet(Key(5), out _), "retired file fills budget and prevents disk growth");
+                }
+            }
+            else
             {
                 cache.Clear();
-                Check(!cache.TryGet(Key(4), out _), "Clear logically purges even a locked file");
-                Check(cache.DiskBytes <= 128, "failed deletion retains budget accounting");
                 cache.Dispose();
-                using (var restarted = new FrameCacheStore(root, 16, 64))
-                {
-                    WaitFor(() => restarted.DiskBytes == 64, "restart accounts locked retired physical bytes");
-                    Check(!restarted.TryGet(Key(4), out _), "locked retired frame cannot resurrect after restart");
-                    restarted.Put(Key(5), frame);
-                }
-                using var reopened = new FrameCacheStore(root, 16, 64);
-                WaitFor(() => reopened.DiskBytes == 64, "disk budget remains full after queued write drains");
-                Check(!reopened.TryGet(Key(5), out _), "retired file fills budget and prevents disk growth");
             }
             using var reclaimed = new FrameCacheStore(root, 16, 128);
             reclaimed.Clear();
@@ -127,6 +134,17 @@ internal static class StoreChecks
             Check(GC.GetAllocatedBytesForCurrentThread() - allocated < 1024 * 1024, "over-cap input rejected before cloning");
             Check(!cache.TryGet(Key(10), out _), "over-cap input is never cached");
         }
+        using (var cache = new FrameCacheStore(Path.Combine(tempPath, "shared-hit-store"), 4 * 1024 * 1024, 0))
+        {
+            byte[] large = new byte[1024 * 1024];
+            large[5] = 7;
+            cache.Put(Key(1), large);
+            large[5] = 9;
+            Check(cache.TryGet(Key(1), out _), "large frame hit");
+            long allocated = GC.GetAllocatedBytesForCurrentThread();
+            Check(cache.TryGet(Key(1), out var shared) && shared.Span[5] == 7, "Put must snapshot pixels before hits share them");
+            Check(GC.GetAllocatedBytesForCurrentThread() - allocated < 64 * 1024, "RAM hits must share, not copy, stored pixels");
+        }
         bool rejectedDiskOnly = false;
         try { using var _ = new FrameCacheStore(Path.Combine(tempPath, "disk-only-store"), 0, 64); }
         catch (ArgumentOutOfRangeException) { rejectedDiskOnly = true; }
@@ -139,38 +157,41 @@ internal static class StoreChecks
             Check(GC.GetAllocatedBytesForCurrentThread() - allocated < 1024, "over-RAM input is rejected before cloning");
         }
         Check(!Directory.EnumerateFiles(tooLargeForRam, "*.ymmframe", SearchOption.AllDirectories).Any(), "frames larger than RAM are not written to unreachable disk cache");
-        // A record locked against reading is charged even though startup cannot validate it.
-        string occupied = Path.Combine(tempPath, "occupied-store");
-        using (var cache = new FrameCacheStore(occupied, 16, 64)) cache.Put(Key(1), frame);
-        string occupiedRecord = Directory.EnumerateFiles(occupied, "*.ymmframe", SearchOption.AllDirectories).Single();
-        using (var held = new FileStream(occupiedRecord, FileMode.Open, FileAccess.Read, FileShare.None))
+        if (OperatingSystem.IsWindows())
         {
-            using (var cache = new FrameCacheStore(occupied, 16, 64))
+            // A record locked against reading is charged even though startup cannot validate it.
+            string occupied = Path.Combine(tempPath, "occupied-store");
+            using (var cache = new FrameCacheStore(occupied, 16, 64)) cache.Put(Key(1), frame);
+            string occupiedRecord = Directory.EnumerateFiles(occupied, "*.ymmframe", SearchOption.AllDirectories).Single();
+            using (var held = new FileStream(occupiedRecord, FileMode.Open, FileAccess.Read, FileShare.None))
             {
-                WaitFor(() => cache.DiskBytes == 64, "unreadable startup record retains physical accounting");
-                Check(!cache.TryGet(Key(1), out _), "unreadable startup record is a miss");
-                cache.Put(Key(2), frame);
+                using (var cache = new FrameCacheStore(occupied, 16, 64))
+                {
+                    WaitFor(() => cache.DiskBytes == 64, "unreadable startup record retains physical accounting");
+                    Check(!cache.TryGet(Key(1), out _), "unreadable startup record is a miss");
+                    cache.Put(Key(2), frame);
+                }
+                using var reopened = new FrameCacheStore(occupied, 16, 64);
+                WaitFor(() => reopened.DiskBytes == 64, "locked record still accounts after write drains");
+                Check(!reopened.TryGet(Key(2), out _), "unreadable record prevents budget overrun");
             }
-            using var reopened = new FrameCacheStore(occupied, 16, 64);
-            WaitFor(() => reopened.DiskBytes == 64, "locked record still accounts after write drains");
-            Check(!reopened.TryGet(Key(2), out _), "unreadable record prevents budget overrun");
-        }
-        // Even an invalid, oversize file is accounted when Windows cannot delete it.
-        string invalid = Path.Combine(tempPath, "invalid-occupied-store");
-        using (var cache = new FrameCacheStore(invalid, 16, 64)) cache.Put(Key(1), frame);
-        string invalidRecord = Directory.EnumerateFiles(invalid, "*.ymmframe", SearchOption.AllDirectories).Single();
-        File.WriteAllBytes(invalidRecord, new byte[80]);
-        using (var held = new FileStream(invalidRecord, FileMode.Open, FileAccess.Read, FileShare.Read))
-        {
-            using (var cache = new FrameCacheStore(invalid, 16, 64))
+            // Even an invalid, oversize file is accounted when Windows cannot delete it.
+            string invalid = Path.Combine(tempPath, "invalid-occupied-store");
+            using (var cache = new FrameCacheStore(invalid, 16, 64)) cache.Put(Key(1), frame);
+            string invalidRecord = Directory.EnumerateFiles(invalid, "*.ymmframe", SearchOption.AllDirectories).Single();
+            File.WriteAllBytes(invalidRecord, new byte[80]);
+            using (var held = new FileStream(invalidRecord, FileMode.Open, FileAccess.Read, FileShare.Read))
             {
-                WaitFor(() => cache.DiskBytes == 80, "invalid locked file larger than budget is reported honestly");
-                Check(!cache.TryGet(Key(1), out _), "invalid locked record is a miss");
-                cache.Put(Key(2), frame);
+                using (var cache = new FrameCacheStore(invalid, 16, 64))
+                {
+                    WaitFor(() => cache.DiskBytes == 80, "invalid locked file larger than budget is reported honestly");
+                    Check(!cache.TryGet(Key(1), out _), "invalid locked record is a miss");
+                    cache.Put(Key(2), frame);
+                }
+                using var reopened = new FrameCacheStore(invalid, 16, 64);
+                WaitFor(() => reopened.DiskBytes == 80, "oversubscribed file remains accounted after write drains");
+                Check(!reopened.TryGet(Key(2), out _), "oversubscribed startup bypasses new disk writes");
             }
-            using var reopened = new FrameCacheStore(invalid, 16, 64);
-            WaitFor(() => reopened.DiskBytes == 80, "oversubscribed file remains accounted after write drains");
-            Check(!reopened.TryGet(Key(2), out _), "oversubscribed startup bypasses new disk writes");
         }
         Console.WriteLine("Cache store: ownership, budgets, cap, restart, checksum, locked-file epoch purge, physical accounting, concurrent purge and disk failure passed.");
     }
