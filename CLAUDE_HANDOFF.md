@@ -6,27 +6,50 @@
 
 ### 2026-09-30 追記（Claude Code クラウドセッション、branch `claude/frame-render-readiness`、draft PR #1）
 
-- `FrameRenderReadiness.cs` を実装しました。
-  - `TimelineSource.Update` を AsyncLocal scope で囲みます（Prefix: Priority.First / Finalizer: Priority.Last）。decoder の Finalizer で「要求時刻を含む sample を保持しているか」を判定し、失敗は親 scope へ伝搬します。
-  - 帰属を失った decode（EC 非 flow、完了済み scope）は、処理中の全 frame を失敗扱いにします。インストール途中で失敗した場合は、自分が追加した patch だけを戻します。
-- 呼出し側 API を変更しました: `IsUpdateReady(source)`（Postfix 用、scope の source 一致も確認）と `WasLastUpdateReady(source, time)`（時刻一致も確認）。
-- `BindHostDecoders` は**実 host 未確認のまま、引継ぎ資料の形状名で構造判定**しています。
-  - 対象: host / Plugin / host dir の `YukkuriMovieMaker.Plugin.FileSource.*` に含まれる `IVideoFileSource` 実装の**すべて**をフックします。interface map で実装メソッドを求め、MethodHandle で照合します。
-  - MF2: `decodedFrame` の `SampleTime`/`SampleDuration`（long 100ns または TimeSpan）が t を含むこと。
-  - legacy: `currentTime`/`currentDuration`/`streamStartTime`。stream start の意味が未確認なので、非 0 の場合は両方の解釈で t を含むときだけ ready にしています（実質キャッシュしません）。
-  - `CachedVideoFileSource`: 内部ソースの field がちょうど1つで、その実体が MF2/legacy かつ t を保持していること。wrapper が内部の Update を呼ばない場合も、状態で判定します。
-  - それ以外の実装: 常に未確認扱いです（その動画を含む frame は保存しません）。
-  - インストール後に組込み assembly が動画ソースを持って読み込まれた場合は、`CoverageProblem` を立てて全 frame を未確認扱いにします。外部 reader は FrameCacheKey 側で除外済みです。
-- **要確認（host DLL 到着後）**:
-  - 上記の分類結果（HostCacheProbe が `Render readiness coverage` として出力します）を ILSpy の実コードと照合する
-  - legacy の stream start の意味、wrapper の委譲、組込み FileSource assembly が plugin ctor より後に読み込まれないかを確認する
-  - decoder 失敗を注入する実 host 回帰試験を追加する
-- 状態表示: ツールに完成判定の要約（検証可能 / 未検証の種類数）と、保存を見送った理由を表示します。
-- 検証:
-  - `tests/ReadinessChecks`（net10.0、偽 host 型 + Harmony 2.4.2）を Linux の Debug/Release で20回連続成功、0 warnings。
-  - 主要規則9件（wrapper の内部状態、legacy の stream start、遅延読込の検出、親への伝搬、非帰属 decode、完了済み scope、時刻の束縛、例外、未確認ソース）を壊す変異テストをすべて検出しました。
-- **YMM4 DLL を使う Release ビルドは未再確認**です。参照なしの Linux ビルドでは YMM4 型未解決（CS0246）以外のエラー種別は出ていませんが、Windows での確認が必要です。
-- Linux では StoreChecks の「ロック中ファイルは削除できない」前提（65行目）が OS 差で失敗します。Windows 専用の前提で、回帰ではありません。
+環境: Linux クラウドコンテナ（GPU・YMM4 本体なし）。.NET SDK 10.0.112 / Harmony 2.4.2 / ilspycmd 11.1 を導入済みです。YMM4 DLL はこの環境に届いていません（manjubox.net は遮断されています）。
+
+**実装したこと**
+- `FrameRenderReadiness.cs`（新規）
+  - `TimelineSource.Update` を AsyncLocal scope で囲みます（Prefix: Priority.First / Finalizer: Priority.Last）。decoder の Finalizer で「要求時刻 t を含む sample を保持しているか」を判定し、失敗は親 scope へ伝搬します。
+  - 帰属を失った decode（EC 非 flow、完了済み scope）は処理中の全 frame を失敗扱いにします。例外は保持し、インストール途中で失敗した場合は自分が追加した patch だけを戻します。
+  - host binding: host / Plugin / host dir の `YukkuriMovieMaker.Plugin.FileSource.*` にある `IVideoFileSource` 実装を**すべて**フックします（interface map、MethodHandle で照合）。分類は次のとおりです。
+    - MF2: `decodedFrame` の `SampleTime`/`SampleDuration`（long 100ns または TimeSpan）が t を含むこと。
+    - legacy: `currentTime`/`currentDuration`/`streamStartTime`。stream start が非 0 のときは両方の解釈で t を含む場合だけ ready です。
+    - `CachedVideoFileSource`: 内部ソースの field が1つで、その実体が MF2/legacy かつ t を保持していること。
+    - その他: 常に未確認扱いです。
+  - 遅延読込: インストール後に組込み assembly が読み込まれた場合は、その場で分類・フックします。bind epoch（奇数＝フック中）で、変更をまたいだ frame は未確認扱いです。フックできない型がある場合は `CoverageProblem` で全停止します。
+  - API: `IsUpdateReady(source)`（scope の source 一致も確認）、`WasLastUpdateReady(source, time)`（時刻一致も確認）、`Coverage`（分類一覧）、`Summary`（ツール表示）。
+- `TimelineFrameCache.cs`
+  - 永続キーを `pixels-v4` にし、DXGI adapter（vendor/device/subsys/rev/名称）、UMD driver version、plugin MVID を含めました。識別に失敗した場合は bypass です。
+  - `Clear()` が `cacheGate` を保持したままディスク消去を待ち、描画スレッドを止めていた問題を修正しました。
+  - hit 時はストアの snapshot を ReadOnlyMemory で共有します（1080p で約 8 MiB の複製を廃止）。
+  - 保存を見送った理由を状態表示に出します。
+- `FrameCacheStore.TryGet` を `out ReadOnlyMemory<byte>` に変更しました（snapshot は挿入後に不変）。
+- `IdleFramePreRenderer`: viewport 比較から LastDrawTimestamp を除外しました（同じ view の再描画で batch が毎回中断され、device を作り直していた問題の修正）。prime には最新の viewport を使います。
+- 状態・理由文字列を日本語化しました。
+- テスト
+  - `tests/ReadinessChecks`（新規、host 非依存。emit した実 DLL で遅延読込も検証）を追加しました。
+  - StoreChecks に「hit は 64 KiB 未満の確保」を追加し、Windows 専用のロック区間は他 OS で skip します。
+  - HostCacheProbe: `PreviewViewport` の15引数へ追従しました。また Clear 後に一度再描画されて再利用が再開すること、`Render readiness coverage` の出力と MF2 認識の検査、組込み reader DLL の事前読込を追加しました。
+
+**検証済み（Linux）**
+- ReadinessChecks: Debug/Release で各20回連続成功、0 warnings。主要規則11件の変異テスト（wrapper の内部状態、legacy の stream start、遅延フック、epoch、遅延失敗の報告、親への伝搬、非帰属 decode、完了済み scope、時刻の束縛、例外、未確認ソース）をすべて検出しました。
+- StoreChecks: Windows 専用区間以外はすべて成功しました。hit 時の複製を戻す変異も検出しました。
+- Vortice 依存コード（Capture/Upload/RenderEnvironment ほか）を抜き出してコンパイル: **3.5.0 で 0 errors**。3.3.4 は SizeI がなく、3.6 以降は `CopyFromMemory` の引数が uint になるため失敗します。このことから YMM4 同梱の Vortice は 3.5.x と推定しています（要確認）。
+- 注意: YMM4 参照なしのプラグイン全体ビルドは、宣言の CS0246 で止まり、メソッド本体を検査しません。**YMM4 DLL を使う Release ビルドは未確認**です。
+
+**host DLL / Windows で最初に確認すること**
+1. `dotnet build ... -c Release` が通ること。次に `ReadinessChecks` → `StoreChecks` → `CacheChecks` → `HostCacheProbe --gpu` の順で実行します。HostCacheProbe の `Render readiness coverage` 出力を ILSpy と照合してください。
+2. ILSpy で確認する内容:
+   - (a) MF2 の `decodedFrame.SampleTime/SampleDuration` の単位と、t（Update 引数）との関係
+   - (b) legacy の `streamStartTime` の意味
+   - (c) `CachedVideoFileSource` が内部の Update を呼ばずに frame を返す経路と、その frame の由来
+   - (d) 組込み FileSource assembly が plugin ctor より前に読み込まれるか
+   - (e) `TimelineSource.Update` 内で `IVideoFileSource.Update` が EC を flow したまま呼ばれるか（`UnsafeQueueUserWorkItem` や SuppressFlow がないか）
+   - (f) `VideoFileWriter.CreateFileAsync` の frame loop 範囲と `EncodeFrom`/`EncodeTo` の包含・範囲指定 flag（`HostExportScope.ExpectedFrames` が一致しないと、全出力が `.partial` のまま公開されません）
+   - (g) `TimelineVideoPlayer.Draw` が `TimelineSource.Update` を BeginDraw の内側で呼ぶか（プレビューで見たフレームを保存する機能の実装可否）
+   - (h) 小さい Update が JIT で inline 化されてフックを迂回しないか（Harmony/MonoMod は patch 対象の inline を抑止しますが、既に JIT 済みの呼出し側は要注意です）
+3. decoder 失敗を注入する実 host 回帰試験（MF2 の読込を timeout させ、保存されないことを確認）を追加する。
 
 ### 以前の状態（2026-10-01 checkpoint 時点）
 
