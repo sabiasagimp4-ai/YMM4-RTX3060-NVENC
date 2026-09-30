@@ -51,6 +51,10 @@ internal static class FramePixelChecks
         try
         {
             Check(TimelineFrameCache.TryInstall(host, harmony, out var reason), reason);
+            Console.WriteLine("Render readiness coverage (verify against host code):");
+            foreach (var line in FrameRenderReadiness.Coverage) Console.WriteLine("  " + line);
+            Check(FrameRenderReadiness.Coverage.Any(line => line.Contains(": MF2 (", StringComparison.Ordinal)),
+                "No MF2 video source was recognized; video frames would never be cached");
             var timeline = new Timeline();
             timeline.VideoInfo.Width = 321; timeline.VideoInfo.Height = 181;
             timeline.VideoInfo.BackgroundColor = System.Windows.Media.Color.FromArgb(137, 123, 76, 231);

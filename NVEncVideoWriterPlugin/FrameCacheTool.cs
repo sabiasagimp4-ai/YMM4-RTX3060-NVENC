@@ -96,7 +96,7 @@ public sealed class FrameCacheToolView : UserControl
         }
         catch (Exception exception)
         {
-            error.Text = "The setting is active for this session but could not be saved: " + exception.GetBaseException().Message;
+            error.Text = "設定はこのセッションでは有効ですが、保存できませんでした: " + exception.GetBaseException().Message;
         }
         Refresh();
     }
@@ -105,8 +105,8 @@ public sealed class FrameCacheToolView : UserControl
     {
         enabled.IsEnabled = HostIntegration.CacheAvailable;
         enabled.IsChecked = TimelineFrameCache.Enabled;
-        status.Text = HostIntegration.Status + Environment.NewLine + TimelineFrameCache.Status
-            + Environment.NewLine + IdleFramePreRenderer.Status;
+        status.Text = HostIntegration.Status + Environment.NewLine + FrameRenderReadiness.Summary
+            + Environment.NewLine + TimelineFrameCache.Status + Environment.NewLine + IdleFramePreRenderer.Status;
         counts.Text = $"再利用 {TimelineFrameCache.Hits:N0} / 新規描画 {TimelineFrameCache.Misses:N0}\n"
             + $"GPU {TimelineFrameCache.GpuBytes / 1048576.0:N1} MiB / RAM 上限 256 MiB / ディスク上限 4 GiB";
     }

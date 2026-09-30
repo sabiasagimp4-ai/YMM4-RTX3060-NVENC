@@ -4,13 +4,28 @@
 
 ## 最初に読むこと
 
-### 2026-09-30 追記（Claude Code クラウドセッション、branch `claude/frame-render-readiness`）
+### 2026-09-30 追記（Claude Code クラウドセッション、branch `claude/frame-render-readiness`、draft PR #1）
 
-- `FrameRenderReadiness.cs` の汎用部を実装しました。`TimelineSource.Update` の AsyncLocal scope（Prefix: Priority.First / Finalizer: Priority.Last）を使います。decoder の Finalizer で「要求時刻を含む sample を保持しているか」を判定し、失敗は親 scope へ伝搬します。帰属を失った decode（EC 非 flow、完了済み scope）は処理中の全 frame を失敗扱いにします。インストール途中で失敗した場合は、自分が追加した patch だけを戻します。
-- 呼出し側 API は `IsUpdateReady(source)`（Postfix 用、scope の source 一致も確認）と `WasLastUpdateReady(source, time)`（時刻一致も確認）に変更しました。
-- **host の decoder 形状（MF2 / legacy / CachedVideoFileSource）はまだ結び付けていません。** `BindHostDecoders` は NotSupportedException を投げるため、実 host ではキャッシュ接続が理由付きで拒否されます（fail-closed。成功 stub ではありません）。
-- 検証: `tests/ReadinessChecks`（net10.0、偽 host 型 + Harmony 2.4.2）を Linux で Debug/Release 実行し、15 回連続で成功、0 warnings。対象は帰属、Parallel.ForEach、入れ子伝搬、例外保持、skip 時の scope、非帰属 decode、並行 render の分離、外部 owner と途中失敗の rollback、uninstall です。
-- **YMM4 DLL を使う Release ビルドは未再確認**です（クラウド環境に host DLL がないため）。CS0103 はソース上解消済みですが、他の compile error がないことは Windows で確認が必要です。
+- `FrameRenderReadiness.cs` を実装しました。
+  - `TimelineSource.Update` を AsyncLocal scope で囲みます（Prefix: Priority.First / Finalizer: Priority.Last）。decoder の Finalizer で「要求時刻を含む sample を保持しているか」を判定し、失敗は親 scope へ伝搬します。
+  - 帰属を失った decode（EC 非 flow、完了済み scope）は、処理中の全 frame を失敗扱いにします。インストール途中で失敗した場合は、自分が追加した patch だけを戻します。
+- 呼出し側 API を変更しました: `IsUpdateReady(source)`（Postfix 用、scope の source 一致も確認）と `WasLastUpdateReady(source, time)`（時刻一致も確認）。
+- `BindHostDecoders` は**実 host 未確認のまま、引継ぎ資料の形状名で構造判定**しています。
+  - 対象: host / Plugin / host dir の `YukkuriMovieMaker.Plugin.FileSource.*` に含まれる `IVideoFileSource` 実装の**すべて**をフックします。interface map で実装メソッドを求め、MethodHandle で照合します。
+  - MF2: `decodedFrame` の `SampleTime`/`SampleDuration`（long 100ns または TimeSpan）が t を含むこと。
+  - legacy: `currentTime`/`currentDuration`/`streamStartTime`。stream start の意味が未確認なので、非 0 の場合は両方の解釈で t を含むときだけ ready にしています（実質キャッシュしません）。
+  - `CachedVideoFileSource`: 内部ソースの field がちょうど1つで、その実体が MF2/legacy かつ t を保持していること。wrapper が内部の Update を呼ばない場合も、状態で判定します。
+  - それ以外の実装: 常に未確認扱いです（その動画を含む frame は保存しません）。
+  - インストール後に組込み assembly が動画ソースを持って読み込まれた場合は、`CoverageProblem` を立てて全 frame を未確認扱いにします。外部 reader は FrameCacheKey 側で除外済みです。
+- **要確認（host DLL 到着後）**:
+  - 上記の分類結果（HostCacheProbe が `Render readiness coverage` として出力します）を ILSpy の実コードと照合する
+  - legacy の stream start の意味、wrapper の委譲、組込み FileSource assembly が plugin ctor より後に読み込まれないかを確認する
+  - decoder 失敗を注入する実 host 回帰試験を追加する
+- 状態表示: ツールに完成判定の要約（検証可能 / 未検証の種類数）と、保存を見送った理由を表示します。
+- 検証:
+  - `tests/ReadinessChecks`（net10.0、偽 host 型 + Harmony 2.4.2）を Linux の Debug/Release で20回連続成功、0 warnings。
+  - 主要規則9件（wrapper の内部状態、legacy の stream start、遅延読込の検出、親への伝搬、非帰属 decode、完了済み scope、時刻の束縛、例外、未確認ソース）を壊す変異テストをすべて検出しました。
+- **YMM4 DLL を使う Release ビルドは未再確認**です。参照なしの Linux ビルドでは YMM4 型未解決（CS0246）以外のエラー種別は出ていませんが、Windows での確認が必要です。
 - Linux では StoreChecks の「ロック中ファイルは削除できない」前提（65行目）が OS 差で失敗します。Windows 専用の前提で、回帰ではありません。
 
 ### 以前の状態（2026-10-01 checkpoint 時点）

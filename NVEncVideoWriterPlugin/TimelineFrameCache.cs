@@ -252,7 +252,12 @@ internal static class TimelineFrameCache
         {
             if (__state.CacheHit) return;
             __state.State.Released(); // The host update disposed the previous source-owned output.
-            if (!FrameRenderReadiness.IsUpdateReady(__instance) || !StillCurrent(__state)) return;
+            if (!FrameRenderReadiness.IsUpdateReady(__instance))
+            {
+                status = FrameRenderReadiness.CoverageProblem ?? "動画のデコード完了を確認できないフレームは保存しません。";
+                return;
+            }
+            if (!StillCurrent(__state)) return;
             var output = (ID2D1CommandList)outputField.GetValue(__instance)!;
             if (__state.CacheKey is not null && __state.Viewport is null)
             {

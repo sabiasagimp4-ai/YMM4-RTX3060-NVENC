@@ -1,17 +1,28 @@
-using System.Collections.Concurrent;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using NVEncVideoWriterPlugin;
 using YukkuriMovieMaker.Player.Video;
+using YukkuriMovieMaker.Plugin.FileSource;
 
 // Host-independent checks for FrameRenderReadiness. Fake types mimic only the call shape that matters:
 // TimelineSource.Update fans decoder updates (and nested scenes) out through Parallel.ForEach, swallows
 // decoder failures the way the host renders them as transparent output, and returns normally.
+// The video source fakes follow the shapes recorded in CLAUDE_HANDOFF.md; they are not host code.
 internal static class Program
 {
     private const string Owner = "ymm.tests.readiness";
-    private static readonly TimeSpan Frame = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 30);
+    internal static readonly TimeSpan Frame = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 30);
+    private static readonly MethodBase[] VideoSourceUpdates =
+    [
+        typeof(Mf2Source).GetMethod(nameof(Mf2Source.Update))!,
+        typeof(ExplicitMf2Source).GetInterfaceMap(typeof(IVideoFileSource)).TargetMethods.Single(),
+        typeof(OverridingMf2Source).GetMethod(nameof(OverridingMf2Source.Update))!,
+        typeof(LegacySource).GetMethod(nameof(LegacySource.Update))!,
+        typeof(CachedVideoFileSource).GetMethod(nameof(CachedVideoFileSource.Update))!,
+        typeof(OddSource).GetMethod(nameof(OddSource.Update))!,
+    ];
 
     private static int Main()
     {
@@ -25,15 +36,14 @@ internal static class Program
             harmony.Patch(update, prefix: new HarmonyMethod(typeof(CacheLike), nameof(CacheLike.Prefix)),
                 postfix: new HarmonyMethod(typeof(CacheLike), nameof(CacheLike.Postfix)));
 
-            Check(!FrameRenderReadiness.TryInstall(typeof(Program).Assembly, harmony, out var hostReason)
-                && hostReason.Contains("not been verified"), "Unverified host decoder contract must reject install: " + hostReason);
-            CheckOnlyCacheLikePatches(update, decode, "unverified host install");
+            Check(!FrameRenderReadiness.TryInstall(typeof(Harmony).Assembly, harmony, out var hostReason),
+                "A host without the TimelineSource contract must reject install");
+            CheckOnlyCacheLikePatches(update, [decode, .. VideoSourceUpdates], "rejected host install: " + hostReason);
 
             CheckRollbackOnExternalOwner(harmony, update);
 
             Check(FrameRenderReadiness.TryInstall(update, checks, harmony, out var reason), reason);
             Check(!FrameRenderReadiness.TryInstall(update, checks, harmony, out _), "Second install must be rejected");
-
             CheckReadyFrame();
             CheckDecoderTimeoutPropagatesToParents();
             CheckSwallowedDecoderException();
@@ -43,14 +53,22 @@ internal static class Program
             CheckCompletedScopeCapturedByLateTask();
             CheckIdleDecodeIsIgnored();
             CheckConcurrentRendersAreIsolated();
-
             FrameRenderReadiness.Uninstall(harmony);
-            CheckOnlyCacheLikePatches(update, decode, "uninstall");
+            CheckOnlyCacheLikePatches(update, [decode], "core uninstall");
             var root = Scene(decoders: 1);
             Render(root, Frame);
             Check(CacheLike.Last(root) == false && !FrameRenderReadiness.WasLastUpdateReady(root, Frame),
                 "Uninstalled readiness must not report frames ready");
-            Console.WriteLine("Render readiness: attribution, propagation, fail-closed paths, rollback and uninstall OK");
+            Console.WriteLine("Render readiness core: attribution, propagation, fail-closed paths, rollback and uninstall OK");
+
+            Check(FrameRenderReadiness.TryInstall(typeof(Program).Assembly, harmony, out reason), reason);
+            CheckHostCoverage();
+            CheckHostVideoSources();
+            CheckLateBuiltInVideoSource();
+            FrameRenderReadiness.Uninstall(harmony);
+            CheckOnlyCacheLikePatches(update, [decode, .. VideoSourceUpdates], "host uninstall");
+            Check(FrameRenderReadiness.CoverageProblem is null && FrameRenderReadiness.Coverage.Count == 0, "Uninstall kept host coverage state");
+            Console.WriteLine("Render readiness host binding: MF2/legacy/wrapper/unverified sources and late-loaded coverage OK");
             return 0;
         }
         finally { FrameRenderReadiness.Uninstall(harmony); harmony.UnpatchAll(Owner); }
@@ -71,7 +89,7 @@ internal static class Program
             };
             Check(!FrameRenderReadiness.TryInstall(update, checks, harmony, out var reason) && reason.Contains("someone.else"),
                 "External Harmony owner must reject install: " + reason);
-            CheckOnlyCacheLikePatches(update, decode, "external-owner rollback");
+            CheckOnlyCacheLikePatches(update, [decode], "external-owner rollback");
             Check(Harmony.GetPatchInfo(target)!.Owners.SequenceEqual(["someone.else"]), "Rollback touched a foreign patch");
         }
         finally { foreign.UnpatchAll(foreign.Id); }
@@ -85,16 +103,17 @@ internal static class Program
         };
         Check(!FrameRenderReadiness.TryInstall(update, partial, harmony, out var partialReason) && !FrameRenderReadiness.Installed,
             "Unpatchable decoder target must reject install");
-        CheckOnlyCacheLikePatches(update, decode, "mid-install rollback: " + partialReason);
+        CheckOnlyCacheLikePatches(update, [decode], "mid-install rollback: " + partialReason);
     }
 
-    private static void CheckOnlyCacheLikePatches(MethodBase update, MethodBase decode, string stage)
+    private static void CheckOnlyCacheLikePatches(MethodBase update, MethodBase[] decoders, string stage)
     {
         var info = Harmony.GetPatchInfo(update)!;
         Check(info.Prefixes.Count == 1 && info.Prefixes[0].PatchMethod.DeclaringType == typeof(CacheLike)
             && info.Postfixes.Count == 1 && info.Finalizers.Count == 0, $"Readiness patches left on Update after {stage}");
-        Check(Harmony.GetPatchInfo(decode) is not { } decoderInfo || decoderInfo.Finalizers.Count == 0,
-            $"Readiness patches left on decoder after {stage}");
+        foreach (var decoder in decoders)
+            Check(Harmony.GetPatchInfo(decoder) is not { } decoderInfo || decoderInfo.Finalizers.Count == 0,
+                $"Readiness patches left on {decoder.DeclaringType?.Name}.{decoder.Name} after {stage}");
     }
 
     private static void CheckReadyFrame()
@@ -208,6 +227,96 @@ internal static class Program
         Check(!FrameRenderReadiness.WasLastUpdateReady(bad, Frame * 20), "Concurrent failing render reported ready");
     }
 
+    private static void CheckHostCoverage()
+    {
+        var coverage = FrameRenderReadiness.Coverage;
+        void Expect(Type type, string kind) => Check(coverage.Any(line => line.StartsWith(type.FullName + ": " + kind, StringComparison.Ordinal)),
+            $"{type.Name} was not classified as {kind}: {string.Join(" | ", coverage)}");
+        Expect(typeof(Mf2Source), "MF2");
+        Expect(typeof(DerivedMf2Source), "MF2");
+        Expect(typeof(ExplicitMf2Source), "MF2");
+        Expect(typeof(OverridingMf2Source), "MF2");
+        Expect(typeof(LegacySource), "legacy");
+        Expect(typeof(CachedVideoFileSource), "wrapper");
+        Expect(typeof(OddSource), "unverified");
+        Check(coverage.Count == 7, "Unexpected video source coverage: " + string.Join(" | ", coverage));
+        foreach (var method in VideoSourceUpdates)
+            Check(Harmony.GetPatchInfo(method)?.Finalizers.Count == 1, $"{method.DeclaringType?.Name}.Update was not hooked exactly once");
+    }
+
+    private static void CheckHostVideoSources()
+    {
+        // Renders frame 2, applies the change, then renders frame 3 (or frame 2 again).
+        bool Ready(Func<IVideoFileSource[]> create, Action<IVideoFileSource[]>? before = null, bool repeatTime = false)
+        {
+            var sources = create();
+            var root = Scene(decoders: 0);
+            root.Sources.AddRange(sources);
+            Render(root, Frame * 2);
+            before?.Invoke(sources);
+            var time = repeatTime ? Frame * 2 : Frame * 3;
+            Render(root, time);
+            return CacheLike.Last(root) == true && FrameRenderReadiness.WasLastUpdateReady(root, time);
+        }
+        Check(Ready(() => [new Mf2Source(), new DerivedMf2Source(), new ExplicitMf2Source(), new OverridingMf2Source(),
+            new LegacySource(), new CachedVideoFileSource(new Mf2Source())]), "Verified sources that decoded must be ready");
+
+        Check(!Ready(() => [new Mf2Source()], s => ((Mf2Source)s[0]).Behavior = VideoMode.Stale), "MF2 stale frame reported ready");
+        Check(!Ready(() => [new Mf2Source()], s => ((Mf2Source)s[0]).Behavior = VideoMode.Clear), "MF2 cleared frame reported ready");
+        Check(!Ready(() => [new Mf2Source()], s => ((Mf2Source)s[0]).Behavior = VideoMode.Throw), "MF2 swallowed exception reported ready");
+        Check(!Ready(() => [new DerivedMf2Source()], s => ((Mf2Source)s[0]).Behavior = VideoMode.Stale),
+            "Shared inherited hook did not check the derived instance");
+        Check(!Ready(() => [new ExplicitMf2Source()], s => ((ExplicitMf2Source)s[0]).Behavior = VideoMode.Stale),
+            "Explicit interface implementation was not checked");
+        Check(!Ready(() => [new OverridingMf2Source()], s => ((OverridingMf2Source)s[0]).Behavior = VideoMode.Stale),
+            "Abstract-base override was not checked");
+        Check(!Ready(() => [new LegacySource()], s => ((LegacySource)s[0]).Behavior = VideoMode.Clear),
+            "Legacy error (currentDuration = 0) reported ready");
+        Check(!Ready(() => [new LegacySource { StreamStart = Frame * 2 }]) && !Ready(() => [new LegacySource { StreamStart = Frame * 2, Normalized = true }]),
+            "Legacy nonzero stream start is unverified until host semantics are confirmed");
+        Check(Ready(() => [new LegacySource { Normalized = true }]), "Legacy with zero stream start must be ready under either reading");
+        Check(!Ready(() => [new CachedVideoFileSource(new Mf2Source())], s => ((CachedVideoFileSource)s[0]).ServeWithoutInner = true),
+            "Wrapper served a new time without its inner source holding it");
+        Check(Ready(() => [new CachedVideoFileSource(new Mf2Source())], s => ((CachedVideoFileSource)s[0]).ServeWithoutInner = true, repeatTime: true)
+            && Ready(() => [new CachedVideoFileSource(new Mf2Source())]), "Wrapper whose inner source holds the frame must be ready");
+        Check(!Ready(() => [new CachedVideoFileSource(new OddSource())]), "Wrapper around an unverified source reported ready");
+        Check(!Ready(() => [new CachedVideoFileSource(new CachedVideoFileSource(new Mf2Source()))]), "Nested wrapper reported ready");
+        Check(!Ready(() => [new OddSource()]), "Unverified video source reported ready");
+    }
+
+    private static void CheckLateBuiltInVideoSource()
+    {
+        var root = Scene(decoders: 0);
+        root.Sources.Add(new Mf2Source());
+        Render(root, Frame);
+        Check(FrameRenderReadiness.WasLastUpdateReady(root, Frame), "Precondition: verified source ready before late load");
+
+        string directory = Path.GetDirectoryName(typeof(Program).Assembly.Location)!;
+        string name = "YukkuriMovieMaker.Plugin.FileSource.Late" + Guid.NewGuid().ToString("N")[..8];
+        string path = Path.Combine(directory, name + ".dll");
+        var builder = new PersistedAssemblyBuilder(new AssemblyName(name), typeof(object).Assembly);
+        var type = builder.DefineDynamicModule(name).DefineType("Late.LateVideoSource",
+            TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.Class);
+        type.AddInterfaceImplementation(typeof(IVideoFileSource));
+        type.DefineDefaultConstructor(MethodAttributes.Public);
+        var update = type.DefineMethod(nameof(IVideoFileSource.Update), MethodAttributes.Public | MethodAttributes.Virtual
+            | MethodAttributes.Final | MethodAttributes.HideBySig | MethodAttributes.NewSlot, typeof(void), [typeof(TimeSpan)]);
+        update.GetILGenerator().Emit(OpCodes.Ret);
+        type.DefineMethodOverride(update, typeof(IVideoFileSource).GetMethod(nameof(IVideoFileSource.Update))!);
+        type.CreateType();
+        builder.Save(path);
+        try
+        {
+            Assembly.LoadFrom(path);
+            Check(FrameRenderReadiness.CoverageProblem?.Contains("Late.LateVideoSource") == true,
+                "Late-loaded built-in video source was not reported: " + FrameRenderReadiness.CoverageProblem);
+            Render(root, Frame * 2);
+            Check(CacheLike.Last(root) == false && !FrameRenderReadiness.WasLastUpdateReady(root, Frame * 2),
+                "Frames must not be ready once an unhooked built-in video source can exist");
+        }
+        finally { try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    }
+
     private static TimelineSource Scene(int decoders, TimelineSource[]? children = null)
     {
         var source = new TimelineSource();
@@ -251,7 +360,6 @@ internal sealed class FakeDecoder
     internal Mode Behavior;
     internal TimeSpan? SampleTime;
     internal int Updates;
-    private static readonly TimeSpan SampleDuration = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 30);
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     public void Update(TimeSpan time)
@@ -267,7 +375,7 @@ internal sealed class FakeDecoder
     }
 
     internal static bool Holds(object decoder, TimeSpan time) => decoder is FakeDecoder fake && fake.SampleTime is { } start
-        && start <= time && time < start + SampleDuration;
+        && start <= time && time < start + Program.Frame;
 }
 
 internal abstract class AbstractDecoder
@@ -281,6 +389,115 @@ internal sealed class OtherDecoder
     public void Update(TimeSpan time) { }
 }
 
+namespace YukkuriMovieMaker.Plugin.FileSource
+{
+    // Public so that the emitted late-loaded assembly can implement it.
+    public interface IVideoFileSource
+    {
+        void Update(TimeSpan time);
+    }
+
+    internal enum VideoMode { Decode, Stale, Clear, Throw }
+
+    internal sealed class DecodedFrame(long sampleTime, long sampleDuration)
+    {
+        public long SampleTime { get; } = sampleTime;
+        public long SampleDuration { get; } = sampleDuration;
+    }
+
+    internal static class FakeMf2
+    {
+        internal static DecodedFrame? Next(DecodedFrame? current, VideoMode mode, TimeSpan time)
+        {
+            Thread.Sleep(1);
+            return mode switch
+            {
+                VideoMode.Decode => new DecodedFrame(time.Ticks, global::Program.Frame.Ticks),
+                VideoMode.Stale => current,
+                VideoMode.Clear => null,
+                _ => throw new TimeoutException("decoder timeout"),
+            };
+        }
+    }
+
+    internal class Mf2Source : IVideoFileSource
+    {
+        internal VideoMode Behavior;
+        private DecodedFrame? decodedFrame;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public void Update(TimeSpan time) => decodedFrame = FakeMf2.Next(decodedFrame, Behavior, time);
+    }
+
+    // Inherits Update: one hook must dispatch on the runtime type.
+    internal sealed class DerivedMf2Source : Mf2Source;
+
+    internal sealed class ExplicitMf2Source : IVideoFileSource
+    {
+        internal VideoMode Behavior;
+        private DecodedFrame? decodedFrame;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        void IVideoFileSource.Update(TimeSpan time) => decodedFrame = FakeMf2.Next(decodedFrame, Behavior, time);
+    }
+
+    internal abstract class VideoSourceBase : IVideoFileSource
+    {
+        public abstract void Update(TimeSpan time);
+    }
+
+    internal sealed class OverridingMf2Source : VideoSourceBase
+    {
+        internal VideoMode Behavior;
+        private DecodedFrame? decodedFrame;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public override void Update(TimeSpan time) => decodedFrame = FakeMf2.Next(decodedFrame, Behavior, time);
+    }
+
+    internal sealed class LegacySource : IVideoFileSource
+    {
+        internal VideoMode Behavior;
+        internal TimeSpan StreamStart { get => TimeSpan.FromTicks(streamStartTime); init => streamStartTime = value.Ticks; }
+        internal bool Normalized { get; init; } // sample times already relative to the stream start
+        private long currentTime, currentDuration, streamStartTime;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public void Update(TimeSpan time)
+        {
+            Thread.Sleep(1);
+            switch (Behavior)
+            {
+                // Either reading of the stream start is plausible until the host code is confirmed.
+                case VideoMode.Decode:
+                    currentTime = time.Ticks + (Normalized ? 0 : streamStartTime);
+                    currentDuration = global::Program.Frame.Ticks;
+                    break;
+                case VideoMode.Clear: currentDuration = 0; break;
+                case VideoMode.Throw: throw new TimeoutException("decoder timeout");
+            }
+        }
+    }
+
+    internal sealed class CachedVideoFileSource(IVideoFileSource inner) : IVideoFileSource
+    {
+        private readonly IVideoFileSource source = inner;
+        internal bool ServeWithoutInner;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public void Update(TimeSpan time)
+        {
+            if (!ServeWithoutInner) source.Update(time);
+        }
+    }
+
+    internal sealed class OddSource : IVideoFileSource
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public void Update(TimeSpan time) => Thread.Sleep(1);
+    }
+}
+
 namespace YukkuriMovieMaker.Player.Video
 {
     internal enum TimelineSourceUsage { Playing, Exporting }
@@ -289,6 +506,7 @@ namespace YukkuriMovieMaker.Player.Video
     {
         internal const string FailureMessage = "fake render failure";
         internal readonly List<FakeDecoder> Decoders = [];
+        internal readonly List<YukkuriMovieMaker.Plugin.FileSource.IVideoFileSource> Sources = [];
         internal readonly List<TimelineSource> Children = [];
         internal Action<TimeSpan>? During;
         internal bool Throw;
@@ -296,15 +514,19 @@ namespace YukkuriMovieMaker.Player.Video
         [MethodImpl(MethodImplOptions.NoInlining)]
         public void Update(TimeSpan time, TimelineSourceUsage usage)
         {
-            var work = Decoders.Cast<object>().Concat(Children).ToArray();
+            var work = Decoders.Cast<object>().Concat(Sources).Concat(Children).ToArray();
             Parallel.ForEach(work, new ParallelOptions { MaxDegreeOfParallelism = 4 }, item =>
             {
-                if (item is FakeDecoder decoder)
+                try
                 {
-                    try { decoder.Update(time); }
-                    catch (TimeoutException) { } // the host draws nothing for this item and continues
+                    switch (item)
+                    {
+                        case FakeDecoder decoder: decoder.Update(time); break;
+                        case YukkuriMovieMaker.Plugin.FileSource.IVideoFileSource video: video.Update(time); break;
+                        default: ((TimelineSource)item).Update(time, usage); break;
+                    }
                 }
-                else ((TimelineSource)item).Update(time, usage);
+                catch (TimeoutException) { } // the host draws nothing for this item and continues
             });
             During?.Invoke(time);
             if (Throw) throw new InvalidOperationException(FailureMessage);
