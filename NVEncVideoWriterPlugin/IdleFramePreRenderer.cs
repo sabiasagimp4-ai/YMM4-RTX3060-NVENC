@@ -332,7 +332,7 @@ internal static class IdleFramePreRenderer
     private static void OnInput(object sender, PreProcessInputEventArgs args)
     {
         if (args.StagingItem.Input is not null && session is { } current)
-            MarkActivity(current, "User activity; idle pre-render paused.");
+            MarkActivity(current, "操作を検知したため、先読みを中断しました。");
     }
 
     private static void SubscribeInput()

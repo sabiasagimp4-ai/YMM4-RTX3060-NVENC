@@ -15,7 +15,7 @@ internal static class HostIntegration
     private static Assembly? checkedHost;
     private static bool installed;
     private static bool cacheAvailable;
-    private static string status = "YMM4 integration has not been initialized.";
+    private static string status = "YMM4との連携はまだ初期化されていません。";
 
     internal static string Status { get { lock (installLock) return status; } }
     internal static bool CacheAvailable { get { lock (installLock) return cacheAvailable; } }
@@ -29,7 +29,7 @@ internal static class HostIntegration
                 .FirstOrDefault(a => a.GetName().Name == "YukkuriMovieMaker");
             if (host is null)
             {
-                status = "YMM4 is not loaded; offline writer checks remain available.";
+                status = "YMM4が読み込まれていません（オフライン検査のみ利用できます）。";
                 return false;
             }
             if (ReferenceEquals(checkedHost, host)) return installed;
@@ -50,9 +50,9 @@ internal static class HostIntegration
             {
                 installed = false;
                 cacheAvailable = false;
-                status = $"YMM4 integration disabled: {ex.GetBaseException().Message}";
+                status = $"YMM4との連携を無効にしました: {ex.GetBaseException().Message}";
                 try { harmony.UnpatchAll(PatchId); cacheHarmony.UnpatchAll(cacheHarmony.Id); }
-                catch (Exception rollback) { status += $"; hook rollback failed: {rollback.GetBaseException().Message}"; }
+                catch (Exception rollback) { status += $"（フックの解除にも失敗しました: {rollback.GetBaseException().Message}）"; }
                 return false;
             }
         }
@@ -102,9 +102,9 @@ internal static class HostIntegration
         var expectedPath = Path.GetFullPath(Path.Combine(directory, file));
         if (!string.Equals(Path.GetFullPath(assembly.Location), expectedPath, StringComparison.OrdinalIgnoreCase)
             || assembly.ManifestModule.ModuleVersionId != Guid.Parse(mvid))
-            throw new NotSupportedException($"Unsupported loaded {file}; tested host is YMM4 4.55.1.1");
+            throw new NotSupportedException($"読み込まれた {file} は未検証の版です（検証済み: YMM4 4.55.1.1）");
         using var stream = new FileStream(expectedPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         if (Convert.ToHexString(SHA256.HashData(stream)) != sha256)
-            throw new NotSupportedException($"Unsupported {file} SHA-256; tested host is YMM4 4.55.1.1");
+            throw new NotSupportedException($"{file} のSHA-256が検証済みの版と一致しません（検証済み: YMM4 4.55.1.1）");
     }
 }

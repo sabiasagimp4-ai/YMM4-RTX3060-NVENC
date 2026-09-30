@@ -140,7 +140,7 @@ internal static class TimelineFrameCache
         {
             foreach (var target in patched)
                 try { harmony.Unpatch(target, HarmonyPatchType.All, harmony.Id); } catch { }
-            reason = "Cache hook rejected: " + error.GetBaseException().Message;
+            reason = "キャッシュ用フックを接続できません: " + error.GetBaseException().Message;
             return false;
         }
     }
@@ -201,16 +201,16 @@ internal static class TimelineFrameCache
         {
             string usageName = usage.ToString() ?? string.Empty;
             bool exporting = usageName == "Exporting", playing = usageName == "Playing";
-            if (!exporting && !playing) return Bypass("Preview cache requires an unselected Playing frame.");
-            if ((bool)needRects.GetValue(__instance)!) return Bypass("Live item metadata is required.");
+            if (!exporting && !playing) return Bypass("プレビューのキャッシュは通常再生用の描画だけが対象です。");
+            if ((bool)needRects.GetValue(__instance)!) return Bypass("アイテムの表示枠が必要な描画のため、通常描画を使用します。");
             var scene = (Scene)sceneField.GetValue(__instance)!;
-            if (scene.ParentScenes.Length != 0) return Bypass("Nested scene is not cacheable.");
+            if (scene.ParentScenes.Length != 0) return Bypass("入れ子のシーンは通常描画を使用します。");
             var picker = pickerField.GetValue(__instance)!;
             if (picker.GetType() != pickerType || pickerType.GetFields(Instance).Any(f => f.GetValue(picker) != null))
-                return Bypass("Active item picker state is not cacheable.");
+                return Bypass("アイテム選択の操作中は通常描画を使用します。");
             var devices = (IGraphicsDevicesAndContext)devicesField.GetValue(__instance)!;
             var context = devices.DeviceContext;
-            if (!ValidContext(context)) return Bypass("Graphics context is not cacheable.");
+            if (!ValidContext(context)) return Bypass("描画コンテキストの状態が対象外のため、通常描画を使用します。");
             var state = sources.GetValue(__instance, _ => new SourceState(scene));
             if (!state.Tracker.TryCapture(out capture, out var reason)) return Bypass(reason);
             PreviewViewport? viewport = playing && TryGetPreviewViewportForSource(__instance, out var currentViewport)
@@ -246,7 +246,7 @@ internal static class TimelineFrameCache
             __state = pending;
             return true;
         }
-        catch (Exception error) { pending?.Dispose(); return Bypass("Cache bypass: " + error.GetType().Name); }
+        catch (Exception error) { pending?.Dispose(); return Bypass("キャッシュを使用しませんでした: " + error.GetType().Name); }
         finally { capture?.Dispose(); }
     }
 
@@ -270,7 +270,7 @@ internal static class TimelineFrameCache
                 lock (cacheGate) if (record != null && StillCurrent(__state))
                 {
                     store.Value.Put(__state.CacheKey, record);
-                    status = "Rendered output frame stored.";
+                    status = "描画したフレームを保存しました。";
                 }
             }
             lock (cacheGate) if (StillCurrent(__state) && sources.TryGetValue(__instance, out var current) && ReferenceEquals(current, __state.State))
@@ -282,7 +282,7 @@ internal static class TimelineFrameCache
                 current.Generation = __state.Generation;
             }
         }
-        catch (Exception error) { status = "Frame cache capture failed: " + error.GetType().Name; }
+        catch (Exception error) { status = "フレームの保存に失敗しました: " + error.GetType().Name; }
         finally { __state.Dispose(); }
     }
 
@@ -376,7 +376,7 @@ internal static class TimelineFrameCache
                 {
                     if (record is null || !capture.Validate() || !Enabled) return false;
                     store.Value.Put(key, record);
-                    status = viewport is null ? "Rendered output frame primed." : "Rendered preview frame primed.";
+                    status = viewport is null ? "出力フレームを先読みしました。" : "プレビューのフレームを先読みしました。";
                     return true;
                 }
             }

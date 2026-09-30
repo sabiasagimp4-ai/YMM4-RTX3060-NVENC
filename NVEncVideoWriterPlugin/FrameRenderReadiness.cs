@@ -92,7 +92,7 @@ internal static class FrameRenderReadiness
     {
         if (Installed)
         {
-            reason = "Render readiness hook rejected: already installed.";
+            reason = "動画の完成判定は既に接続されています。";
             return false;
         }
         try
@@ -115,7 +115,7 @@ internal static class FrameRenderReadiness
         catch (Exception error)
         {
             Volatile.Write(ref coverage, []);
-            reason = "Render readiness hook rejected: " + error.GetBaseException().Message;
+            reason = "動画の完成判定を接続できません: " + error.GetBaseException().Message;
             return false;
         }
     }
@@ -126,7 +126,7 @@ internal static class FrameRenderReadiness
         if (Installed)
         {
             // Never touch the live install from a rejected call.
-            reason = "Render readiness hook rejected: already installed.";
+            reason = "動画の完成判定は既に接続されています。";
             return false;
         }
         var added = new List<(MethodBase Target, MethodInfo Patch)>();
@@ -169,7 +169,7 @@ internal static class FrameRenderReadiness
             for (int i = added.Count - 1; i >= 0; i--)
                 try { harmony.Unpatch(added[i].Target, added[i].Patch); } catch { }
             Volatile.Write(ref decoders, []);
-            reason = "Render readiness hook rejected: " + error.GetBaseException().Message;
+            reason = "動画の完成判定を接続できません: " + error.GetBaseException().Message;
             return false;
         }
     }

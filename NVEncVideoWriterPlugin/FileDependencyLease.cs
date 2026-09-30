@@ -33,7 +33,7 @@ internal sealed class FileDependencyLease : IDisposable
         long maxHashBytes, out FileDependencyLease? lease, out string reason, CancellationToken cancellationToken = default)
     {
         lease = null;
-        reason = "External file validation failed.";
+        reason = "外部素材を検証できませんでした。";
         var candidate = new FileDependencyLease();
         try
         {
@@ -44,11 +44,11 @@ internal sealed class FileDependencyLease : IDisposable
                 string path = Path.GetFullPath(suppliedPath);
                 if (candidate.files.ContainsKey(path)) continue;
                 if (candidate.files.Count == 256) { reason = "External file count exceeds 256."; return false; }
-                if (!IsLocalPlainPath(path)) { reason = "External files require local fixed drives without reparse points."; return false; }
+                if (!IsLocalPlainPath(path)) { reason = "外部素材はリンクを含まないローカル固定ドライブ上にある必要があります。"; return false; }
                 var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
                 candidate.files.Add(path, file);
                 if (!IsNtfs(file.SafeFileHandle) || !TryStamp(file.SafeFileHandle, out var stamp))
-                { reason = "External file identity requires a regular NTFS file."; return false; }
+                { reason = "外部素材はNTFS上の通常ファイルである必要があります。"; return false; }
                 string hash;
                 FileFingerprint? previous = null;
                 bool reused = prior is not null && prior.TryGetValue(path, out previous) && previous.Stamp == stamp;
@@ -59,7 +59,7 @@ internal sealed class FileDependencyLease : IDisposable
                 else
                 {
                     bytes = checked(bytes + stamp.Length);
-                    if (bytes > maxHashBytes) { reason = "External file size exceeds the fingerprint budget."; return false; }
+                    if (bytes > maxHashBytes) { reason = "外部素材のサイズが内容確認の上限を超えています。"; return false; }
                     using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
                     byte[] buffer = new byte[64 * 1024];
                     int count;

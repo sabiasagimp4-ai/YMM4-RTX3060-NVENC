@@ -100,7 +100,7 @@ internal sealed class KeyDependencyTracker : IDisposable
                     }
                     else
                     {
-                        cachedReason = "External file fingerprinting failed; retrying shortly.";
+                        cachedReason = "外部素材の内容確認に失敗しました。しばらくして再試行します。";
                         nextFingerprintAttempt = Environment.TickCount64 + 1000;
                     }
                 }
@@ -134,7 +134,7 @@ internal sealed class KeyDependencyTracker : IDisposable
             else if (now >= nextFingerprintAttempt)
                 nextFingerprintAttempt = now + 250;
             reason = now < nextFingerprintAttempt && !string.IsNullOrEmpty(cachedReason)
-                ? cachedReason : "External file fingerprinting is being prepared; using the host renderer.";
+                ? cachedReason : "外部素材の内容確認を準備中のため、通常描画を使用します。";
             return false;
         }
     }

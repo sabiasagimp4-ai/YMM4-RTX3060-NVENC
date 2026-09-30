@@ -28,7 +28,7 @@ internal static class FrameCacheKey
         if (!TryDescribe(scene, out string model, out string[] paths, out reason)) return false;
         hasExternalDependencies = paths.Length != 0;
         if (hasExternalDependencies)
-            return Bypass("External dependencies require background fingerprinting through KeyDependencyTracker.", out reason);
+            return Bypass("外部素材は背景での内容確認が必要です。", out reason);
         try
         {
             key = FromFingerprints(model, new Dictionary<string, FileFingerprint>());
