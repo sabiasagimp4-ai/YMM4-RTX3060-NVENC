@@ -8,11 +8,13 @@ namespace NVEncVideoWriterPlugin;
 internal sealed class KeyDependencyTracker : IDisposable
 {
     private const long MaximumFingerprintBytes = 512L * 1024 * 1024;
+    private const long SettleMilliseconds = 250;
     private static readonly SemaphoreSlim FingerprintSlot = new(1, 1);
     private readonly Scene scene;
     private readonly object gate = new();
     private readonly List<Action> unsubscribe = [];
     private long revision;
+    private long lastInvalidated = long.MinValue / 2;
     private long cachedRevision = -1;
     private string cachedKey = string.Empty;
     private string cachedReason = string.Empty;
@@ -42,18 +44,28 @@ internal sealed class KeyDependencyTracker : IDisposable
         using (capture) { key = capture!.Key; return capture.Validate(); }
     }
 
-    public bool TryCapture(out KeyCapture? capture, out string reason)
+    public bool TryCapture(out KeyCapture? capture, out string reason) => TryCapture(out capture, out reason, settle: false);
+
+    // settle: the render path passes true so that continuous edits (every one changes the whole-project key)
+    // do not re-describe the model on every frame; it bypasses until edits have paused for a moment.
+    public bool TryCapture(out KeyCapture? capture, out string reason, bool settle)
     {
         lock (gate)
         {
             capture = null;
             reason = "描画キャッシュの状態監視は終了しています。";
             if (disposed) return false;
-            if (cachedRevision >= 0 && (!scene.ParentScenes.AsSpan().SequenceEqual(cachedParents)
+            // Only when still current: repeating it would keep refreshing the settle window forever.
+            if (cachedRevision >= 0 && cachedRevision == Revision && (!scene.ParentScenes.AsSpan().SequenceEqual(cachedParents)
                 || !FrameCacheKey.SourceReadersMatch(cachedSourceReaders))) Invalidate();
             long before = Revision;
             if (cachedRevision != before)
             {
+                if (settle && cachedRevision >= 0 && Environment.TickCount64 - Volatile.Read(ref lastInvalidated) < SettleMilliseconds)
+                {
+                    reason = "編集中のため、通常描画を使用します。";
+                    return false;
+                }
                 Type[][] sourceReaders;
                 try { sourceReaders = FrameCacheKey.CaptureSourceReaderTypes(); }
                 catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
@@ -148,6 +160,7 @@ internal sealed class KeyDependencyTracker : IDisposable
     private void Invalidate()
     {
         Interlocked.Increment(ref revision);
+        Volatile.Write(ref lastInvalidated, Environment.TickCount64);
         // Cancellation is checked between 64 KiB reads; never wait for file I/O from an editor event.
         try { Volatile.Read(ref fingerprintCancellation)?.Cancel(); } catch (ObjectDisposedException) { }
         try { Invalidated?.Invoke(); } catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { }

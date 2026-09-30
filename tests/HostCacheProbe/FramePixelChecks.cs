@@ -96,6 +96,9 @@ internal static class FramePixelChecks
                 oldHits = TimelineFrameCache.Hits;
                 source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
                 Check(TimelineFrameCache.Hits == oldHits, "Background edit reused stale output");
+                Thread.Sleep(300); // the render path waits for edits to settle before re-describing the model
+                source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                Check(TimelineFrameCache.Hits == oldHits, "Edited frame was reused before it was re-rendered");
                 source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
                 Check(TimelineFrameCache.Hits == oldHits + 1, "Re-rendered frame after an edit was not reused");
                 // Clear invalidates the live frame and the store; reuse resumes after one render.

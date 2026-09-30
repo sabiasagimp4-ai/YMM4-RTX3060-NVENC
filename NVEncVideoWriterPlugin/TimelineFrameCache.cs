@@ -212,7 +212,7 @@ internal static class TimelineFrameCache
             var context = devices.DeviceContext;
             if (!ValidContext(context)) return Bypass("描画コンテキストの状態が対象外のため、通常描画を使用します。");
             var state = sources.GetValue(__instance, _ => new SourceState(scene));
-            if (!state.Tracker.TryCapture(out capture, out var reason)) return Bypass(reason);
+            if (!state.Tracker.TryCapture(out capture, out var reason, settle: true)) return Bypass(reason);
             PreviewViewport? viewport = playing && TryGetPreviewViewportForSource(__instance, out var currentViewport)
                 && currentViewport.SceneId == scene.ID && currentViewport.TimelineId == scene.Timeline.ID ? currentViewport : null;
             string liveKey = MakeKey(capture!.Key, time, usage, context, null);
