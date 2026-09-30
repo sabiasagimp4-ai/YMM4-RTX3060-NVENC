@@ -27,6 +27,7 @@ internal static class TimelineFrameCache
     private static readonly ConditionalWeakTable<object, SourceState> sources = new();
     private static readonly ConditionalWeakTable<object, PlayerAssociation> sourcePlayers = new();
     private static readonly ConditionalWeakTable<Timeline, LatestViewport> latestViewports = new();
+    private static readonly ConditionalWeakTable<ID2D1DeviceContext, string> renderEnvironments = new();
     private static readonly object cacheGate = new();
     private static readonly Lazy<FrameCacheStore> store = new(() => new FrameCacheStore(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YMM4-RTX3060-NVENC", "cache")));
@@ -289,11 +290,29 @@ internal static class TimelineFrameCache
 
     private static string MakeKey(string model, TimeSpan time, object usage, ID2D1DeviceContext context, PreviewViewport? viewport)
     {
-        string value = $"pixels-v3|{model}|{time.Ticks}|{usage}|{context.AntialiasMode}|{context.TextAntialiasMode}|{context.PrimitiveBlend}";
+        string value = $"pixels-v4|{RenderEnvironment(context)}|{model}|{time.Ticks}|{usage}|{context.AntialiasMode}|{context.TextAntialiasMode}|{context.PrimitiveBlend}";
         if (viewport is { } view)
             value += $"|{view.SceneId:N}|{view.TimelineId:N}|{view.Width}|{view.Height}|{Bits(view.Transform.M11)}|{Bits(view.Transform.M12)}|{Bits(view.Transform.M21)}|{Bits(view.Transform.M22)}|{Bits(view.Transform.M31)}|{Bits(view.Transform.M32)}|{Bits(view.TargetOffset.X)}|{Bits(view.TargetOffset.Y)}|{Bits(view.DpiX)}|{Bits(view.DpiY)}|{view.BackBufferFormat.Format}|{view.BackBufferFormat.AlphaMode}|{view.AntialiasMode}|{view.TextAntialiasMode}|{view.PrimitiveBlend}|{view.UnitMode}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     }
+
+    // Stored pixels outlive the process: rasterization may differ between GPUs, drivers and plugin builds.
+    // Failure to identify the adapter throws, which callers treat as a cache bypass.
+    private static string RenderEnvironment(ID2D1DeviceContext context) => renderEnvironments.GetValue(context, static value =>
+    {
+        using var probe = value.CreateBitmap(new SizeI(1, 1), new BitmapProperties1(
+            new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied), 96, 96, BitmapOptions.Target));
+        using var surface = probe.Surface ?? throw new NotSupportedException("Render target has no DXGI surface");
+        using var device = surface.GetDevice<IDXGIDevice>();
+        using var adapter = device.GetAdapter();
+        var description = adapter.Description;
+        var invariant = System.Globalization.CultureInfo.InvariantCulture;
+        // IDXGIDevice is the documented way to read the user-mode driver version from DXGI.
+        string driver = adapter.CheckInterfaceSupport<IDXGIDevice>(out long version) ? version.ToString("X16", invariant) : "unknown";
+        return string.Join(':', description.VendorId.ToString("X4", invariant), description.DeviceId.ToString("X4", invariant),
+            description.SubsystemId.ToString("X8", invariant), description.Revision.ToString("X2", invariant), description.Description,
+            driver, typeof(TimelineFrameCache).Assembly.ManifestModule.ModuleVersionId.ToString("N"));
+    });
 
     private static string Bits(float value) => BitConverter.SingleToInt32Bits(value).ToString("X8", System.Globalization.CultureInfo.InvariantCulture);
 

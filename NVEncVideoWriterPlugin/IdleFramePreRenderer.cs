@@ -199,7 +199,7 @@ internal static class IdleFramePreRenderer
                 {
                     if (!CanContinue(current, job.Token, anchorFrame)
                         || !TimelineFrameCache.TryGetLatestPreviewViewport(current.Info.Timeline, current.Info.Scenes, out var latestViewport)
-                        || latestViewport != viewport || !IsViewportFresh(latestViewport) || latestViewport.IsPlaying)
+                        || !SameView(latestViewport, viewport) || !IsViewportFresh(latestViewport) || latestViewport.IsPlaying)
                         return;
                     if (!TryCapturePair(current.Tracker, cloneTracker, out var liveCapture, out var cloneCapture, out reason))
                     {
@@ -213,7 +213,7 @@ internal static class IdleFramePreRenderer
                         var time = FrameTime(frame, fps);
                         source.Update(time, TimelineSourceUsage.Playing);
                         if (!CanContinue(current, job.Token, anchorFrame)) return;
-                        if (TryPrimeIfCurrent(job.Token, current.LiveScene, cloneScene, source, time, viewport, liveCapture, cloneCapture))
+                        if (TryPrimeIfCurrent(job.Token, current.LiveScene, cloneScene, source, time, latestViewport, liveCapture, cloneCapture))
                             rendered++;
                         Volatile.Write(ref current.NextFrame, frame + 1);
                     }
@@ -276,6 +276,10 @@ internal static class IdleFramePreRenderer
         && Volatile.Read(ref current.IsBusy) == 0
         && ReferenceEquals(Volatile.Read(ref session), current)
         && current.Info.Timeline.CurrentFrame == anchorFrame;
+
+    // A redraw of the same view only refreshes the timestamp; it must not abort the batch.
+    private static bool SameView(TimelineFrameCache.PreviewViewport latest, TimelineFrameCache.PreviewViewport expected) =>
+        latest with { LastDrawTimestamp = 0 } == expected with { LastDrawTimestamp = 0 };
 
     private static bool IsViewportFresh(TimelineFrameCache.PreviewViewport viewport) =>
         viewport.LastDrawTimestamp != 0 && Stopwatch.GetElapsedTime(viewport.LastDrawTimestamp) <= TimeSpan.FromSeconds(10);
