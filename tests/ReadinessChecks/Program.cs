@@ -13,6 +13,7 @@ using YukkuriMovieMaker.Plugin.FileSource;
 internal static class Program
 {
     private const string Owner = "ymm.tests.readiness";
+    private static readonly List<string> emitted = [];
     internal static readonly TimeSpan Frame = TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 30);
     private static readonly MethodBase[] VideoSourceUpdates =
     [
@@ -71,7 +72,13 @@ internal static class Program
             Console.WriteLine("Render readiness host binding: MF2/legacy/wrapper/unverified sources and late-loaded coverage OK");
             return 0;
         }
-        finally { FrameRenderReadiness.Uninstall(harmony); harmony.UnpatchAll(Owner); }
+        finally
+        {
+            FrameRenderReadiness.Uninstall(harmony);
+            harmony.UnpatchAll(Owner);
+            // Loaded assemblies stay locked on Windows; leftovers in bin/ are harmless and never loaded.
+            foreach (var path in emitted) try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
     }
 
     private static void CheckRollbackOnExternalOwner(Harmony harmony, MethodBase update)
@@ -291,30 +298,95 @@ internal static class Program
         Render(root, Frame);
         Check(FrameRenderReadiness.WasLastUpdateReady(root, Frame), "Precondition: verified source ready before late load");
 
+        // A built-in assembly loaded mid-frame is hooked, but the frame that spans the change is unverified.
+        string lateVerified = EmitLateAssembly(generic: false);
+        Assembly? late = null;
+        root.During = _ => late ??= Assembly.LoadFrom(lateVerified);
+        Render(root, Frame * 2);
+        root.During = null;
+        Check(late is not null && CacheLike.Last(root) == false && !FrameRenderReadiness.WasLastUpdateReady(root, Frame * 2),
+            "A frame spanning a late hook change must be unverified");
+        Check(FrameRenderReadiness.CoverageProblem is null, "Hookable late sources must not stop caching: " + FrameRenderReadiness.CoverageProblem);
+        var coverage = FrameRenderReadiness.Coverage;
+        Check(coverage.Any(line => line.StartsWith("Late.LateMf2Source: MF2", StringComparison.Ordinal))
+            && coverage.Any(line => line.StartsWith("Late.LateOddSource: unverified", StringComparison.Ordinal)),
+            "Late sources were not classified: " + string.Join(" | ", coverage));
+        foreach (var name in new[] { "Late.LateMf2Source", "Late.LateOddSource" })
+            Check(Harmony.GetPatchInfo(late!.GetType(name, true)!.GetMethod("Update")!)?.Finalizers.Count == 1, name + " was not hooked");
+
+        Render(root, Frame * 3);
+        Check(FrameRenderReadiness.WasLastUpdateReady(root, Frame * 3), "Frames after the late hook must be verifiable again");
+        var lateMf2 = (IVideoFileSource)Activator.CreateInstance(late!.GetType("Late.LateMf2Source", true)!)!;
+        var lateOdd = (IVideoFileSource)Activator.CreateInstance(late.GetType("Late.LateOddSource", true)!)!;
+        var mixed = Scene(decoders: 0);
+        mixed.Sources.Add(lateMf2);
+        Render(mixed, Frame * 4);
+        Check(FrameRenderReadiness.WasLastUpdateReady(mixed, Frame * 4), "Late MF2-shaped source that decoded must be ready");
+        mixed.Sources.Add(lateOdd);
+        Render(mixed, Frame * 5);
+        Check(!FrameRenderReadiness.WasLastUpdateReady(mixed, Frame * 5), "Late unverified source reported ready");
+
+        // A late source that cannot be hooked makes every later frame unverified.
+        Assembly.LoadFrom(EmitLateAssembly(generic: true));
+        Check(FrameRenderReadiness.CoverageProblem?.Contains("LateGenericSource") == true,
+            "Unhookable late source was not reported: " + FrameRenderReadiness.CoverageProblem);
+        Render(root, Frame * 6);
+        Check(CacheLike.Last(root) == false && !FrameRenderReadiness.WasLastUpdateReady(root, Frame * 6),
+            "Frames must not be ready once an unhookable built-in video source can exist");
+    }
+
+    // Emits a real on-disk assembly that the binder treats as built-in (name prefix, host directory).
+    private static string EmitLateAssembly(bool generic)
+    {
         string directory = Path.GetDirectoryName(typeof(Program).Assembly.Location)!;
         string name = "YukkuriMovieMaker.Plugin.FileSource.Late" + Guid.NewGuid().ToString("N")[..8];
-        string path = Path.Combine(directory, name + ".dll");
         var builder = new PersistedAssemblyBuilder(new AssemblyName(name), typeof(object).Assembly);
-        var type = builder.DefineDynamicModule(name).DefineType("Late.LateVideoSource",
-            TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.Class);
-        type.AddInterfaceImplementation(typeof(IVideoFileSource));
-        type.DefineDefaultConstructor(MethodAttributes.Public);
-        var update = type.DefineMethod(nameof(IVideoFileSource.Update), MethodAttributes.Public | MethodAttributes.Virtual
-            | MethodAttributes.Final | MethodAttributes.HideBySig | MethodAttributes.NewSlot, typeof(void), [typeof(TimeSpan)]);
-        update.GetILGenerator().Emit(OpCodes.Ret);
-        type.DefineMethodOverride(update, typeof(IVideoFileSource).GetMethod(nameof(IVideoFileSource.Update))!);
-        type.CreateType();
-        builder.Save(path);
-        try
+        var module = builder.DefineDynamicModule(name);
+        var interfaceUpdate = typeof(IVideoFileSource).GetMethod(nameof(IVideoFileSource.Update))!;
+        const MethodAttributes implementation = MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.Final
+            | MethodAttributes.HideBySig | MethodAttributes.NewSlot;
+        TypeBuilder Source(string typeName)
         {
-            Assembly.LoadFrom(path);
-            Check(FrameRenderReadiness.CoverageProblem?.Contains("Late.LateVideoSource") == true,
-                "Late-loaded built-in video source was not reported: " + FrameRenderReadiness.CoverageProblem);
-            Render(root, Frame * 2);
-            Check(CacheLike.Last(root) == false && !FrameRenderReadiness.WasLastUpdateReady(root, Frame * 2),
-                "Frames must not be ready once an unhooked built-in video source can exist");
+            var type = module.DefineType(typeName, TypeAttributes.Public | TypeAttributes.Sealed | TypeAttributes.Class);
+            type.AddInterfaceImplementation(typeof(IVideoFileSource));
+            type.DefineDefaultConstructor(MethodAttributes.Public);
+            return type;
         }
-        finally { try { File.Delete(path); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+        if (generic)
+        {
+            var type = Source("Late.LateGenericSource");
+            type.DefineGenericParameters("T");
+            var update = type.DefineMethod(nameof(IVideoFileSource.Update), implementation, typeof(void), [typeof(TimeSpan)]);
+            update.GetILGenerator().Emit(OpCodes.Ret);
+            type.DefineMethodOverride(update, interfaceUpdate);
+            type.CreateType();
+        }
+        else
+        {
+            var odd = Source("Late.LateOddSource");
+            var oddUpdate = odd.DefineMethod(nameof(IVideoFileSource.Update), implementation, typeof(void), [typeof(TimeSpan)]);
+            oddUpdate.GetILGenerator().Emit(OpCodes.Ret);
+            odd.DefineMethodOverride(oddUpdate, interfaceUpdate);
+            odd.CreateType();
+
+            var mf2 = Source("Late.LateMf2Source");
+            var frame = mf2.DefineField("decodedFrame", typeof(DecodedFrame), FieldAttributes.Private);
+            var update = mf2.DefineMethod(nameof(IVideoFileSource.Update), implementation, typeof(void), [typeof(TimeSpan)]);
+            var il = update.GetILGenerator();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarga_S, (byte)1);
+            il.Emit(OpCodes.Call, typeof(TimeSpan).GetProperty(nameof(TimeSpan.Ticks))!.GetMethod!);
+            il.Emit(OpCodes.Ldc_I8, Frame.Ticks);
+            il.Emit(OpCodes.Newobj, typeof(DecodedFrame).GetConstructor([typeof(long), typeof(long)])!);
+            il.Emit(OpCodes.Stfld, frame);
+            il.Emit(OpCodes.Ret);
+            mf2.DefineMethodOverride(update, interfaceUpdate);
+            mf2.CreateType();
+        }
+        string path = Path.Combine(directory, name + ".dll");
+        builder.Save(path);
+        emitted.Add(path);
+        return path;
     }
 
     private static TimelineSource Scene(int decoders, TimelineSource[]? children = null)
@@ -399,7 +471,8 @@ namespace YukkuriMovieMaker.Plugin.FileSource
 
     internal enum VideoMode { Decode, Stale, Clear, Throw }
 
-    internal sealed class DecodedFrame(long sampleTime, long sampleDuration)
+    // Public so that emitted late-loaded sources can construct it.
+    public sealed class DecodedFrame(long sampleTime, long sampleDuration)
     {
         public long SampleTime { get; } = sampleTime;
         public long SampleDuration { get; } = sampleDuration;

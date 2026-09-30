@@ -91,6 +91,16 @@ internal static class FramePixelChecks
                 oldHits = TimelineFrameCache.Hits;
                 source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
                 Check(TimelineFrameCache.Hits == oldHits, "Background edit reused stale output");
+                source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                Check(TimelineFrameCache.Hits == oldHits + 1, "Re-rendered frame after an edit was not reused");
+                // Clear invalidates the live frame and the store; reuse resumes after one render.
+                TimelineFrameCache.Clear();
+                oldHits = TimelineFrameCache.Hits;
+                long oldMisses = TimelineFrameCache.Misses;
+                source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                Check(TimelineFrameCache.Hits == oldHits && TimelineFrameCache.Misses == oldMisses + 1, "Clear did not invalidate the live frame");
+                source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                Check(TimelineFrameCache.Hits == oldHits + 1, "Reuse did not resume after Clear");
             }
             Check(TimelineFrameCache.GpuBytes == 0, "Source disposal leaked global GPU reservation");
             Console.WriteLine("Actual host automatic source cache: hit/parity/invalidation/GPU cleanup OK");

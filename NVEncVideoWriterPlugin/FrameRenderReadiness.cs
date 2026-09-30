@@ -18,33 +18,52 @@ internal static class FrameRenderReadiness
     private static readonly ConditionalWeakTable<object, UpdateResult> lastResults = new();
     private static Dictionary<RuntimeMethodHandle, DecoderCheck> decoders = [];
     private static (MethodBase Target, MethodInfo Patch)[] installedPatches = [];
+    private static readonly object patchGate = new();
     private static string[] coverage = [];
-    private static HostScan? scan;
+    private static HostBinding? binding;
     private static string? coverageProblem;
     private static int installed;
+    // Odd while a late-loaded video source is being hooked. A frame is verified only if the epoch it
+    // started in is even and still current, so no frame spanning a hook change counts as ready.
+    private static int bindEpoch;
 
     // Returns whether the decoded frame the decoder now holds covers the requested time.
     internal sealed record DecoderCheck(string Name, MethodBase Update, Func<object, TimeSpan, bool> HoldsFrame);
 
-    private sealed class Scope(object source, TimeSpan time, Scope? parent)
+    private sealed class Scope(object source, TimeSpan time, Scope? parent, int epoch)
     {
         internal readonly object Source = source;
         internal readonly TimeSpan Time = time;
         internal readonly Scope? Parent = parent;
+        internal readonly int Epoch = epoch;
         internal int Failed;
         internal int Completed;
     }
 
     private sealed record UpdateResult(bool Ready, TimeSpan Time);
 
-    private sealed record HostScan(Type VideoSource, string HostDirectory, HashSet<string> Assemblies);
+    private sealed class HostBinding(Harmony harmony, Type videoSource, MethodInfo interfaceUpdate, string hostDirectory)
+    {
+        internal readonly object Gate = new();
+        internal readonly Harmony Harmony = harmony;
+        internal readonly Type VideoSource = videoSource;
+        internal readonly MethodInfo InterfaceUpdate = interfaceUpdate;
+        internal readonly string HostDirectory = hostDirectory;
+        internal readonly HashSet<string> Assemblies = new(StringComparer.Ordinal);
+        internal readonly ConcurrentDictionary<Type, Func<object, TimeSpan, bool>> Verified = new();
+        internal readonly ConcurrentDictionary<Type, Func<object, TimeSpan, bool>> Classifiers = new();
+        internal readonly List<string> Coverage = [];
+
+        internal bool HoldsFrame(object instance, TimeSpan time) =>
+            Classifiers.TryGetValue(instance.GetType(), out var holds) && holds(instance, time);
+    }
 
     internal static bool Installed => Volatile.Read(ref installed) != 0;
 
     // Human-readable classification of every hooked host video source (probe/status output).
     internal static IReadOnlyList<string> Coverage => Volatile.Read(ref coverage);
 
-    // Non-null once a video source implementation appeared that was not hooked at install time.
+    // Non-null once a video source implementation could not be hooked; no frame is ready after that.
     internal static string? CoverageProblem => Volatile.Read(ref coverageProblem);
 
     internal static string Summary
@@ -61,7 +80,9 @@ internal static class FrameRenderReadiness
     // For TimelineSource.Update postfixes: the scope is still open (finalizers run after postfixes).
     internal static bool IsUpdateReady(object timelineSource) => Installed && CoverageProblem is null
         && current.Value is { } scope && ReferenceEquals(scope.Source, timelineSource)
-        && Volatile.Read(ref scope.Completed) == 0 && Volatile.Read(ref scope.Failed) == 0;
+        && Volatile.Read(ref scope.Completed) == 0 && Volatile.Read(ref scope.Failed) == 0 && Stable(scope);
+
+    private static bool Stable(Scope scope) => (scope.Epoch & 1) == 0 && scope.Epoch == Volatile.Read(ref bindEpoch);
 
     // For callers that inspect a source after its Update returned (idle pre-render).
     internal static bool WasLastUpdateReady(object timelineSource, TimeSpan time) => Installed && CoverageProblem is null
@@ -79,10 +100,13 @@ internal static class FrameRenderReadiness
             var sourceType = host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!;
             var update = sourceType.GetMethods(Instance).Single(m => m.Name == "Update" && m.GetParameters().Length == 2
                 && m.GetParameters()[0].ParameterType == typeof(TimeSpan) && m.ReturnType == typeof(void));
-            var checks = BindHostDecoders(host, out var hostScan, out var described);
-            if (!TryInstall(update, checks, harmony, out reason)) return false;
-            Volatile.Write(ref coverage, described);
-            Volatile.Write(ref scan, hostScan);
+            var hostBinding = CreateBinding(host, harmony, out var types);
+            if (!TryInstall(update, Classify(hostBinding, types), harmony, out reason))
+            {
+                Volatile.Write(ref coverage, []);
+                return false;
+            }
+            Volatile.Write(ref binding, hostBinding);
             AppDomain.CurrentDomain.AssemblyLoad += OnAssemblyLoad;
             // Close the window between scanning loaded assemblies and subscribing.
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies()) NoteAssemblyLoaded(assembly);
@@ -90,6 +114,7 @@ internal static class FrameRenderReadiness
         }
         catch (Exception error)
         {
+            Volatile.Write(ref coverage, []);
             reason = "Render readiness hook rejected: " + error.GetBaseException().Message;
             return false;
         }
@@ -134,7 +159,7 @@ internal static class FrameRenderReadiness
                 harmony.Patch(check.Update, finalizer: new HarmonyMethod(decoderFinalizer, Priority.Last));
                 added.Add((check.Update, decoderFinalizer));
             }
-            installedPatches = [.. added];
+            lock (patchGate) installedPatches = [.. added];
             Volatile.Write(ref installed, 1);
             reason = string.Empty;
             return true;
@@ -154,12 +179,13 @@ internal static class FrameRenderReadiness
     {
         Volatile.Write(ref installed, 0);
         AppDomain.CurrentDomain.AssemblyLoad -= OnAssemblyLoad;
-        var patches = Interlocked.Exchange(ref installedPatches, []);
+        (MethodBase Target, MethodInfo Patch)[] patches;
+        lock (patchGate) { patches = installedPatches; installedPatches = []; }
         for (int i = patches.Length - 1; i >= 0; i--)
             try { harmony.Unpatch(patches[i].Target, patches[i].Patch); } catch { }
         Volatile.Write(ref decoders, []);
         Volatile.Write(ref coverage, []);
-        Volatile.Write(ref scan, null);
+        Volatile.Write(ref binding, null);
         Volatile.Write(ref coverageProblem, null);
         active.Clear();
     }
@@ -178,7 +204,7 @@ internal static class FrameRenderReadiness
     {
         __state = null;
         if (!Installed || __args is not [TimeSpan time, ..]) return;
-        var scope = new Scope(__instance, time, current.Value);
+        var scope = new Scope(__instance, time, current.Value, Volatile.Read(ref bindEpoch));
         active[scope] = 0;
         current.Value = scope;
         __state = scope;
@@ -192,7 +218,7 @@ internal static class FrameRenderReadiness
             if (__exception is not null) Fail(__state);
             Volatile.Write(ref __state.Completed, 1);
             active.TryRemove(__state, out _);
-            lastResults.AddOrUpdate(__instance, new UpdateResult(Volatile.Read(ref __state.Failed) == 0, __state.Time));
+            lastResults.AddOrUpdate(__instance, new UpdateResult(Volatile.Read(ref __state.Failed) == 0 && Stable(__state), __state.Time));
         }
         catch { Fail(__state); lastResults.Remove(__instance); }
         finally { current.Value = __state.Parent; }
@@ -232,28 +258,39 @@ internal static class FrameRenderReadiness
     private static void OnAssemblyLoad(object? sender, AssemblyLoadEventArgs args) => NoteAssemblyLoaded(args.LoadedAssembly);
 
     // Built-in readers are trusted by FrameCacheKey, so a built-in assembly loaded after the scan could
-    // decode through a video source that was never hooked. Once that is possible, no frame is ready.
+    // decode through a video source that was never hooked. Its sources are hooked on load; frames that
+    // overlap the change are unverified, and a source that cannot be hooked stops all storing.
     // (Non-built-in readers are excluded earlier: FrameCacheKey bypasses file-backed scenes when they exist.)
     internal static void NoteAssemblyLoaded(Assembly assembly)
     {
-        if (Volatile.Read(ref scan) is not { } hostScan || !IsBuiltInAssembly(assembly, hostScan.HostDirectory)) return;
-        lock (hostScan.Assemblies) if (!hostScan.Assemblies.Add(assembly.FullName ?? string.Empty)) return;
-        try
+        if (Volatile.Read(ref binding) is not { } hostBinding || !IsBuiltInAssembly(assembly, hostBinding.HostDirectory)) return;
+        lock (hostBinding.Gate)
         {
-            var late = LoadableTypes(assembly, strict: true)
-                .FirstOrDefault(type => !type.IsInterface && hostScan.VideoSource.IsAssignableFrom(type));
-            if (late is null) return;
-            Volatile.Write(ref coverageProblem, $"起動後に読み込まれた動画ソース {late.FullName} を検証できないため、キャッシュ保存を停止しました。YMM4の再起動で再度有効になります。");
-        }
-        catch (Exception error) when (error is not OutOfMemoryException)
-        {
-            Volatile.Write(ref coverageProblem, $"起動後に読み込まれた {assembly.GetName().Name} の動画ソースを検査できないため、キャッシュ保存を停止しました。");
+            if (!hostBinding.Assemblies.Add(assembly.FullName ?? string.Empty)) return;
+            Interlocked.Increment(ref bindEpoch);
+            try
+            {
+                var patch = Method(nameof(DecoderFinalizer));
+                foreach (var check in Classify(hostBinding, Implementations(hostBinding.VideoSource, LoadableTypes(assembly, strict: true))))
+                {
+                    EnsureNoExternalHarmonyOwners(check.Update, hostBinding.Harmony.Id);
+                    Volatile.Write(ref decoders, new Dictionary<RuntimeMethodHandle, DecoderCheck>(Volatile.Read(ref decoders))
+                    {
+                        [check.Update.MethodHandle] = check,
+                    });
+                    hostBinding.Harmony.Patch(check.Update, finalizer: new HarmonyMethod(patch, Priority.Last));
+                    lock (patchGate) installedPatches = [.. installedPatches, (check.Update, patch)];
+                }
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                Volatile.Write(ref coverageProblem, $"起動後に読み込まれた {assembly.GetName().Name} の動画ソースを検証できないため、キャッシュ保存を停止しました: {error.GetBaseException().Message}");
+            }
+            finally { Interlocked.Increment(ref bindEpoch); }
         }
     }
 
-    // Every built-in IVideoFileSource implementation is hooked. Only shapes whose "holds the requested
-    // sample" state is understood are verifiable; every other implementation makes its frames unverified.
-    private static IReadOnlyList<DecoderCheck> BindHostDecoders(Assembly host, out HostScan hostScan, out string[] described)
+    private static HostBinding CreateBinding(Assembly host, Harmony harmony, out Type[] implementations)
     {
         string hostDirectory = Path.GetDirectoryName(Path.GetFullPath(host.Location))
             ?? throw new NotSupportedException("Host directory is unknown");
@@ -266,36 +303,54 @@ internal static class FrameRenderReadiness
         var videoSource = interfaces[0];
         var interfaceUpdate = new[] { videoSource }.Concat(videoSource.GetInterfaces()).SelectMany(i => i.GetMethods())
             .Single(m => m.Name == "Update" && m.ReturnType == typeof(void) && m.GetParameters() is [{ ParameterType: var p }] && p == typeof(TimeSpan));
+        var hostBinding = new HostBinding(harmony, videoSource, interfaceUpdate, hostDirectory);
+        foreach (var assembly in assemblies) hostBinding.Assemblies.Add(assembly.FullName ?? string.Empty);
+        implementations = Implementations(videoSource, types);
+        return hostBinding;
+    }
+
+    private static Type[] Implementations(Type videoSource, IEnumerable<Type> types)
+    {
         var implementations = types.Where(type => !type.IsInterface && videoSource.IsAssignableFrom(type) && !type.IsAbstract)
             .OrderBy(type => type.FullName, StringComparer.Ordinal).ToArray();
         if (implementations.FirstOrDefault(type => !type.IsClass || type.ContainsGenericParameters) is { } unsupported)
             throw new NotSupportedException($"Video source {unsupported.FullName} cannot be hooked");
+        return implementations;
+    }
 
-        var verified = new Dictionary<Type, Func<object, TimeSpan, bool>>();
+    // Every built-in IVideoFileSource implementation is hooked. Only shapes whose "holds the requested
+    // sample" state is understood are verifiable; every other implementation makes its frames unverified.
+    // Returns checks for Update bodies that are not hooked yet (inherited bodies are shared).
+    private static List<DecoderCheck> Classify(HostBinding hostBinding, Type[] types)
+    {
+        var targets = types.ToDictionary(type => type, type => ImplementationOf(type, hostBinding.InterfaceUpdate));
         var names = new Dictionary<Type, string>();
-        foreach (var type in implementations)
+        foreach (var type in types)
         {
-            if (DescribeMf2(type) is { } mf2) { verified[type] = mf2.Holds; names[type] = mf2.Name; }
-            else if (DescribeLegacy(type) is { } legacy) { verified[type] = legacy.Holds; names[type] = legacy.Name; }
+            if (DescribeMf2(type) is { } mf2) { hostBinding.Verified[type] = mf2.Holds; names[type] = mf2.Name; }
+            else if (DescribeLegacy(type) is { } legacy) { hostBinding.Verified[type] = legacy.Holds; names[type] = legacy.Name; }
         }
-        var classifiers = new Dictionary<Type, Func<object, TimeSpan, bool>>(verified);
-        foreach (var type in implementations.Where(type => !verified.ContainsKey(type)))
+        foreach (var type in types)
         {
-            if (DescribeWrapper(type, videoSource, verified) is { } wrapper) { classifiers[type] = wrapper.Holds; names[type] = wrapper.Name; }
-            else { classifiers[type] = static (_, _) => false; names[type] = "unverified (frames using it are never stored)"; }
+            if (hostBinding.Verified.TryGetValue(type, out var verified)) hostBinding.Classifiers[type] = verified;
+            else if (DescribeWrapper(type, hostBinding.VideoSource, hostBinding.Verified) is { } wrapper)
+            {
+                hostBinding.Classifiers[type] = wrapper.Holds;
+                names[type] = wrapper.Name;
+            }
+            else
+            {
+                hostBinding.Classifiers[type] = static (_, _) => false;
+                names[type] = "unverified (frames using it are never stored)";
+            }
         }
-
-        var checks = new List<DecoderCheck>();
-        foreach (var group in implementations.GroupBy(type => ImplementationOf(type, interfaceUpdate), MethodHandleComparer.Instance))
-        {
-            string name = string.Join(", ", group.Select(type => $"{type.FullName}: {names[type]}"));
-            checks.Add(new DecoderCheck(name, group.Key, (instance, time) =>
-                classifiers.TryGetValue(instance.GetType(), out var holds) && holds(instance, time)));
-        }
-        hostScan = new HostScan(videoSource, hostDirectory,
-            new HashSet<string>(assemblies.Select(assembly => assembly.FullName ?? string.Empty), StringComparer.Ordinal));
-        described = implementations.Select(type => $"{type.FullName}: {names[type]}").ToArray();
-        return checks;
+        hostBinding.Coverage.AddRange(types.Select(type => $"{type.FullName}: {names[type]}"));
+        Volatile.Write(ref coverage, hostBinding.Coverage.ToArray());
+        var hooked = Volatile.Read(ref decoders);
+        return types.GroupBy(type => targets[type], MethodHandleComparer.Instance)
+            .Where(group => !hooked.ContainsKey(group.Key.MethodHandle))
+            .Select(group => new DecoderCheck(string.Join(", ", group.Select(type => type.FullName)), group.Key, hostBinding.HoldsFrame))
+            .ToList();
     }
 
     private static bool IsBuiltInAssembly(Assembly assembly, string hostDirectory)
