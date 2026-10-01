@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
-using Newtonsoft.Json.Linq;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
@@ -182,20 +181,12 @@ internal static class FrameCacheKey
             model = YukkuriMovieMaker.Json.Json.GetJsonText(snapshot);
             if (model.Length > MaximumModelCharacters)
                 return Bypass("プロジェクトの描画状態がキャッシュ検査の上限を超えています。", out reason);
-            // Strings stay strings (no date parsing), so distinct texts never serialize to the same token.
-            JObject parsed;
-            using (var reader = new Newtonsoft.Json.JsonTextReader(new StringReader(model)) { DateParseHandling = Newtonsoft.Json.DateParseHandling.None })
-                parsed = JObject.Load(reader);
-            // Runtime types in polymorphic parameters/effects must also belong to the inspected host.
-            foreach (var typeProperty in parsed.Descendants().OfType<JProperty>().Where(p => p.Name == "$type"))
-            {
-                string type = typeProperty.Value.Value<string>() ?? string.Empty;
-                string assembly = type.Split(',').Skip(1).FirstOrDefault()?.Trim() ?? string.Empty;
-                if (assembly != "YukkuriMovieMaker" && assembly != "YukkuriMovieMaker.Plugin" && !IsBundledTachieParameter(typeProperty, assembly))
-                    return Bypass("外部描画パラメーターを検証できません: " + type, out reason);
-            }
+            // Runtime types in polymorphic parameters/effects must also belong to the inspected host (checked while
+            // the model is split; strings stay strings, so distinct texts never serialize to the same token).
+            if (!FrameModelSplit.TrySplit(model, scene.Timeline.ID, characterResources, IsKnownType, out var split, out string? rejected))
+                return Bypass("外部描画パラメーターを検証できません: " + rejected, out reason);
             if (paths.Count > MaximumFiles) return Bypass("外部素材の数がキャッシュ検査の上限を超えています。", out reason);
-            frames = DescribeFrames(parsed, scene.Timeline.ID, rootItems, rootDependencies, characterPaths, characterResources, nestedPaths, nestedUncacheable);
+            frames = DescribeFrames(split, rootItems, rootDependencies, characterPaths, nestedPaths, nestedUncacheable);
             dependencies = paths.ToArray();
             return true;
         }
@@ -209,11 +200,17 @@ internal static class FrameCacheKey
     // Parameters of the tachie plugins YMM4 ships (loaded from its folder) only reach TachieSource, whose frames are
     // rendered normally, so they do not disable the other frames. Elsewhere, or from a tachie plugin a user added,
     // a foreign type still bypasses.
-    private static bool IsBundledTachieParameter(JProperty typeProperty, string assemblyName)
+    private static bool IsKnownType(string type, IReadOnlyList<string> path)
+    {
+        string assembly = type.Split(',').Skip(1).FirstOrDefault()?.Trim() ?? string.Empty;
+        return assembly is "YukkuriMovieMaker" or "YukkuriMovieMaker.Plugin" || IsBundledTachieParameter(path, assembly);
+    }
+
+    // `path`: the property names from the model's root to the object holding the "$type".
+    private static bool IsBundledTachieParameter(IReadOnlyList<string> path, string assemblyName)
     {
         if (!assemblyName.StartsWith("YukkuriMovieMaker.Plugin.Tachie.", StringComparison.Ordinal)
-            || !typeProperty.Ancestors().OfType<JProperty>().Any(property =>
-                property.Name.StartsWith("Tachie", StringComparison.Ordinal) && property.Name.EndsWith("Parameter", StringComparison.Ordinal)))
+            || !path.Any(property => property.StartsWith("Tachie", StringComparison.Ordinal) && property.EndsWith("Parameter", StringComparison.Ordinal)))
             return false;
         var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(loaded => loaded.GetName().Name == assemblyName);
         return assembly is not null
@@ -233,11 +230,11 @@ internal static class FrameCacheKey
 
     // Splits the serialized model into the part every frame depends on (everything but timeline items), the
     // other timelines (only read by frames with a scene item), and one hash per root timeline item.
-    private static FrameDependencyIndex DescribeFrames(JObject parsed, Guid rootId, IItem[] rootItems,
+    private static FrameDependencyIndex DescribeFrames(FrameModelSplit.Parts split, IItem[] rootItems,
         List<(SortedSet<string> Paths, SortedSet<string> Resources, bool Uncacheable)> rootDependencies,
-        SortedSet<string> characterPaths, SortedSet<string> characterResources, SortedSet<string> nestedPaths, bool nestedUncacheable)
+        SortedSet<string> characterPaths, SortedSet<string> nestedPaths, bool nestedUncacheable)
     {
-        var (global, nested, texts) = FrameModelSplit.Split(parsed, rootId, characterResources);
+        var (global, nested, texts) = split;
         if (texts.Length != rootItems.Length) throw new InvalidDataException("Serialized root items do not match the timeline");
         var entries = new FrameDependencyIndex.Entry[rootItems.Length];
         for (int i = 0; i < rootItems.Length; i++)
