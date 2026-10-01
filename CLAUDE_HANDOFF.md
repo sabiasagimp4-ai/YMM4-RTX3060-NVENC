@@ -24,6 +24,8 @@
 
 **新しい版の自動確認（`.github/workflows/ymm4-watch.yml`、main に取り込まれてから有効）**: 毎日 06:17 JST に versionlist2.php を見て、未報告の版があれば `tools/ci/fetch-ymm4.sh`（YMM4 自身の更新手順: `YukkuriMovieMaker.json` のハッシュを照合）で Actions cache に取得 → contracts 判定 → Windows でプラグインのビルド・CacheChecks・`HostCacheProbe --unread --gpu`（照合で ON の機能だけ画素一致などを検査）→ issue「YMM4 <版> の確認結果」を作成。`ci/ymm4-watch` への push は試行（issue を作らず summary に出す）。YMM4-dlls の同名ブランチに `CI_WATCH_VERSION` を置くと版を指定できます。
 
+**実 YMM4 の GUI 起動テスト（`tools/ci/gui-smoke.yml` / `gui-smoke.ps1` / `tests/GuiSmoke`、YMM4-dlls の `ci/gui-smoke` に push で実行）**: runner（Windows Server 2022、1600x900、英語 UI）で release 0.1 の YMM4 にプラグインを `user\plugin\YMM4Rtx3060Nvenc\` へ入れ、`user\setting\<版>\NVEncVideoWriterPlugin.FrameCacheToolSettings.json` で有効化し、生成したプロジェクトを開きます。初回の About ウィンドウ（ShowDialog）は WM_CLOSE で閉じ、UI Automation でツールメニューから「描画キャッシュ」を開き、画面写真を JPEG/base64 でログに出します（artifact の blob は cloud から取れないため）。ログ→画像は scratchpad の extract.py 相当で復元。スクリプトは Windows PowerShell 5.1 が ANSI で読むので ASCII のみ（日本語は `\uXXXX` を `[regex]::Unescape`）。
+
 **新しい版で core が一致しなかったときの手順（次の Claude 向け）**
 1. ymm4-watch の issue / host-versions（`TYPES` 入力で `members` 差分）で、どの型・メソッドが変わったか見る。
 2. その版の DLL を読む（クラウドからは manjubox.net に出られないので、ユーザーに YMM4-dlls の Release へ zip を置いてもらうか、CI 上で ILSpy にかけて差分の型だけ確認する）。前提が崩れていないか、`HostContracts.Rules` の witness に新しい種類のコードが要るかを判断。
