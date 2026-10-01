@@ -82,7 +82,7 @@ if ($Smoke) {
     if ($LASTEXITCODE -ne 0) { throw 'External file lease checks failed.' }
     & dotnet run --project (Join-Path $root 'tests\CacheChecks\CacheChecks.csproj') -c Release "-p:YMM4DirPath=$hostDir" --no-launch-profile -- $hostDir
     if ($LASTEXITCODE -ne 0) { throw 'Cache dependency checks failed.' }
-    & dotnet run --project (Join-Path $root 'tests\HostCacheProbe\HostCacheProbe.csproj') -c Release "-p:YMM4DirPath=$hostDir" --no-launch-profile -- $hostDir --gpu
+    & dotnet run --project (Join-Path $root 'tests\HostCacheProbe\HostCacheProbe.csproj') -c Release "-p:YMM4DirPath=$hostDir" --no-launch-profile -- $hostDir --gpu --video (Join-Path $dist 'managed-audio-first.mp4')
     if ($LASTEXITCODE -ne 0) { throw 'Host integration and pixel checks failed.' }
     & $msbuild (Join-Path $root 'tests\NativeSmoke.vcxproj') /t:Build /p:Configuration=Release /p:Platform=x64 /m /nologo /v:minimal
     if ($LASTEXITCODE -ne 0) { throw 'Smoke test build failed.' }

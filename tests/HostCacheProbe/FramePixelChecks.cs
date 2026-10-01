@@ -13,12 +13,12 @@ using YukkuriMovieMaker.Player.Video;
 
 internal static class FramePixelChecks
 {
-    internal static void Run(Assembly host)
+    internal static void Run(Assembly host, string? videoPath)
     {
         var bootstrap = new Harmony("ymm.tests.pixel-builtin-loader");
         var loader = typeof(PluginAssemblyLoader);
         bootstrap.Patch(loader.TypeInitializer!, prefix: new HarmonyMethod(typeof(FramePixelChecks), nameof(SkipLoader)));
-        AccessTools.StaticFieldRefAccess<IEnumerable<Assembly>>(AccessTools.Field(loader, "<Assemblies>k__BackingField"))() = [host, typeof(CacheProvider).Assembly];
+        AccessTools.StaticFieldRefAccess<IEnumerable<Assembly>>(AccessTools.Field(loader, "<Assemblies>k__BackingField"))() = ProbeLoader.Assemblies(host);
         using var devices = new GraphicsDevices();
         using var context = devices.CreateContext();
         var dc = context.DeviceContext;
@@ -112,6 +112,7 @@ internal static class FramePixelChecks
             }
             Check(TimelineFrameCache.GpuBytes == 0, "Source disposal leaked global GPU reservation");
             Console.WriteLine("Actual host automatic source cache: hit/parity/invalidation/GPU cleanup OK");
+            CheckVideoDecodeFailureIsNotStored(host, context, videoPath);
         }
         finally
         {
@@ -122,6 +123,79 @@ internal static class FramePixelChecks
         }
     }
     private static bool SkipLoader() => false;
+
+    // Real reader, injected decoder failure: the host renders transparency and returns normally, and the
+    // cache must neither store nor reuse that frame. Recovery must re-enable reuse.
+    private static void CheckVideoDecodeFailureIsNotStored(Assembly host, IGraphicsDevicesAndContext context, string? videoPath)
+    {
+        if (videoPath is null || !System.IO.File.Exists(videoPath))
+        {
+            Console.WriteLine("Video decode-failure check skipped (pass --video <mp4>)");
+            return;
+        }
+        var reader = AppDomain.CurrentDomain.GetAssemblies().Single(a => a.GetName().Name == "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation");
+        const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        var tryDecode = reader.GetType("YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.Source2.MFFrameDecoder", true)!.GetMethod("TryDecodeAt", Instance)!;
+        var legacy = reader.GetType("YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.MFVideoFileSource", true)!;
+        var refresh = legacy.GetMethod("RefreshCurrentFrameWithReload", Instance)!;
+        clearCurrentFrame = legacy.GetMethod("ClearCurrentFrame", Instance)!;
+
+        var timeline = new Timeline();
+        timeline.VideoInfo.Width = 320; timeline.VideoInfo.Height = 180; timeline.VideoInfo.FPS = 30;
+        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        timeline.Items = timeline.Items.Add(new VideoItem { FilePath = videoPath, Frame = 0, Length = 30 });
+        var scene = new Scene(timeline, scenes, []);
+        var source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
+            Instance, null, [context, scene, null], null)!;
+        using (source)
+        {
+            TimelineFrameCache.Enabled = true;
+            TimelineFrameCache.Clear();
+            bool Reused(int frame, int attempts)
+            {
+                var time = timeline.VideoInfo.GetTimeFrom(frame);
+                for (int i = 0; i < attempts; i++)
+                {
+                    source.Update(time, TimelineSourceUsage.Exporting);
+                    long hits = TimelineFrameCache.Hits;
+                    source.Update(time, TimelineSourceUsage.Exporting);
+                    if (TimelineFrameCache.Hits > hits) return true;
+                    Thread.Sleep(50); // external files are fingerprinted in the background first
+                }
+                return false;
+            }
+            Check(Reused(5, 100), "Decoded video frame was never reused: " + TimelineFrameCache.Status);
+
+            var failure = new Harmony("ymm.tests.decode-failure");
+            failure.Patch(tryDecode, prefix: new HarmonyMethod(typeof(FramePixelChecks), nameof(FailDecode)));
+            failure.Patch(refresh, prefix: new HarmonyMethod(typeof(FramePixelChecks), nameof(FailRefresh)));
+            try
+            {
+                TimelineFrameCache.Clear();
+                long misses = TimelineFrameCache.Misses;
+                Check(!Reused(12, 3), "A frame whose video decode failed was stored or reused");
+                Check(TimelineFrameCache.Misses > misses, "Decode-failure frames never reached the cache: " + TimelineFrameCache.Status);
+                Check(TimelineFrameCache.Status.Contains("デコード完了", StringComparison.Ordinal), "Unexpected status: " + TimelineFrameCache.Status);
+            }
+            finally { failure.UnpatchAll(failure.Id); }
+            Check(Reused(14, 20), "Reuse did not resume after decoding recovered: " + TimelineFrameCache.Status);
+        }
+        Console.WriteLine("Real reader decode failure (MF2 TryDecodeAt / legacy timeout): not stored, reuse resumes after recovery OK");
+    }
+
+    private static MethodInfo clearCurrentFrame = null!;
+
+    private static bool FailDecode(ref bool __result)
+    {
+        __result = false; // the source has already disposed its previous frame, so it draws transparency
+        return false;
+    }
+
+    private static bool FailRefresh(object __instance, TimeSpan time)
+    {
+        clearCurrentFrame.Invoke(__instance, [time]); // what the legacy reader does after a timeout
+        return false;
+    }
 
     private static void CheckLatePreviewTransformParity(ID2D1DeviceContext dc)
     {

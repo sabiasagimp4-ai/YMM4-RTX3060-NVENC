@@ -77,7 +77,8 @@
 **次に Windows で確認すること**
 1. `tools/HostShapeReport` を手元の YMM4 に対して実行し、4.55.1.1 でも `predicted:` が MF2 / MF-legacy / FFmpeg / WIC / wrapper になるか確認します。または YMM4 を 4.56.1.0 に更新します（未保存プロジェクトを保存してから）。
 2. `build.ps1 -Smoke`（GPU を使う HostCacheProbe と NativeSmoke を含む）を実行します。
-3. decoder 失敗を注入する実 host 回帰試験を追加します（例: MF2 の `MFFrameDecoder.TryDecodeAt` を test 用に false にして、保存されないことを確認）。
+3. HostCacheProbe の `CheckVideoDecodeFailureIsNotStored`（追加済み、未実行）を確認します。`build.ps1 -Smoke` は ManagedSmoke が作る `dist/managed-audio-first.mp4` を `--video` で渡します。
+   - 中身: 実 MediaFoundation reader で VideoItem をデコードして再利用を確認します。次に MF2 は `MFFrameDecoder.TryDecodeAt` を false に、旧 MF は timeout 時と同じ `ClearCurrentFrame` にして、そのフレームが保存も再利用もされないことを確認し、復旧後に再利用が戻ることを確かめます。
 
 ### 以前の状態（2026-10-01 checkpoint 時点）
 

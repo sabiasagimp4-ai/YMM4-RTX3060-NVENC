@@ -63,7 +63,8 @@ internal static class Program
         Check(disposals == beforeUnpatchCall && (bool)sourceType.GetField("disposedValue", All)!.GetValue(afterUnpatch)!,
             "Unpatch did not restore the original Dispose method");
         Console.WriteLine("Patch/unpatch and reflection contracts OK");
-        if (args.Contains("--gpu")) FramePixelChecks.Run(host);
+        int video = Array.IndexOf(args, "--video");
+        if (args.Contains("--gpu")) FramePixelChecks.Run(host, video >= 0 && video + 1 < args.Length ? Path.GetFullPath(args[video + 1]) : null);
         return 0;
     }
 
@@ -113,4 +114,19 @@ internal static class Program
     private static void UpdatePostfix() => updatePostfixes++;
     private static bool DisposePrefix() { disposals++; return !skip; }
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
+}
+
+// The probes bypass the plugin loader; they register the host, the plugin API and the built-in
+// MediaFoundation reader so that video items decode through the real host readers.
+internal static class ProbeLoader
+{
+    internal static IEnumerable<Assembly> Assemblies(Assembly host)
+    {
+        string reader = Path.Combine(Path.GetDirectoryName(host.Location)!, "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.dll");
+        var loaded = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == Path.GetFileNameWithoutExtension(reader));
+        var assemblies = new List<Assembly> { host, typeof(YukkuriMovieMaker.Plugin.CacheProvider).Assembly };
+        if (loaded is not null) assemblies.Add(loaded);
+        else if (File.Exists(reader)) assemblies.Add(AssemblyLoadContext.Default.LoadFromAssemblyPath(reader));
+        return assemblies;
+    }
 }
