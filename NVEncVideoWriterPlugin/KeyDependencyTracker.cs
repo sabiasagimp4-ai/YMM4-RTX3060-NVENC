@@ -115,7 +115,7 @@ internal sealed class KeyDependencyTracker : IDisposable
             var dependencies = frame is int at ? cachedFrames!.For(at) : null;
             if (!(dependencies ?? cachedFrames!.Whole).Cacheable)
             {
-                reason = "確認できない素材（未インストールのフォントや外部の場所のファイル）を使うアイテムがあるため、通常描画を使用します。";
+                reason = "立ち絵（非同期の口パク）か、確認できない素材（未インストールのフォントや外部の場所のファイル）を使うアイテムが映るため、通常描画を使用します。";
                 return false;
             }
             string[] files = dependencies?.Files ?? cachedPaths;

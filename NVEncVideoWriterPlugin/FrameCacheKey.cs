@@ -35,7 +35,7 @@ internal static class FrameCacheKey
             reason = "描画キャッシュの状態検査を省略しました: " + ex.GetType().Name;
             return false;
         }
-        if (!frames!.Whole.Cacheable) return Bypass("確認できない素材を使うアイテムがあります。", out reason);
+        if (!frames!.Whole.Cacheable) return Bypass("立ち絵（非同期の口パク）か、確認できない素材を使うアイテムがあります。", out reason);
         hasExternalDependencies = paths.Length != 0;
         if (hasExternalDependencies)
             return Bypass("外部素材は背景での内容確認が必要です。", out reason);
@@ -94,18 +94,24 @@ internal static class FrameCacheKey
                 {
                     if (item.GetType().Assembly != typeof(Scene).Assembly)
                         return Bypass("外部アイテムの描画状態を検証できません: " + item.GetType().FullName, out reason);
-                    if (item is TachieItem)
-                        return Bypass("立ち絵の非同期口パクと外部描画状態は通常描画を使用します。", out reason);
                     if (item is ShapeItem shape && !IsBuiltIn(shape.ShapeType2))
                         return Bypass("外部図形プラグインの描画状態を検証できません。", out reason);
                     var itemPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
                     var itemResources = new SortedSet<string>(StringComparer.Ordinal);
-                    bool uncacheable = false;
+                    // A tachie's mouth follows a volume envelope computed asynchronously (TachieSource), so its frames
+                    // are rendered normally. Faces and voices only reach tachie items drawn at the same frame
+                    // (TimelineSource picks them per frame, 4.56.1.0), so other frames stay cacheable; in another
+                    // timeline it disables the scene item frames that draw it. Its files are then never needed.
+                    bool tachie = item is TachieItem;
+                    bool uncacheable = tachie;
                     try
                     {
-                        foreach (var file in item.GetFiles()) AddPath(file, itemPaths);
-                        if (item is VoiceItem voice && !string.IsNullOrWhiteSpace(voice.FilePath)) AddPath(voice.FilePath, itemPaths);
-                        foreach (var resource in item.GetResources()) AddResource(resource, itemPaths, itemResources);
+                        if (!tachie)
+                        {
+                            foreach (var file in item.GetFiles()) AddPath(file, itemPaths);
+                            if (item is VoiceItem voice && !string.IsNullOrWhiteSpace(voice.FilePath)) AddPath(voice.FilePath, itemPaths);
+                        }
+                        foreach (var resource in item.GetResources()) AddResource(resource, tachie ? Unused() : itemPaths, itemResources);
                     }
                     catch (NotSupportedException)
                     {
@@ -127,8 +133,17 @@ internal static class FrameCacheKey
             var characterResources = new SortedSet<string>(StringComparer.Ordinal);
             foreach (var character in characters)
             {
-                foreach (var file in character.GetFiles()) AddPath(file, characterPaths);
-                foreach (var resource in character.GetResources()) AddResource(resource, characterPaths, characterResources);
+                // A character's tachie settings only reach TachieSource, whose frames are never cached: their files
+                // are not dependencies of any frame (the settings themselves stay in the key, in the character).
+                var (shared, tachieOnly) = SplitCharacter<IFileItem>(character);
+                var files = shared.SelectMany(part => part.GetFiles()).ToList();
+                var tachieFiles = tachieOnly.SelectMany(part => part.GetFiles());
+                // If YMM4 adds another kind of character file, all of them stay dependencies of every frame.
+                if (!new HashSet<string>(character.GetFiles()).SetEquals(files.Concat(tachieFiles))) files = character.GetFiles().ToList();
+                foreach (var file in files) AddPath(file, characterPaths);
+                var (sharedResources, tachieResources) = SplitCharacter<IResourceItem>(character);
+                foreach (var resource in sharedResources.SelectMany(part => part.GetResources())) AddResource(resource, characterPaths, characterResources);
+                foreach (var resource in tachieResources.SelectMany(part => part.GetResources())) AddResource(resource, Unused(), characterResources);
             }
             paths.UnionWith(characterPaths);
             resources.UnionWith(characterResources);
@@ -176,7 +191,7 @@ internal static class FrameCacheKey
             {
                 string type = typeProperty.Value.Value<string>() ?? string.Empty;
                 string assembly = type.Split(',').Skip(1).FirstOrDefault()?.Trim() ?? string.Empty;
-                if (assembly != "YukkuriMovieMaker" && assembly != "YukkuriMovieMaker.Plugin")
+                if (assembly != "YukkuriMovieMaker" && assembly != "YukkuriMovieMaker.Plugin" && !IsBundledTachieParameter(typeProperty, assembly))
                     return Bypass("外部描画パラメーターを検証できません: " + type, out reason);
             }
             if (paths.Count > MaximumFiles) return Bypass("外部素材の数がキャッシュ検査の上限を超えています。", out reason);
@@ -190,6 +205,28 @@ internal static class FrameCacheKey
             return false;
         }
     }
+
+    // Parameters of the tachie plugins YMM4 ships (loaded from its folder) only reach TachieSource, whose frames are
+    // rendered normally, so they do not disable the other frames. Elsewhere, or from a tachie plugin a user added,
+    // a foreign type still bypasses.
+    private static bool IsBundledTachieParameter(JProperty typeProperty, string assemblyName)
+    {
+        if (!assemblyName.StartsWith("YukkuriMovieMaker.Plugin.Tachie.", StringComparison.Ordinal)
+            || !typeProperty.Ancestors().OfType<JProperty>().Any(property =>
+                property.Name.StartsWith("Tachie", StringComparison.Ordinal) && property.Name.EndsWith("Parameter", StringComparison.Ordinal)))
+            return false;
+        var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(loaded => loaded.GetName().Name == assemblyName);
+        return assembly is not null
+            && IsBundledPluginAssembly(assemblyName, assembly.Location, Path.GetDirectoryName(typeof(Scene).Assembly.Location));
+    }
+
+    // Character.GetFiles/GetResources in 4.56.1.0: subtitle and audio effects, and the tachie effects and parameters.
+    private static (IEnumerable<T> Shared, IEnumerable<T> TachieOnly) SplitCharacter<T>(Character character) =>
+        (character.JimakuVideoEffects.OfType<T>().Concat(character.AudioEffects.OfType<T>()),
+         character.TachieItemVideoEffects.OfType<T>().Concat(character.TachieDefaultFaceEffects.OfType<T>())
+            .Concat(new object?[] { character.TachieCharacterParameter, character.TachieDefaultItemParameter, character.TachieDefaultFaceParameter }.OfType<T>()));
+
+    private static SortedSet<string> Unused() => new(StringComparer.OrdinalIgnoreCase);
 
     internal static string[] FileTypes() =>
         SettingsBase<FileSettings>.Default.FileExtensions.Select(extension => $"{extension.Extention}={extension.FileType}").ToArray();

@@ -42,6 +42,7 @@ internal static class Program
         Check(FrameCacheKey.IsBuiltInSourceReader(typeof(YukkuriMovieMaker.Plugin.CacheProvider)), "Plugin API reader assembly was not trusted");
         Check(!FrameCacheKey.IsBuiltInSourceReader(typeof(Program)), "Custom reader assembly was trusted");
         CheckBundledReaders();
+        CheckBundledTachie();
         Type[][] readerTypes = FrameCacheKey.CaptureSourceReaderTypes();
         Check(FrameCacheKey.SourceReadersMatch(readerTypes), "Unchanged source reader stamp mismatched");
         Check(!FrameCacheKey.SourceReadersMatch([readerTypes[0].Append(typeof(Program)).ToArray(), readerTypes[1], readerTypes[2]]), "Source reader list change was not detected");
@@ -164,7 +165,7 @@ internal static class Program
         MeasureCaptureCost();
 
         timeline.Items = timeline.Items.Add(new TachieItem());
-        Check(!FrameCacheKey.TryCreate(scene, out _, out string reason) && reason.Contains("非同期"), "Transient lip-sync was cached");
+        Check(!FrameCacheKey.TryCreate(scene, out _, out string reason) && reason.Contains("非同期"), "Transient lip-sync was cached in the whole-project key");
         tracker.Dispose();
         Check(!tracker.ValidateRevision(tracker.CaptureRevision()) && !tracker.TryGetKey(out _, out _), "Disposed tracker remained usable");
         Console.WriteLine("Cache drawing keys and tracker: empty/text/shape, seek/selection, edit/restore/undo/redo, nested scene, parent context, same-metadata file replacement, missing input, transient lip-sync bypass, revision capture/validation and disposal OK");
@@ -326,6 +327,14 @@ internal static class Program
         Check(WaitForFrameKey(tracker, 10) == at10, "An unverifiable file elsewhere disabled or changed unrelated frames");
         timeline.Items = timeline.Items.Remove(remote);
 
+        // A tachie's lip sync is asynchronous: its frames render normally, the others stay cached.
+        var tachie = new TachieItem { Frame = 300, Length = 10, Layer = 4 };
+        timeline.Items = timeline.Items.Add(tachie);
+        WaitForFrameKey(tracker, 10);
+        Check(!tracker.TryCapture(305, out _, out string tachieReason) && tachieReason.Contains("立ち絵"), "A frame showing a tachie was cached: " + tachieReason);
+        Check(WaitForFrameKey(tracker, 10) == at10, "A tachie elsewhere disabled or changed unrelated frames");
+        timeline.Items = timeline.Items.Remove(tachie);
+
         var scene = new SceneItem { Frame = 200, Length = 10, Layer = 3 };
         timeline.Items = timeline.Items.Add(scene);
         string sceneFrame = WaitForFrameKey(tracker, 205);
@@ -335,12 +344,49 @@ internal static class Program
         Check(WaitForFrameKey(tracker, 10) == at10 && WaitForFrameKey(tracker, 70) == at70, "Another timeline's edit invalidated ordinary frames");
         nested.VideoInfo.Height--;
         Check(WaitForFrameKey(tracker, 205) == sceneFrame, "Restoring another timeline did not restore the scene item frame");
+        // A tachie in another timeline reaches the frames of scene items, not the others.
+        var nestedTachie = new TachieItem { Frame = 0, Length = 10 };
+        nested.Items = nested.Items.Add(nestedTachie);
+        WaitForFrameKey(tracker, 10);
+        Check(!tracker.TryCapture(205, out _, out _), "A scene item frame drawing a tachie was cached");
+        Check(WaitForFrameKey(tracker, 10) == at10, "A tachie in another timeline disabled ordinary frames");
+        nested.Items = nested.Items.Remove(nestedTachie);
         timeline.Items = timeline.Items.Remove(scene).Remove(early).Remove(late);
         Console.WriteLine("Per-frame keys: unrelated frames survive edits, boundaries, settings, per-frame files, scene items OK");
     }
     private static bool SkipLoader() => false;
     // Readers in the plugin assemblies YMM4 ships (its folder) are built in, so a project with a file or a font
     // stays cacheable; the same assembly names from user\plugin, or other names in YMM4's folder, are not.
+    // A character whose tachie comes from a plugin YMM4 ships: its parameter types (foreign to the host assemblies)
+    // and its files only reach tachie frames, so frames without the tachie are keyed and the tachie's are not.
+    private static void CheckBundledTachie()
+    {
+        string hostDirectory = Path.GetDirectoryName(typeof(Scene).Assembly.Location)!;
+        string file = Path.Combine(hostDirectory, "YukkuriMovieMaker.Plugin.Tachie.SimpleTachie.dll");
+        if (!File.Exists(file))
+        {
+            Console.WriteLine("Bundled tachie check skipped: no SimpleTachie plugin in the YMM4 folder");
+            return;
+        }
+        var plugin = Assembly.LoadFrom(file);
+        var parameterType = plugin.GetTypes().First(type => !type.IsAbstract && type.GetConstructor(Type.EmptyTypes) is not null
+            && typeof(YukkuriMovieMaker.Plugin.Tachie.ITachieCharacterParameter).IsAssignableFrom(type));
+        var character = new YukkuriMovieMaker.Project.Character { Name = "cache-check-tachie" };
+        character.TachieCharacterParameter = (YukkuriMovieMaker.Plugin.Tachie.ITachieCharacterParameter)Activator.CreateInstance(parameterType)!;
+        var timeline = new Timeline();
+        var scenes = new Scenes(false);
+        scenes.AddScene(timeline);
+        timeline.Items = timeline.Items.Add(new ShapeItem { Frame = 0, Length = 30 }).Add(new TachieItem(character) { Frame = 50, Length = 10, Layer = 1 });
+        var scene = new Scene(timeline, scenes, []);
+        Check(FrameCacheKey.TryDescribe(scene, out string model, out _, out string reason), "A project with a bundled tachie was not described: " + reason);
+        Check(model.Contains(plugin.GetName().Name!, StringComparison.Ordinal), "Premise: the tachie parameter type is part of the description");
+        using var tracker = new KeyDependencyTracker(scene);
+        Check(tracker.TryCapture(10, out var capture, out reason), "A frame without the tachie was not keyed: " + reason);
+        capture!.Dispose();
+        Check(!tracker.TryCapture(55, out _, out reason) && reason.Contains("立ち絵"), "The tachie frame was keyed: " + reason);
+        Console.WriteLine($"Bundled tachie ({parameterType.Name}): frames without it keyed, its frames rendered normally");
+    }
+
     private static void CheckBundledReaders()
     {
         string hostDirectory = Path.GetDirectoryName(typeof(Scene).Assembly.Location)!;

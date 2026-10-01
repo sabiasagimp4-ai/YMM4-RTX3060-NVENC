@@ -16,8 +16,8 @@ internal sealed class FrameDependencyIndex
     internal const string Version = "frame-deps-v1";
     private const int MaximumCachedSegments = 65536;
 
-    // Uncacheable: the item uses something that cannot be fingerprinted (an uninstalled font, a remote file);
-    // only the frames that contain it are rendered normally.
+    // Uncacheable: the item uses something that cannot be fingerprinted (an uninstalled font, a remote file) or
+    // renders from asynchronous state (a tachie's lip sync); only the frames that contain it are rendered normally.
     internal readonly record struct Entry(int Frame, int Length, bool IsTransition, bool IsWide, string Hash, string[] Files,
         bool Uncacheable = false)
     {
