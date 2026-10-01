@@ -47,13 +47,32 @@ internal static class TimelineFrameCache
     private static long hits, misses, gpuBytes, generation;
     private static long liveReuses, ramHits, diskHits, bypasses, previewStored, previewStoreTicks, readAheads;
     private static string status = "自動キャッシュは停止中です";
-    private static bool enabled, previewSupported, rectsSupported, refreshSupported;
+    private static bool previewEnabled, exportEnabled, previewSupported, rectsSupported, refreshSupported;
 
+    // The preview (TimelineVideoPlayer: playing, paused, idle pre-rendering, cache bars) and export (any writer) are
+    // switched separately. Enabled: either; setting it switches both.
     internal static bool Enabled
     {
-        get => Volatile.Read(ref enabled);
-        set { lock (cacheGate) { Volatile.Write(ref enabled, value); Interlocked.Increment(ref generation); status = value ? "キャッシュ待機中" : "自動キャッシュは停止中です"; } }
+        get => PreviewEnabled || ExportEnabled;
+        set => SetEnabled(value, value);
     }
+    internal static bool PreviewEnabled => Volatile.Read(ref previewEnabled);
+    internal static bool ExportEnabled => Volatile.Read(ref exportEnabled);
+
+    internal static void SetEnabled(bool preview, bool export)
+    {
+        lock (cacheGate)
+        {
+            Volatile.Write(ref previewEnabled, preview);
+            Volatile.Write(ref exportEnabled, export);
+            Interlocked.Increment(ref generation); // in-flight captures of a switched-off use are dropped
+            status = preview && export ? "キャッシュ待機中（プレビュー・動画出力）"
+                : preview ? "キャッシュ待機中（プレビューのみ）"
+                : export ? "キャッシュ待機中（動画出力のみ）" : "自動キャッシュは停止中です";
+        }
+    }
+
+    private static bool EnabledFor(bool exporting) => exporting ? ExportEnabled : PreviewEnabled;
     internal static string Status => Volatile.Read(ref status);
     internal static long Hits => Interlocked.Read(ref hits);
     internal static long Misses => Interlocked.Read(ref misses);
@@ -322,6 +341,7 @@ internal static class TimelineFrameCache
             string usageName = usage.ToString() ?? string.Empty;
             bool exporting = usageName == "Exporting", paused = usageName == "Paused", preview = paused || usageName == "Playing";
             if (!exporting && !preview) return Bypass("キャッシュの対象はプレビュー（再生・一時停止）と動画出力の描画だけです。");
+            if (!EnabledFor(exporting)) return true; // switched off for this use in the settings
             if (preview && !previewSupported) return Bypass("このYMM4ではプレビューのキャッシュを使いません（動画出力のみ）。");
             bool wantRects = (bool)needRects.GetValue(__instance)!;
             if (wantRects && (exporting || !rectsSupported)) return Bypass("アイテムの表示枠が必要な描画のため、通常描画を使用します。");
@@ -530,7 +550,7 @@ internal static class TimelineFrameCache
 
     private static Exception? Finalizer(Exception? __exception, Pending? __state) { __state?.Dispose(); return __exception; }
 
-    private static bool StillCurrent(Pending value) => Enabled && value.Generation == Interlocked.Read(ref generation)
+    private static bool StillCurrent(Pending value) => EnabledFor(value.UsageKey == "Exporting") && value.Generation == Interlocked.Read(ref generation)
         && value.Capture.Validate() && MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.UsageKey, value.Devices.DeviceContext, null) == value.LiveKey
         && (value.Viewport is null || value.CacheKey == MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.UsageKey, value.Devices.DeviceContext, value.Viewport.Value));
 
@@ -613,7 +633,7 @@ internal static class TimelineFrameCache
     internal static bool TryGetPreviewResidency(object source, PreviewViewport viewport, IReadOnlyList<int> frames, Span<byte> residency)
     {
         residency.Clear();
-        if (!Enabled || !sources.TryGetValue(source, out var state) || state.Environment is not { } environment) return false;
+        if (!PreviewEnabled || !sources.TryGetValue(source, out var state) || state.Environment is not { } environment) return false;
         var scene = (Scene)sceneField.GetValue(source)!;
         var frameKeys = new string?[frames.Count];
         if (!state.Tracker.TryPeekFrameKeys(frames, frameKeys, out string model)) return false;
@@ -649,7 +669,7 @@ internal static class TimelineFrameCache
     // would prime is already stored (in RAM or on disk), so that it is not rendered again.
     internal static bool IsPreviewStored(object timelineSource, TimeSpan time, KeyCapture capture, PreviewViewport viewport)
     {
-        if (!Enabled) return false;
+        if (!PreviewEnabled) return false;
         try
         {
             timelineSource = GetTimelineSource(timelineSource);
@@ -684,6 +704,7 @@ internal static class TimelineFrameCache
             if (scene.ParentScenes.Length != 0 || (bool)needRects.GetValue(timelineSource)!) return false;
             string usageName = usage.ToString() ?? string.Empty;
             bool exporting = usageName == "Exporting", playing = usageName == "Playing";
+            if (!EnabledFor(exporting)) return false;
             if (viewport is null ? !exporting : !playing || !IsValidViewport(viewport.Value, int.MaxValue)
                 || viewport.Value.SceneId != scene.ID || viewport.Value.TimelineId != scene.Timeline.ID) return false;
             if (viewport is { } preview && (preview.IsPlaying || preview.LastDrawTimestamp <= 0
@@ -705,7 +726,7 @@ internal static class TimelineFrameCache
                 var record = viewport is { } view ? CapturePreview(context, output, view) : CaptureScene(context, output, scene);
                 lock (cacheGate)
                 {
-                    if (record is null || !capture.Validate() || !Enabled) return false;
+                    if (record is null || !capture.Validate() || !EnabledFor(exporting)) return false;
                     store.Value.PutOwned(key, record);
                     status = viewport is null ? "出力フレームを先読みしました。" : "プレビューのフレームを先読みしました。";
                     return true;

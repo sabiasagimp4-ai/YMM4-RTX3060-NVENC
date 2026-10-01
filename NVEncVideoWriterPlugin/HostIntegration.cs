@@ -15,10 +15,22 @@ internal static class HostIntegration
     private static Assembly? checkedHost;
     private static bool installed;
     private static bool cacheAvailable;
+    private static bool exportHooked;
+    private static Assembly? installedHost;
+    private static string exportProblem = string.Empty;
     private static string status = "YMM4との連携はまだ初期化されていません。";
 
     internal static string Status { get { lock (installLock) return status; } }
     internal static bool CacheAvailable { get { lock (installLock) return cacheAvailable; } }
+    internal static bool ExportHooked { get { lock (installLock) return exportHooked; } }
+
+    // The NVENC output setting (FrameCacheToolSettings); outside YMM4 (tests, probes) the output is always on.
+    internal static Func<bool> NvencOutputEnabled { get; set; } = () =>
+    {
+        if (!IsHostProcess) return true;
+        try { return FrameCacheToolSettings.Default.NvencOutput; }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { return true; }
+    };
     internal static bool IsHostProcess => Assembly.GetEntryAssembly()?.GetName().Name == "YukkuriMovieMaker";
 
     internal static bool EnsureInstalled()
@@ -47,10 +59,19 @@ internal static class HostIntegration
         {
             try
             {
-                // The export hook only needs its own contract: whatever the host does, an output replaces the
-                // file only when every frame of the range arrived without cancellation. The cache depends on
-                // how the host renders, so it is installed only on builds whose code was checked.
-                if (!HostExportScope.TryInstall(host, harmony, out var reason)) throw new NotSupportedException(reason);
+                // The export hook (for NVENC output only) needs its own contract: whatever the host does, an output
+                // replaces the file only when every frame of the range arrived without cancellation. With NVENC
+                // output switched off in the settings it is not installed and YMM4's export is left untouched. The
+                // cache depends on how the host renders, so it is installed only on builds whose code was checked.
+                string reason;
+                installedHost = host;
+                exportHooked = false;
+                exportProblem = string.Empty;
+                if (NvencOutputEnabled())
+                {
+                    if (HostExportScope.TryInstall(host, harmony, out reason)) exportHooked = true;
+                    else exportProblem = reason;
+                }
                 installed = true;
                 string features = string.Empty;
                 if (!verified)
@@ -60,7 +81,7 @@ internal static class HostIntegration
                     if (!TryMatchReadBuild(host, out var matched, out var detail))
                     {
                         cacheAvailable = false;
-                        status = $"YMM4 {version}（未確認の版）: 取消保護つきの出力は使えます。自動キャッシュは使いません: {detail}";
+                        status = $"YMM4 {version}（未確認の版）: {ExportStatus()}自動キャッシュは使いません: {detail}";
                         return true;
                     }
                     HostFeatures.Decide(host, matched);
@@ -70,14 +91,15 @@ internal static class HostIntegration
                 if (!cacheAvailable) cacheHarmony.UnpatchAll(cacheHarmony.Id);
                 else TimelineCacheBars.TryInstall(host, out _);
                 status = cacheAvailable
-                    ? $"YMM4 {version}: 取消保護・自動キャッシュの接続を確認しました。{features}"
-                    : "取消保護は有効です。自動キャッシュは利用できません: " + reason;
+                    ? $"YMM4 {version}: {ExportStatus()}自動キャッシュの接続を確認しました。{features}"
+                    : $"{ExportStatus()}自動キャッシュは利用できません: " + reason;
                 return true;
             }
             catch (Exception ex)
             {
                 installed = false;
                 cacheAvailable = false;
+                exportHooked = false;
                 status = $"YMM4との連携を無効にしました: {ex.GetBaseException().Message}";
                 try { harmony.UnpatchAll(PatchId); cacheHarmony.UnpatchAll(cacheHarmony.Id); }
                 catch (Exception rollback) { status += $"（フックの解除にも失敗しました: {rollback.GetBaseException().Message}）"; }
@@ -86,11 +108,33 @@ internal static class HostIntegration
         }
     }
 
+    // Under installLock.
+    private static string ExportStatus() => exportHooked ? "NVENC 出力（取消保護つき）を使えます。"
+        : exportProblem.Length != 0 ? $"NVENC 出力は使えません（{exportProblem}）。" : "NVENC 出力は設定で無効です。";
+
+    // When NVENC output is switched on after start: installs the export hook now (before an export starts).
+    internal static bool EnsureExportHooks(out string reason)
+    {
+        lock (installLock)
+        {
+            reason = string.Empty;
+            if (exportHooked) return true;
+            if (!installed || installedHost is null) { reason = status; return false; }
+            if (!HostExportScope.TryInstall(installedHost, harmony, out reason)) { exportProblem = reason; return false; }
+            exportHooked = true;
+            exportProblem = string.Empty;
+            status = status.Replace("NVENC 出力は設定で無効です。", "NVENC 出力（取消保護つき）を使えます。", StringComparison.Ordinal);
+            return true;
+        }
+    }
+
     internal static void RequireExportScope()
     {
         // Direct/offline callers have no host cancellation contract. The real host must have one.
         if (!IsHostProcess) return;
-        if (!EnsureInstalled())
+        if (!NvencOutputEnabled())
+            throw new InvalidOperationException("「RTX 3060 NVENC 出力」は設定で無効になっています。ツール「描画キャッシュ」か、YMM4 の設定（その他）で有効にするか、YMM4 標準の出力形式を選んでください。");
+        if (!EnsureInstalled() || !EnsureExportHooks(out var reason))
             throw new NotSupportedException($"このYMM4では安全な動画出力を開始できません。{Status}");
         if (HostExportScope.GetCurrent() is null)
             throw new InvalidOperationException("YMM4の出力範囲・取消状態を取得できなかったため、既存ファイルを保護して出力を中止しました。");

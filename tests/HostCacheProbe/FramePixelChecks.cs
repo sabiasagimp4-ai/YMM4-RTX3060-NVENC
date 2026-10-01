@@ -111,6 +111,7 @@ internal static class FramePixelChecks
                 Check(TimelineFrameCache.Hits == oldHits && TimelineFrameCache.Misses == oldMisses + 1, "Clear did not invalidate the live frame");
                 source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
                 Check(TimelineFrameCache.Hits == oldHits + 1, "Reuse did not resume after Clear");
+                CheckSeparateSwitches(source);
             }
             Check(TimelineFrameCache.GpuBytes == 0, "Source disposal leaked global GPU reservation");
             Console.WriteLine("Actual host automatic source cache: hit/parity/invalidation/GPU cleanup OK");
@@ -138,6 +139,40 @@ internal static class FramePixelChecks
         }
     }
     private static bool SkipLoader() => false;
+
+    // The settings switch the preview cache and the export cache separately (NVENC output is a third switch).
+    private static void CheckSeparateSwitches(ITimelineSource source)
+    {
+        long Reused(TimelineSourceUsage usage)
+        {
+            long hits = TimelineFrameCache.Hits;
+            source.Update(TimeSpan.Zero, usage);
+            source.Update(TimeSpan.Zero, usage);
+            return TimelineFrameCache.Hits - hits;
+        }
+        try
+        {
+            TimelineFrameCache.SetEnabled(preview: true, export: false);
+            Check(Reused(TimelineSourceUsage.Exporting) == 0, "Export frames were cached with the export cache switched off");
+            Check(Reused(TimelineSourceUsage.Paused) == 1, "The preview cache did not work on its own");
+            TimelineFrameCache.SetEnabled(preview: false, export: true);
+            Check(Reused(TimelineSourceUsage.Paused) == 0, "Preview frames were cached with the preview cache switched off");
+            Check(Reused(TimelineSourceUsage.Exporting) == 1, "The export cache did not work on its own");
+        }
+        finally { TimelineFrameCache.SetEnabled(preview: true, export: true); }
+
+        // Settings files from before the switches were separated carry their one switch over to both caches.
+        var legacy = new FrameCacheToolSettings { Enabled = true };
+        legacy.Initialize();
+        Check(legacy.PreviewCache && legacy.ExportCache && legacy.NvencOutput && legacy.SettingsVersion == 1, "Old settings (cache on) were not carried over");
+        var fresh = new FrameCacheToolSettings();
+        fresh.Initialize();
+        Check(!fresh.PreviewCache && !fresh.ExportCache && fresh.NvencOutput, "New settings: caches off, NVENC output on");
+        var current = new FrameCacheToolSettings { SettingsVersion = 1, Enabled = true, PreviewCache = false, ExportCache = true, NvencOutput = false };
+        current.Initialize();
+        Check(!current.PreviewCache && current.ExportCache && !current.NvencOutput, "Current settings were changed on load");
+        Console.WriteLine("Settings: preview and export caches switch separately; old settings carried over");
+    }
 
     // Real reader, injected decoder failure: the host renders transparency and returns normally, and the
     // cache must neither store nor reuse that frame. Recovery must re-enable reuse.

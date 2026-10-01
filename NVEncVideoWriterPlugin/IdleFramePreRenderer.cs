@@ -117,7 +117,7 @@ internal static class IdleFramePreRenderer
     private static void Tick(object? sender, EventArgs args)
     {
         var current = session;
-        if (!Enabled || !TimelineFrameCache.Enabled || current is null || !HostIntegration.CacheAvailable) return;
+        if (!Enabled || !TimelineFrameCache.PreviewEnabled || current is null || !HostIntegration.CacheAvailable) return;
 
         int frame = current.Info.Timeline.CurrentFrame;
         if (frame != current.ObservedFrame)
@@ -287,7 +287,7 @@ internal static class IdleFramePreRenderer
     }
 
     private static bool CanContinue(Session current, CancellationToken token, int anchorFrame) =>
-        !token.IsCancellationRequested && Enabled && TimelineFrameCache.Enabled
+        !token.IsCancellationRequested && Enabled && TimelineFrameCache.PreviewEnabled
         && Volatile.Read(ref current.IsBusy) == 0
         && ReferenceEquals(Volatile.Read(ref session), current)
         && current.Info.Timeline.CurrentFrame == anchorFrame;

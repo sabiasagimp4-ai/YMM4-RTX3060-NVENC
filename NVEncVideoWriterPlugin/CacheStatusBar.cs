@@ -41,7 +41,7 @@ internal sealed class CacheStatusBar : FrameworkElement
         {
             var current = timeline();
             int width = (int)Math.Ceiling(ActualWidth);
-            if (current is null || !TimelineFrameCache.Enabled || width <= 0 || mapping(current, ActualWidth) is not { } view)
+            if (current is null || !TimelineFrameCache.PreviewEnabled || width <= 0 || mapping(current, ActualWidth) is not { } view)
             {
                 Show([]);
                 return;

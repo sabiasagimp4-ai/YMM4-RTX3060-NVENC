@@ -47,6 +47,13 @@ public sealed class NvencVideoFileWriterPlugin : IVideoFileWriterPlugin
 
     public System.Windows.UIElement GetVideoConfigView(string projectName, VideoInfo videoInfo, int length)
     {
+        if (!HostIntegration.NvencOutputEnabled())
+            return new System.Windows.Controls.TextBlock
+            {
+                Margin = new System.Windows.Thickness(8),
+                TextWrapping = System.Windows.TextWrapping.Wrap,
+                Text = "RTX 3060 NVENC 出力は設定で無効になっています。ツール「描画キャッシュ」か、YMM4 の設定（その他 > RTX 3060 NVENC・描画キャッシュ）で有効にしてください。",
+            };
         return new NvencConfigView(_settings);
     }
 
