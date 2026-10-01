@@ -86,3 +86,5 @@ MP4のサンプル索引は出力時間に比例してRAMを使用します。�
 
 
 実YMM4の詳細ログと動的な処理検出は [CACHE_DIAGNOSTICS.md](docs/CACHE_DIAGNOSTICS.md) を参照。ツールから計測を開始/停止できます。
+
+GPUヒット時の転送省略と、利用頻度に追従する保持は [設計](docs/GPU_FRAME_RETENTION.md)・[実測](docs/GPU_FRAME_RETENTION_RESULTS_2026-10-01.md) を参照。WARPの8枚反復ではRAM復元平均8.264ms/枚、GPU再利用1.731ms/枚（各3pass）。

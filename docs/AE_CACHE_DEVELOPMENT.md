@@ -56,7 +56,7 @@ RAM回復時にホストを再描画せずディスク画素を供給するこ�
 |---|---|
 | 重い未保存フレームを待ち、音声も同期する | 未実装。音声時計を含む取消可能なbuffering stateを設計。StopAsyncで0へseekする既存APIをそのまま流用しない |
 | Cache Before Playback | 未実装。上記schedulerで連続区間を確保してから再生する |
-| 再生中の保存コストを抑える | CPU readbackは残る。e60c455の同fixtureでGPU L0/降格前後を測定し、D3D queryとD2D flushの順序を実証する |
+| 再生中の保存コストを抑える | 復元済み画像のGPU保持を追加（GPU_FRAME_RETENTION.md）。cold renderのCPU readbackは残る。既存の焼き込みtarget保持と遅延降格を次に検証する |
 | 無損失圧縮ディスクキャッシュ | 未実装。読込速度と圧縮率を実素材で測ってから採用する |
 | 素材・レイヤー・エフェクト段の再利用 | 合成済みフレーム中心。receipt/dependency graphと段単位キャッシュは後段 |
 | MFR | 未実装。所有device/contextを共有しない描画workerとホスト互換契約が必要 |
