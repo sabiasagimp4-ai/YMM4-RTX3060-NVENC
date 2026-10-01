@@ -43,8 +43,8 @@ public static class Win
 $ae = [System.Windows.Automation.AutomationElement]
 $scope = [System.Windows.Automation.TreeScope]
 function U([string] $escaped) { [regex]::Unescape($escaped) }
-$cacheTool = U '描画キャッシュ'   # 描画キャッシュ
-$toolMenu = U 'ツール'                             # ツール
+$cacheTool = U '\u63CF\u753B\u30AD\u30E3\u30C3\u30B7\u30E5'   # the tool's name
+$toolMenu = U '\u30C4\u30FC\u30EB'   # the tools menu
 
 function Shot([string] $name) {
     $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
