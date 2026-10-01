@@ -25,6 +25,7 @@ internal static class PreviewPerformanceChecks
     internal static void Run(Assembly host)
     {
         Check(host.GetName().Version?.ToString() == "4.56.1.0", "Performance fixture requires YMM4 4.56.1.0");
+        TimelineFrameCache.GpuRetentionEnabled = false; // Baseline modes remain byte-store hits.
         var harmony = new Harmony("ymm.tests.preview-performance");
         harmony.Patch(typeof(PluginAssemblyLoader).TypeInitializer!, prefix: new HarmonyMethod(typeof(PreviewPerformanceChecks), nameof(SkipLoader)));
         ProbeLoader.Stub(ProbeLoader.Assemblies(host));
@@ -94,18 +95,18 @@ internal static class PreviewPerformanceChecks
             TimelineFrameCache.CompletePendingStore(source);
             TimelineFrameCache.Clear();
 
-            object Measure(string mode, bool enabled)
+            object Measure(string mode, bool enabled, Func<int, int>? sequence = null)
             {
                 TimelineFrameCache.SetEnabled(enabled, false);
                 PreviewPerformance.Reset();
-                long hits = TimelineFrameCache.RamHits, stored = TimelineFrameCache.PreviewStored;
+                long hits = TimelineFrameCache.RamHits, gpuHits = TimelineFrameCache.GpuHits, stored = TimelineFrameCache.PreviewStored;
                 long allocated = GC.GetTotalAllocatedBytes(precise: true);
                 var collections = Enumerable.Range(0, 3).Select(GC.CollectionCount).ToArray();
                 var wall = Stopwatch.StartNew();
                 for (int frame = 0; frame < Frames; frame++)
                 {
                     long started = PreviewPerformance.Timestamp;
-                    Update(frame);
+                    Update(sequence?.Invoke(frame) ?? frame);
                     using (PreviewPerformance.Measure(PreviewStage.PreviewDraw)) Draw();
                     PreviewPerformance.End(PreviewStage.TotalPreview, started);
                 }
@@ -113,17 +114,20 @@ internal static class PreviewPerformanceChecks
                 var flush = Stopwatch.StartNew();
                 TimelineFrameCache.CompletePendingStore(source);
                 flush.Stop();
+                long gpuHitCount = TimelineFrameCache.GpuHits - gpuHits;
                 long ramHits = TimelineFrameCache.RamHits - hits, saved = TimelineFrameCache.PreviewStored - stored;
                 var stages = PreviewPerformance.Snapshot();
                 Check(stages.Single(s => s.Stage == PreviewStage.TotalUpdate).SampleCount == Frames, mode + " did not measure all updates");
                 Check(stages.Single(s => s.Stage == PreviewStage.TotalPreview).SampleCount == Frames, mode + " did not measure all previews");
                 if (mode == "cold-store") Check(saved == Frames && ramHits == 0, $"Cold-store counts: saved={saved}, hits={ramHits}");
                 if (mode.StartsWith("ram-hit", StringComparison.Ordinal)) Check(ramHits == Frames && saved == 0, $"RAM-hit counts: hits={ramHits}, saved={saved}");
+                if (mode.StartsWith("gpu-hit", StringComparison.Ordinal)) Check(gpuHitCount == Frames && ramHits == 0 && saved == 0,
+                    $"GPU-hit counts: gpu={gpuHitCount}, ram={ramHits}, saved={saved}");
                 if (mode == "off") Check(saved == 0 && ramHits == 0, "OFF used the cache");
                 long bytes = GC.GetTotalAllocatedBytes(precise: true) - allocated;
-                Console.WriteLine($"{mode}: {wall.Elapsed.TotalMilliseconds / Frames:F3} ms/frame, final flush {flush.Elapsed.TotalMilliseconds:F3} ms, RAM hits {ramHits}, stored {saved}");
+                Console.WriteLine($"{mode}: {wall.Elapsed.TotalMilliseconds / Frames:F3} ms/frame, final flush {flush.Elapsed.TotalMilliseconds:F3} ms, GPU hits {gpuHitCount}, RAM hits {ramHits}, stored {saved}");
                 return new { Mode = mode, WallMilliseconds = wall.Elapsed.TotalMilliseconds, FinalFlushMilliseconds = flush.Elapsed.TotalMilliseconds,
-                    AllocatedBytes = bytes, GcCollections = Enumerable.Range(0, 3).Select(i => GC.CollectionCount(i) - collections[i]).ToArray(), RamHits = ramHits, Stored = saved, Stages = stages };
+                    AllocatedBytes = bytes, GcCollections = Enumerable.Range(0, 3).Select(i => GC.CollectionCount(i) - collections[i]).ToArray(), GpuHits = gpuHitCount, RamHits = ramHits, Stored = saved, Stages = stages };
             }
 
             var measurements = new List<object> { Measure("off", false), Measure("cold-store", true), Measure("ram-hit", true) };
@@ -142,10 +146,93 @@ internal static class PreviewPerformanceChecks
                 var cached = TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!;
                 Check(baseline.SequenceEqual(cached), $"Frame {frame} pixel parity failed");
             }
+            // Counterbalanced hot-set comparison; retain the preceding 100-frame sequential baseline.
+            const int HotFrames = 8;
+            Func<int, int> hot = frame => frame % HotFrames;
+            long oldGpuBudget = TimelineFrameCache.GpuRetentionBudget;
+            TimelineFrameCache.GpuRetentionBudget = HotFrames * (long)Width * Height * 4;
+            try
+            {
+                for (int pass = 0; pass < 6; pass++)
+                {
+                    bool gpu = pass is 1 or 2 or 5;
+                    TimelineFrameCache.GpuRetentionEnabled = gpu;
+                    for (int frame = 0; frame < HotFrames; frame++) { Update(frame); Draw(); }
+                    measurements.Add(Measure((gpu ? "gpu-hit-hot-" : "ram-hit-hot-") + pass, true, hot));
+                }
+                CacheTrace.Start(Path.GetFullPath("dist/gpu-retention-trace.jsonl"), "gpu-hot-eight-frames");
+                try { measurements.Add(Measure("gpu-hit-trace", true, hot)); }
+                finally { CacheTrace.StopAsync().GetAwaiter().GetResult(); }
+                var gpuRows = File.ReadLines("dist/gpu-retention-trace.jsonl").Select(line =>
+                {
+                    using var document = JsonDocument.Parse(line);
+                    return document.RootElement.Clone();
+                }).ToArray();
+                Check(gpuRows.Count(row => row.GetProperty("Kind").GetString() == "span"
+                    && row.GetProperty("Stage").GetString() == "timeline-update"
+                    && row.GetProperty("Outcome").GetString() == "gpu") == Frames, "GPU route was not traced");
+                Check(!gpuRows.Any(row => row.GetProperty("Kind").GetString() == "span"
+                    && row.GetProperty("Stage").GetString() == "restore-copy-from-memory"), "GPU hits copied pixels again");
+                var gpuFooter = gpuRows.Single(row => row.GetProperty("Kind").GetString() == "summary");
+                Check(gpuFooter.GetProperty("Dropped").GetInt64() == 0 && gpuFooter.GetProperty("OpenSpans").GetInt64() == 0,
+                    "GPU trace was incomplete");
+                long frameBytes = (long)Width * Height * 4;
+                Check(TimelineFrameCache.GpuRetainedBytes == HotFrames * frameBytes, "GPU budget/alias accounting failed");
+                var gpuPixels = new byte[HotFrames][];
+                for (int frame = 0; frame < HotFrames; frame++)
+                {
+                    Update(frame); gpuPixels[frame] = TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!;
+                }
+                TimelineFrameCache.SetEnabled(false, false);
+                for (int frame = 0; frame < HotFrames; frame++)
+                {
+                    Update(frame);
+                    Check(gpuPixels[frame].SequenceEqual(TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!),
+                        "GPU-resident pixel parity failed: " + frame);
+                }
+                TimelineFrameCache.SetEnabled(true, false);
+                for (int frame = 0; frame < HotFrames; frame++) Update(frame);
+                Update(0); // active borrower of frame 0
+                var beforeEviction = TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!;
+                TimelineFrameCache.GpuRetentionBudget = 0;
+                Check(TimelineFrameCache.GpuRetainedBytes == 0 && TimelineFrameCache.GpuBytes == frameBytes,
+                    "Eviction lost or double-counted the active borrower");
+                Check(beforeEviction.SequenceEqual(TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!),
+                    "Eviction disposed a borrowed output");
+                Update(1);
+                TimelineFrameCache.GpuRetentionBudget = oldGpuBudget;
+                for (int frame = 0; frame < HotFrames; frame++) Update(frame);
+                long priorGpuHits = TimelineFrameCache.GpuHits;
+                var previousViewport = viewport;
+                viewport = viewport with { Transform = Matrix3x2.CreateTranslation(1.25f, -.75f) };
+                Update(0);
+                Check(TimelineFrameCache.GpuHits == priorGpuHits, "Changed viewport reused stale GPU output");
+                var changedView = TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!;
+                TimelineFrameCache.SetEnabled(false, false); Update(0);
+                Check(changedView.SequenceEqual(TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!), "Changed viewport parity failed");
+                viewport = previousViewport;
+                TimelineFrameCache.SetEnabled(true, false);
+                Update(0); Update(1); Update(0);
+                priorGpuHits = TimelineFrameCache.GpuHits;
+                timeline.Items.OfType<ShapeItem>().First().X.SetFirstValue(-350);
+                Update(0);
+                Check(TimelineFrameCache.GpuHits == priorGpuHits, "Model edit reused stale GPU output");
+                var edited = TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!;
+                TimelineFrameCache.SetEnabled(false, false); Update(0);
+                Check(edited.SequenceEqual(TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!), "Edited model parity failed");
+                TimelineFrameCache.SetEnabled(true, false); Update(0); Update(1);
+                TimelineFrameCache.Clear();
+                priorGpuHits = TimelineFrameCache.GpuHits;
+                Update(0);
+                Check(TimelineFrameCache.GpuHits == priorGpuHits && TimelineFrameCache.GpuRetainedBytes == 0,
+                    "Purge retained or reused an old generation");
+                Console.WriteLine("GPU retention: 8-frame pixel parity, budget eviction with active borrower, viewport/edit/purge invalidation OK");
+            }
+            finally { TimelineFrameCache.GpuRetentionEnabled = false; TimelineFrameCache.GpuRetentionBudget = oldGpuBudget; }
             var report = new { HostVersion = host.GetName().Version!.ToString(), HostMvid = host.ManifestModule.ModuleVersionId,
                 HostSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(host.Location))),
                 Adapter = description.Description, description.VendorId, description.DeviceId, Driver = driver,
-                Frames, Width, Height, DiskEnabled = false, PixelParityFrames = Frames,
+                Frames, Width, Height, HotWorkingSetFrames = 8, CounterbalancedHotPasses = 6, DiskEnabled = false, PixelParityFrames = Frames,
                 TimingScope = "Real TimelineSource.Update + stand-in source-only Draw; no GUI/audio/Present/pacing. Final readback flush separate. Cache OFF still has measurement hooks.",
                 Measurements = measurements };
             var options = new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };

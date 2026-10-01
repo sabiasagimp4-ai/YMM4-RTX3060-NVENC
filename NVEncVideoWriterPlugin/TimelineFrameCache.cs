@@ -37,6 +37,10 @@ internal static class TimelineFrameCache
     private static readonly ConditionalWeakTable<Timeline, LatestViewport> latestViewports = new();
     private static readonly ConditionalWeakTable<ID2D1DeviceContext, string> renderEnvironments = new();
     private static readonly object cacheGate = new();
+    // Only immutable pixel-upload command lists are retained. Host effect graphs remain source-owned.
+    private static readonly LinkedList<GpuFrame> gpuLru = new();
+    private static long gpuRetainedBytes, gpuRetentionBudget = 128L << 20;
+    private static bool gpuRetentionEnabled = true;
     private static Lazy<FrameCacheStore> store = new(() => CacheMemoryController.CreateStore(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YMM4-RTX3060-NVENC", "cache")));
     private static FieldInfo sceneField = null!, devicesField = null!, outputField = null!, collectorField = null!, pickerField = null!;
@@ -46,7 +50,7 @@ internal static class TimelineFrameCache
     private static FieldInfo? timelineChangedField, pointerOverPreviewField;
     private static Type pickerType = null!;
     private static long hits, misses, gpuBytes, generation;
-    private static long liveReuses, ramHits, diskHits, bypasses, previewStored, previewStoreTicks, readAheads;
+    private static long gpuHits, liveReuses, ramHits, diskHits, bypasses, previewStored, previewStoreTicks, readAheads;
     private static string status = "自動キャッシュは停止中です";
     private static bool previewEnabled, exportEnabled, previewSupported, rectsSupported, refreshSupported;
 
@@ -71,6 +75,7 @@ internal static class TimelineFrameCache
             status = preview && export ? "キャッシュ待機中（プレビュー・動画出力）"
                 : preview ? "キャッシュ待機中（プレビューのみ）"
                 : export ? "キャッシュ待機中（動画出力のみ）" : "自動キャッシュは停止中です";
+            ClearGpuFrames();
         }
     }
 
@@ -79,6 +84,18 @@ internal static class TimelineFrameCache
     internal static long Hits => Interlocked.Read(ref hits);
     internal static long Misses => Interlocked.Read(ref misses);
     internal static long GpuBytes => Interlocked.Read(ref gpuBytes);
+    internal static long GpuHits => Interlocked.Read(ref gpuHits);
+    internal static long GpuRetainedBytes { get { lock (cacheGate) return gpuRetainedBytes; } }
+    internal static long GpuRetentionBudget
+    {
+        get { lock (cacheGate) return gpuRetentionBudget; }
+        set { lock (cacheGate) { gpuRetentionBudget = Math.Clamp(value, 0, GpuBudget / 2); TrimGpuFrames(0); } }
+    }
+    internal static bool GpuRetentionEnabled
+    {
+        get { lock (cacheGate) return gpuRetentionEnabled; }
+        set { lock (cacheGate) { gpuRetentionEnabled = value; if (!value) ClearGpuFrames(); } }
+    }
     internal static long CacheGeneration => Interlocked.Read(ref generation);
     // Hits by path: the frame already in the source (same request again), the RAM store, a frame read back from disk.
     internal static long LiveReuses => Interlocked.Read(ref liveReuses);
@@ -95,11 +112,14 @@ internal static class TimelineFrameCache
     // Disk reads queued ahead of the playhead.
     internal static long ReadAheads => Interlocked.Read(ref readAheads);
     // Full Update time by path, including deferred work, storing and finalizer cleanup.
-    internal static readonly FrameTimeSamples RenderTimes = new(), RamTimes = new(), DiskTimes = new(), LiveTimes = new();
+    internal static readonly FrameTimeSamples RenderTimes = new(), RamTimes = new(), DiskTimes = new(), LiveTimes = new(), GpuTimes = new();
     internal static FrameCacheStore? StoreIfCreated => store.IsValueCreated ? store.Value : null;
 
     // Tests only: a store with other budgets or in another folder (the caller disposes it).
-    internal static void UseStore(FrameCacheStore replacement) => store = new Lazy<FrameCacheStore>(replacement);
+    internal static void UseStore(FrameCacheStore replacement)
+    {
+        lock (cacheGate) { ClearGpuFrames(); store = new Lazy<FrameCacheStore>(replacement); }
+    }
 
     // Tests only: the preview view of a source, standing in for a TimelineVideoPlayer with a real swap chain.
     internal static Func<object, PreviewViewport?>? TestViewport { get; set; }
@@ -126,6 +146,7 @@ internal static class TimelineFrameCache
         lock (cacheGate)
         {
             Interlocked.Increment(ref generation);
+            ClearGpuFrames();
             status = "キャッシュを消去しています…";
         }
         try { if (store.IsValueCreated) store.Value.Clear(); }
@@ -246,6 +267,8 @@ internal static class TimelineFrameCache
         internal readonly Dictionary<(string FrameKey, int Frame), string> StatusKeys = [];
         internal string StatusStamp = string.Empty;
         internal long Bytes;
+        internal GpuFrame? ActiveGpuFrame;
+        internal readonly Dictionary<string, GpuFrame> GpuFrames = [];
         internal long Generation;
         // A rendered preview frame whose GPU readback is still running; finished on this source's render thread.
         internal DeferredStore? Deferred;
@@ -254,12 +277,18 @@ internal static class TimelineFrameCache
         {
             var released = Interlocked.Exchange(ref Bytes, 0);
             if (released != 0) Interlocked.Add(ref gpuBytes, -released);
+            lock (cacheGate) { ActiveGpuFrame?.Release(); ActiveGpuFrame = null; }
             LastKey = null;
             LastViewportKey = null;
             LastOutput = null;
             RectsKey = null;
         }
-        ~SourceState() { Released(); try { Tracker.Dispose(); } catch { } }
+        ~SourceState()
+        {
+            Released();
+            lock (cacheGate) foreach (var frame in GpuFrames.Values.ToArray()) RemoveGpuFrame(frame);
+            try { Tracker.Dispose(); } catch { }
+        }
     }
 
     private sealed class ModelTraits(string model)
@@ -417,6 +446,14 @@ internal static class TimelineFrameCache
                         return false;
                     }
                 }
+            }
+            if (stored is not null && cacheKey is not null && viewport is not null && TryRestoreGpu(__instance, pending))
+            {
+                Hit(__instance, pending, stored.Value, recalled);
+                Interlocked.Increment(ref gpuHits);
+                pending.Path = GpuTimes;
+                __state = pending;
+                return false;
             }
             bool fromDisk = false;
             bool replaced = false;
@@ -593,6 +630,7 @@ internal static class TimelineFrameCache
             {
                 trace.Outcome = __exception is not null ? "exception" : __state.Pending is null ? "bypass"
                     : __state.RunsHost ? "render" : ReferenceEquals(__state.Pending.Path, LiveTimes) ? "live"
+                    : ReferenceEquals(__state.Pending.Path, GpuTimes) ? "gpu"
                     : ReferenceEquals(__state.Pending.Path, DiskTimes) ? "disk" : "ram";
                 trace.Detail = __exception?.GetType().Name;
                 trace.Dispose();
@@ -1006,6 +1044,7 @@ internal static class TimelineFrameCache
             state.Deferred?.Dispose();
             state.Deferred = null;
             state.Released();
+            foreach (var frame in state.GpuFrames.Values.ToArray()) RemoveGpuFrame(frame);
             state.Tracker.Dispose();
             sources.Remove(__instance);
         }
@@ -1180,6 +1219,117 @@ internal static class TimelineFrameCache
         return record;
     }
 
+    // Cache owner and active-output borrower share one accounted allocation. Each native wrapper
+    // owns a distinct COM reference; eviction never disposes the source's wrapper.
+    private sealed class GpuFrame(SourceState owner, string key, ID2D1DeviceContext context,
+        ID2D1CommandList command, long bytes, long generation)
+    {
+        internal readonly WeakReference<SourceState> Owner = new(owner);
+        internal readonly string Key = key;
+        internal readonly ID2D1DeviceContext Context = context;
+        internal readonly ID2D1CommandList Command = command;
+        internal readonly long Bytes = bytes, Generation = generation;
+        internal LinkedListNode<GpuFrame>? Node;
+        internal int Owners = 2; // retention + currently displayed output
+        internal void Release()
+        {
+            if (--Owners != 0) return;
+            try { Command.Dispose(); }
+            finally { Interlocked.Add(ref gpuBytes, -Bytes); }
+        }
+    }
+
+    // All retention operations run under cacheGate. Global LRU is bounded by bytes and entry count;
+    // weak owners do not keep a disposed/unreachable TimelineSource alive.
+    private static void RemoveGpuFrame(GpuFrame frame)
+    {
+        if (frame.Node is null) return;
+        gpuLru.Remove(frame.Node); frame.Node = null;
+        if (frame.Owner.TryGetTarget(out var owner)) owner.GpuFrames.Remove(frame.Key);
+        gpuRetainedBytes -= frame.Bytes;
+        frame.Release();
+    }
+    private static void ClearGpuFrames()
+    {
+        while (gpuLru.First is { } node) RemoveGpuFrame(node.Value);
+    }
+    private static void TrimGpuFrames(long incoming)
+    {
+        while (gpuLru.First is { } node && (gpuRetainedBytes + incoming > gpuRetentionBudget
+            || (incoming > 0 && gpuLru.Count >= 64))) RemoveGpuFrame(node.Value);
+    }
+    private static void RetainUploaded(Pending pending, ID2D1CommandList command, long bytes)
+    {
+        if (!gpuRetentionEnabled || bytes > gpuRetentionBudget || pending.CacheKey is null) return;
+        ID2D1CommandList? retained = null;
+        try
+        {
+            retained = command.QueryInterface<ID2D1CommandList>();
+            if (pending.State.GpuFrames.TryGetValue(pending.CacheKey, out var previous)) RemoveGpuFrame(previous);
+            TrimGpuFrames(bytes);
+            var frame = new GpuFrame(pending.State, pending.CacheKey, pending.Devices.DeviceContext, retained, bytes, pending.Generation);
+            frame.Node = gpuLru.AddLast(frame);
+            pending.State.GpuFrames.Add(frame.Key, frame);
+            gpuRetainedBytes += bytes;
+            pending.State.Bytes = 0; // transfer the existing reservation; do not double-count aliases
+            pending.State.ActiveGpuFrame = frame;
+            retained = null;
+        }
+        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
+        {
+            using var failure = CacheTrace.Measure("gpu-retention", "state");
+            if (failure is not null) { failure.Outcome = "failed"; failure.Detail = error.GetType().Name; }
+        }
+        finally { retained?.Dispose(); }
+    }
+    private static bool TryRestoreGpu(object source, Pending pending)
+    {
+        using var restore = CacheTrace.Measure("gpu-resident-restore");
+        if (restore is not null) restore.Outcome = "miss";
+        lock (cacheGate)
+        {
+            if (!gpuRetentionEnabled || pending.CacheKey is null || !pending.State.GpuFrames.TryGetValue(pending.CacheKey, out var frame)) return false;
+            if (frame.Generation != pending.Generation || !ReferenceEquals(frame.Context, pending.Devices.DeviceContext)
+                || frame.Context.NativePointer == 0 || !StillCurrent(pending)) { RemoveGpuFrame(frame); return false; }
+            ID2D1CommandList? borrowed = null;
+            bool transferred = false;
+            try
+            {
+                using (CacheTrace.Measure("gpu-command-borrow")) borrowed = frame.Command.QueryInterface<ID2D1CommandList>();
+                frame.Owners++;
+                if (!CommitReplacement(source, pending, borrowed, 0, frame)) return false;
+                transferred = true;
+                if (restore is not null) restore.Outcome = "hit";
+                gpuLru.Remove(frame.Node!); gpuLru.AddLast(frame.Node!);
+                return true;
+            }
+            finally
+            {
+                if (!transferred && borrowed is not null) { borrowed.Dispose(); frame.Release(); }
+            }
+        }
+    }
+    private static bool CommitReplacement(object source, Pending pending, ID2D1CommandList replacement, long bytes, GpuFrame? borrowed)
+    {
+        if (!StillCurrent(pending) || !sources.TryGetValue(source, out var currentState)
+            || !ReferenceEquals(currentState, pending.State)
+            || !ReferenceEquals(outputField.GetValue(source), pending.PreviousOutput)) return false;
+        using var swap = CacheTrace.Measure("cache-output-commit");
+        var collector = (DisposeCollector)collectorField.GetValue(source)!;
+        var previous = (ID2D1CommandList?)outputField.GetValue(source);
+        collector.Collect(replacement);
+        outputField.SetValue(source, replacement);
+        if (previous != null) { collector.Remove(previous); previous.Dispose(); }
+        pending.State.Released();
+        pending.State.LastOutput = replacement;
+        pending.State.LastKey = pending.LiveKey;
+        pending.State.LastViewportKey = pending.Viewport is null ? null : pending.CacheKey;
+        pending.State.Bytes = bytes;
+        pending.State.ActiveGpuFrame = borrowed;
+        pending.State.Generation = pending.Generation;
+        return true;
+    }
+
     private static bool TryReplaceFrame(object source, Pending pending, ReadOnlyMemory<byte> record)
     {
         if (!StillCurrent(pending) || !ParseRecord(record.Span, out int width, out int height, out var origin, out int version, out float dpiX, out float dpiY))
@@ -1206,22 +1356,9 @@ internal static class TimelineFrameCache
                 lock (cacheGate)
                 {
                     gateWait?.Dispose();
-                    if (!StillCurrent(pending) || !sources.TryGetValue(source, out var currentState)
-                        || !ReferenceEquals(currentState, pending.State)
-                        || !ReferenceEquals(outputField.GetValue(source), pending.PreviousOutput)) return false;
-                    using var swap = CacheTrace.Measure("cache-output-commit");
-                    var collector = (DisposeCollector)collectorField.GetValue(source)!;
-                    var previous = (ID2D1CommandList?)outputField.GetValue(source);
-                    collector.Collect(replacement);
-                    outputField.SetValue(source, replacement);
-                    if (previous != null) { collector.Remove(previous); previous.Dispose(); }
-                    pending.State.Released();
-                    pending.State.LastOutput = replacement;
-                    pending.State.LastKey = pending.LiveKey;
-                    pending.State.LastViewportKey = version == 2 ? pending.CacheKey : null;
-                    pending.State.Bytes = bytes;
-                    pending.State.Generation = pending.Generation;
+                    if (!CommitReplacement(source, pending, replacement, bytes, null)) return false;
                     transferred = true;
+                    if (version == 2) RetainUploaded(pending, replacement, bytes);
                     return true;
                 }
             }

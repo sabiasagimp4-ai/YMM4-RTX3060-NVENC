@@ -317,11 +317,11 @@ public sealed class FrameCacheToolView : UserControl
             + Environment.NewLine + TimelineFrameCache.Status + Environment.NewLine + IdleFramePreRenderer.Status
             + Environment.NewLine + CacheMemoryController.Status;
         var store = TimelineFrameCache.StoreIfCreated;
-        counts.Text = $"再利用 {TimelineFrameCache.Hits:N0}（同じ画像 {TimelineFrameCache.LiveReuses:N0} / RAM {TimelineFrameCache.RamHits:N0} / ディスク {TimelineFrameCache.DiskHits:N0}）"
+        counts.Text = $"再利用 {TimelineFrameCache.Hits:N0}（同じ画像 {TimelineFrameCache.LiveReuses:N0} / GPU {TimelineFrameCache.GpuHits:N0} / RAM {TimelineFrameCache.RamHits:N0} / ディスク {TimelineFrameCache.DiskHits:N0}）"
             + $" / 新規描画 {TimelineFrameCache.Misses:N0} / 対象外 {TimelineFrameCache.Bypasses:N0}\n"
             + $"プレビュー保存 {TimelineFrameCache.PreviewStored:N0}（描画スレッド {TimelineFrameCache.PreviewStoreMilliseconds:N1} ms/枚）/ 先読み読込 {TimelineFrameCache.ReadAheads:N0}"
             + (store is null ? "\n" : $" / ディスク読込 {store.DiskReads:N0}（{store.DiskReadMilliseconds:N1} ms/枚）/ 書込 {store.DiskWrites:N0}（混雑で見送り {store.DroppedWrites:N0}）\n")
-            + $"描画の所要時間 p50/p95: 新規描画 {TimelineFrameCache.RenderTimes} / RAM {TimelineFrameCache.RamTimes} / ディスク {TimelineFrameCache.DiskTimes} / 同じ画像 {TimelineFrameCache.LiveTimes}\n"
+            + $"描画の所要時間 p50/p95: 新規描画 {TimelineFrameCache.RenderTimes} / GPU {TimelineFrameCache.GpuTimes} / RAM {TimelineFrameCache.RamTimes} / ディスク {TimelineFrameCache.DiskTimes} / 同じ画像 {TimelineFrameCache.LiveTimes}\n"
             + $"GPU {TimelineFrameCache.GpuBytes / 1048576.0:N1} MiB / RAM {(store?.RamBytes ?? 0) / 1048576.0:N0} / {(store?.RamBudget ?? 0) / 1048576.0:N0} MiB（設定上限 {CacheMemoryController.Maximum / 1048576.0:N0} MiB）"
             + $" / ディスク {(store?.DiskBytes ?? 0) / 1048576.0:N0} MiB / 4 GiB\n"
             + $"ディスク書込待ち {(store?.QueuedWriteBytes ?? 0) / 1048576.0:N0} MiB（RAMの使用量表示とは別に保持）";

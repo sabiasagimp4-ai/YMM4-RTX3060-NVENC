@@ -101,6 +101,7 @@ internal static class Program
                 int traceArg = Array.IndexOf(args, "--trace-output");
                 bool trace = traceArg >= 0 && traceArg + 1 < args.Length;
                 if (trace) { CacheTrace.Start(args[traceArg + 1], "host-gpu-checks"); ProcessingTraceHooks.Start(); ProcessingTraceHooks.Discover(); }
+                TimelineFrameCache.GpuRetentionEnabled = false; // Existing RAM/disk regression counts stay isolated.
                 try { FramePixelChecks.Run(host, video >= 0 && video + 1 < args.Length ? Path.GetFullPath(args[video + 1]) : null, features); }
                 finally { if (trace) { ProcessingTraceHooks.Stop(); CacheTrace.StopAsync().GetAwaiter().GetResult(); } }
             }
