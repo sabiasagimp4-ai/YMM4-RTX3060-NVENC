@@ -721,7 +721,7 @@ internal static class Program
 
     private sealed class DynamicBlurEffect : YukkuriMovieMaker.Project.Effects.GaussianBlurEffect, ICacheDependencyProvider
     {
-        public bool CanCaptureOnCurrentThread => true;
+        [Newtonsoft.Json.JsonIgnore] public bool CanCaptureOnCurrentThread => true;
         [Newtonsoft.Json.JsonIgnore] public string ExternalState { get; set; } = "initial";
         [Newtonsoft.Json.JsonIgnore] public bool FailValidation { get; set; }
         public CacheDependencySnapshot CaptureDependencies(long ticks) => new("test/dynamic-blur", "1", ExternalState, "cpu", [new("previous-input", ExternalState, ticks - 1, ticks)]);
@@ -735,7 +735,7 @@ internal static class Program
         {
             var effect = new DynamicBlurEffect();
             var timeline = new Timeline(); var scenes = new Scenes(false); scenes.AddScene(timeline);
-            var item = new ShapeItem { Frame = 0, Length = 20 }; item.VideoEffects = [effect]; timeline.Items.Add(item);
+            var item = new ShapeItem { Frame = 0, Length = 20 }; item.VideoEffects = [effect]; timeline.Items = timeline.Items.Add(item);
             var scene = new Scene(timeline, scenes, []);
             Check(FrameCacheKey.CaptureDynamicProviders(scene).Contains(effect), "Dynamic provider not found in host animatable tree");
             using var tracker = new KeyDependencyTracker(scene);

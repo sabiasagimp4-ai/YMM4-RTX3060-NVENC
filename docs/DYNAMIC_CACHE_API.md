@@ -37,7 +37,7 @@ if (receipt is not null)
 
 `ICacheDependencyProvider` をホストのanimatableツリー内の設定／効果へ実装する。プロジェクト記述時に発見し、要求時刻の `CacheDependencySnapshot` を既存フレームキーへ混入する。snapshotはclass・schema・状態・context・入力identity／状態token／時間範囲を持つ。keyframe／素材／外部状態の変化はtokenとIsCurrentで報告する。
 
-`CanCaptureOnCurrentThread` の既定はfalse。処理側が実際のスレッド／contextでcallback可能と判断した場合だけtrueを返す。ライブ・idle・exportで同じとは限らない。失敗・例外・変更は通常描画へbypassし、保存・表示前にも再確認する。処理を観測しただけで信頼や安全宣言を作らない。既存のMVID・信頼・file leaseを緩めない。
+`CanCaptureOnCurrentThread` の既定はfalse。処理側が実際のスレッド／contextでcallback可能と判断した場合だけtrueを返す。ライブ・idle・exportで同じとは限らない。スレッドごとの能力判定や実行時状態のpropertyはJsonIgnore等でプロジェクトの設定JSONから除外し、状態はsnapshotへ報告する。optionsとsnapshotを要求中に書き換えない。失敗・例外・変更は通常描画へbypassし、保存・表示前にも再確認する。処理を観測しただけで信頼や安全宣言を作らない。既存のMVID・信頼・file leaseを緩めない。
 
 現段階ではproject内で発見したproviderすべてを追加依存とする。ホストがcheckoutした最小依存範囲の自動追跡ではなく、keyframeの区間内最小無効化も未実装。providerのない処理には従来方式を維持する。UIの帯／disk先読みからcontext制約のあるproviderを呼ばないため、providerを含むprojectではそのキーの受動的な一覧を作らない。通常の要求・復元・保存は有効。
 
