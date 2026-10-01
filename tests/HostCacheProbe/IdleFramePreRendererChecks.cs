@@ -23,8 +23,7 @@ internal static class IdleFramePreRendererChecks
         var loader = typeof(PluginAssemblyLoader);
         var bootstrap = new Harmony("ymm.tests.idle-pre-renderer.loader");
         bootstrap.Patch(loader.TypeInitializer!, prefix: new HarmonyMethod(typeof(IdleFramePreRendererChecks), nameof(SkipPluginLoader)));
-        AccessTools.StaticFieldRefAccess<IEnumerable<Assembly>>(AccessTools.Field(loader, "<Assemblies>k__BackingField"))() =
-            ProbeLoader.Assemblies(typeof(Scene).Assembly);
+        ProbeLoader.Stub(ProbeLoader.Assemblies(typeof(Scene).Assembly));
         var timeline = new Timeline();
         timeline.VideoInfo.Width = 321;
         timeline.VideoInfo.Height = 181;

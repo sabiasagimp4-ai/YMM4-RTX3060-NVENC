@@ -120,6 +120,17 @@ internal static class Program
 // MediaFoundation reader so that video items decode through the real host readers.
 internal static class ProbeLoader
 {
+    // Stands in for PluginAssemblyLoader's static constructor (skipped by the caller's Harmony prefix), which
+    // would load plugins from the test executable's directory. 4.56.1.0 also reads IncompatiblePluginAssemblies.
+    internal static void Stub(IEnumerable<Assembly> assemblies)
+    {
+        var loader = typeof(YukkuriMovieMaker.Plugin.PluginAssemblyLoader);
+        AccessTools.StaticFieldRefAccess<IEnumerable<Assembly>>(AccessTools.Field(loader, "<Assemblies>k__BackingField"))() = assemblies;
+        foreach (var name in new[] { "<IncompatiblePluginAssemblies>k__BackingField", "loadFailures" })
+            if (AccessTools.Field(loader, name) is { } field) // init-only: FieldInfo.SetValue would throw
+                AccessTools.StaticFieldRefAccess<object>(field)() ??= Activator.CreateInstance(typeof(List<>).MakeGenericType(field.FieldType.GetGenericArguments()))!;
+    }
+
     internal static IEnumerable<Assembly> Assemblies(Assembly host)
     {
         string reader = Path.Combine(Path.GetDirectoryName(host.Location)!, "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.dll");

@@ -30,6 +30,10 @@ internal static class Program
         bootstrap.Patch(loaderType.TypeInitializer!, prefix: new HarmonyMethod(typeof(Program), nameof(SkipLoader)));
         AccessTools.StaticFieldRefAccess<IEnumerable<Assembly>>(AccessTools.Field(loaderType, "<Assemblies>k__BackingField"))() =
             new[] { typeof(Scene).Assembly, typeof(YukkuriMovieMaker.Plugin.CacheProvider).Assembly };
+        // 4.56.1.0's PluginLoader also reads these; the skipped static constructor would have created them empty.
+        foreach (var name in new[] { "<IncompatiblePluginAssemblies>k__BackingField", "loadFailures" })
+            if (AccessTools.Field(loaderType, name) is { } field) // init-only: FieldInfo.SetValue would throw
+                AccessTools.StaticFieldRefAccess<object>(field)() ??= Activator.CreateInstance(typeof(List<>).MakeGenericType(field.FieldType.GetGenericArguments()))!;
         var timeline = new Timeline();
         var scenes = new Scenes(false);
         scenes.AddScene(timeline);

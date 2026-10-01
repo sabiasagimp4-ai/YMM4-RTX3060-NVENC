@@ -18,7 +18,7 @@ internal static class FramePixelChecks
         var bootstrap = new Harmony("ymm.tests.pixel-builtin-loader");
         var loader = typeof(PluginAssemblyLoader);
         bootstrap.Patch(loader.TypeInitializer!, prefix: new HarmonyMethod(typeof(FramePixelChecks), nameof(SkipLoader)));
-        AccessTools.StaticFieldRefAccess<IEnumerable<Assembly>>(AccessTools.Field(loader, "<Assemblies>k__BackingField"))() = ProbeLoader.Assemblies(host);
+        ProbeLoader.Stub(ProbeLoader.Assemblies(host));
         using var devices = new GraphicsDevices();
         using var context = devices.CreateContext();
         var dc = context.DeviceContext;
