@@ -6,8 +6,8 @@ using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
 
-// Test-only: writes the project the GUI smoke test opens in YMM4 (tools/ci/gui-smoke.ps1): two shapes and a text
-// over 10 seconds at 1280x720 / 30 fps. Uses YMM4's own model and serializer; no application is started.
+// Test-only: writes the project the GUI smoke test opens in YMM4 (tools/ci/gui-smoke.ps1): two shapes, a text and
+// a Community number shape over 20 seconds at 1280x720 / 30 fps. Uses YMM4's own model and serializer; no application is started.
 //   dotnet run --project tests/GuiSmoke -- <YMM4 dir> <out.ymmp>
 internal static class Program
 {
@@ -46,6 +46,18 @@ internal static class Program
         var text = new TextItem { Frame = 30, Length = 540, Layer = 2, Text = "cache smoke", Font = "Arial" };
         text.Y.SetFirstValue(200);
         timeline.Items = timeline.Items.Add(first).Add(second).Add(text);
+        // A shape from the Community plugin YMM4 ships (code the cache does not read): only 2 s to 3 s render normally,
+        // and the idle pre-renderer reads ahead past it.
+        string communityFile = Path.Combine(Path.GetDirectoryName(typeof(Scene).Assembly.Location)!, "YukkuriMovieMaker.Plugin.Community.dll");
+        if (File.Exists(communityFile)
+            && Assembly.LoadFrom(communityFile).GetType("YukkuriMovieMaker.Plugin.Community.Shape.NumberText.NumberText") is { } numberType
+            && Activator.CreateInstance(numberType, nonPublic: true) is YukkuriMovieMaker.Plugin.Shape.IShapePlugin numberShape)
+        {
+            var number = new ShapeItem { Frame = 60, Length = 30, Layer = 3, ShapeType2 = numberType, ShapeParameter = numberShape.CreateShapeParameter(null) };
+            number.Y.SetFirstValue(-200);
+            timeline.Items = timeline.Items.Add(number);
+        }
+        else Console.WriteLine("No Community number shape in this YMM4; the project has no plugin item");
         var scenes = new Scenes(false);
         scenes.AddScene(timeline);
         var project = new YukkuriMovieMaker.Project.Project(0, scenes, output, string.Empty, new Dictionary<string, SerializableToolState>());
