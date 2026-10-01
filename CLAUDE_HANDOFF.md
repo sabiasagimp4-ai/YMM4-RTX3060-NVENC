@@ -1,8 +1,53 @@
 # Claude 引継ぎ — YMM4 RTX3060 NVENC / AE風キャッシュ
 
-更新日: 2026-10-01（追記5まで）。これは **未完成の作業保存（WIP checkpoint）** です。製品完成・配布可能・AE完全再現を意味しません。
+更新日: 2026-10-01（追記6まで）。これは **未完成の作業保存（WIP checkpoint）** です。製品完成・配布可能・AE完全再現を意味しません。
 
 ## 最初に読むこと
+
+### 2026-10-01 追記（6）— ChatGPT の v2 引継ぎ（`docs/AE_YMM4_Cache_v2_Handoff_2026-10-01.md`）への対応
+
+ユーザー:「docs/AE_YMM4_Cache_v2_Handoff_2026-10-01.md にそろそろ ChatGPT から評価が来ると思うので、それをもとに作業を継続して」。評価（ユーザーが f5098bf で追加、解析対象は 8531425）を HEAD 3508439 と照合し、P0 → P1 → P2 の一部を実装しました。
+
+**HEAD での照合結果（v2 の表 5 / 6 章）**
+| v2 の指摘 | HEAD 3508439 の状態 | 対応 |
+|---|---|---|
+| `FrameTimeKey` が境界 ±1 ms を同じキーに | 残っていた | 正確な ticks をキーに（`t{ticks}@{fps}`、schema `pixels-v7`）。4.56.1.0 の描画元（再生・一時停止・`VideoFileWriter`・現在フレーム出力）と先読み・帯はすべて `VideoInfo.GetTimeFrom(frame)` で時刻を作るので再利用は減らない |
+| `GetResidency` と disk worker の `_disk` 競合 | 残っていた（worker は lock なしで変更） | 索引の変更は worker が `_gate` 下で行い、file I/O 中は持たない。他スレッドは `_gate` 下で読む。purge 永続化中のフレームは帯に出さない |
+| `TryGet` の RAM miss は読み込み予約のみ | 残っていた | 読み込みは書き込みより先（`ReadsFirst`）。一時停止の要求は最大 50 ms 待つ（描画は YMM4 の描画タスク上で UI スレッドではない）。再生中は先読み（`Prefetch`） |
+| 通常プレビューの完成画素を保存しない | 残っていた（保存は idle と出力だけ） | 再生・一時停止・シークで描画したフレームを保存。GPU readback は次の Update か player の `Edit()`（描画スレッド）で仕上げ、描画スレッドは GPU を待たない |
+| idle が保存済み・計算中を skip しない | 残っていた | 保存済み（RAM・ディスク）は描かない（`IsPreviewStored`） |
+| 背景 fingerprint が `cachedPaths` 全体 | 残っていた | chunk ごとに公開し、待っているフレームのファイルを先頭の別 chunk に。検査中でも自分のファイルが確認済みのフレームはキーを作る |
+| `TachieItem` 等が全体 bypass | 残っていた | 立ち絵は映るフレーム（と、それを含むタイムラインを描くシーンアイテムのフレーム）だけ通常描画。同梱の立ち絵プラグインの parameter 型は許可。外部アイテム・外部図形・外部エフェクトは従来どおり全体 bypass（未知の global 依存として保守的に） |
+| whole-project JSON → item 分解 | 残っている | 未着手（未計測。下の「次の課題」） |
+| SingleFlight（同一 key の計算共有） | 残っている | 未実装。重複は「idle の計算中に同じフレームをライブが要求」だけで、idle は操作で中止され結果は捨てられる（1回の割り込みにつき最大1フレーム）。出力とプレビューは usage がキーに入るので互いに合流しない |
+| viewport を含む preview key | 維持 | 変更なし（v2 も維持を指示） |
+
+**実装（commit）**: 96ec9ba（P0・P1 本体）、c1c61c0（保存の capture が Harmony の finalizer で破棄されていた不具合）、05d1df2（立ち絵）、1f69a6d（フレーム単位の素材準備）、22654dd（先読み窓が RAM 内のフレームを数えずに自分を追い出していた不具合）。v2 の「クラス設計のたたき台」は新設せず、既存クラスに入れました（`FrameCacheStore` = FrameDelivery の読み込み・先読み、`TimelineFrameCache` の `DeferredStore`/`PreviewReadback` = 保存、`KeyDependencyTracker` = FileFingerprintService 相当）。
+
+**計測（経路別）**: ツールの「描画キャッシュ」に、再利用の内訳（同じ画像 = live reuse / RAM / ディスク）、新規描画（host render）、対象外（bypass）、プレビュー保存数と描画スレッドでの時間（ms/枚）、先読み読込数、ディスク読込数と ms/枚、書込数、混雑で見送った書込数を表示。`render_ms`（host の描画時間）そのものは分けて計っていない（新規描画の回数のみ）。
+
+**検証（CI）**: 実行中（verify run 14・gui-smoke run 9、f98d131）。結果は次の更新で記入します。
+
+**実装上の注意（次の Claude 向け）**
+- Harmony の finalizer は例外が無くても毎回走ります。`Update` の `Finalizer` が `Pending.Dispose()` を呼ぶため、プレビュー保存で capture を次の Update まで持ち越すときは `Pending.HandOver()` で引き渡し、`DeferredStore.Dispose` が `Release()` します（c1c61c0 まで、保存したフレームが全て「古い」と判定されて 0 枚だった）。
+- 先読み窓（`Prefetch`）は RAM 予算の半分。窓内で既に RAM にあるフレームも数え、最近使ったものへ移します。数えないと窓が RAM を超え、読んだフレームを表示前に自分で追い出します（22654dd まで: 30 フレームで 91 回読み、12 回描画）。
+- 一時停止中の保存: `refreshSupported`（4.56.1.0 と同じ player のコード）なら `BeforeEdit`（player のループ、描画スレッド）で仕上げます。無い版（4.55.1.1 など）は、次の Update が来ないかもしれないので、その場で GPU を待って読みます（一時停止・シーク時に readback 1 回分の待ちが増える）。
+- `TimelineFrameCache.UseStore` / `TestViewport` / `CompletePendingStore` はテスト用（HostCacheProbe の `PreviewDeliveryChecks`）。player 実物の swap chain を作らずに、プレビューの保存・ディスク供給の経路を実 host の `TimelineSource` で通すため。
+- 立ち絵: `FrameCacheKey.IsBundledTachieParameter` は YMM4 のフォルダーから読み込まれた `YukkuriMovieMaker.Plugin.Tachie.*` の型で、JSON 上の祖先に `Tachie*Parameter` プロパティがあるものだけ許可。キャラクターの立ち絵ファイルは依存から外しますが、`Character.GetFiles()` が「字幕・音声エフェクト」+「立ち絵の 5 部分」と一致しない版では全ファイルを依存に戻します。
+
+**未実行・未確認**
+- ユーザーの PC（RTX 3060、YMM4 4.55.1.1）、NVENC 出力、実プロジェクトでの速度（CI は WARP、GPU readback の待ち・PCIe 転送は実 GPU と別物）。
+- 実 GPU での「描画スレッドが GPU を待たない」ことの確認（遅延 readback の効果は WARP では測れない）。
+- UI 操作から表示までの p50/p95、frame drop（計っているのは Update の所要時間）。
+- 動画素材を含むプロジェクトでの 2 周目・再起動（CI は図形のみ。動画は境界時刻の画素一致だけ）。
+- VFR 動画、disk full、device loss の試験（コード上はいずれも通常描画へ戻る経路）。
+
+**次の課題（v2 の残り）**
+1. 実 GPU で計測（ユーザーの PC か GPU のある runner）: ツールの「描画の所要時間 p50/p95」と保存の ms/枚。保存が重ければ、host の出力を一度だけ描いた bitmap を player に渡す方式（1 回描画＋ blit）を検討。
+2. whole-project JSON の差分更新: まず CacheChecks の「Describe after an edit」の数字（CI）で、編集後の待ちの何割かを確認してから。
+3. SingleFlight: idle 中断時の重複（最大 1 フレーム）以外に重複が出る経路が見つかったら。
+4. 外部エフェクト・外部アイテムの限定許可（固定版 adapter）、canonical scene raster、item/effect cache、MFR は v2 どおり後段。
+
 
 ### 2026-10-01 追記（5）— 実 YMM4 の画面で見つけて直した不具合
 
