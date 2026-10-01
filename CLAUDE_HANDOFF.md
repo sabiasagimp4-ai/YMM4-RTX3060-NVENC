@@ -1,8 +1,22 @@
 # Claude 引継ぎ — YMM4 RTX3060 NVENC / AE風キャッシュ
 
-更新日: 2026-10-01（追記9まで）。これは **未完成の作業保存（WIP checkpoint）** です。製品完成・配布可能・AE完全再現を意味しません。
+更新日: 2026-10-01（追記10まで）。これは **未完成の作業保存（WIP checkpoint）** です。製品完成・配布可能・AE完全再現を意味しません。
 
 ## 最初に読むこと
+
+### 2026-10-01 追記（10）— 同一性で決まる乱数、Community の監査、信頼するプラグイン
+
+ユーザー:「外部プラグイン・外部図形・外部フォントを通常描画ではなくキャッシュ使用にすることはできませんか？」→ 回答で選択: 外部プラグインは「個別許可・アイテム単位」、同梱 Community は「コードを読んで安全なものだけ自動対象」。フォントは既に Windows に入っているもの（ユーザー単位のインストールを含む）はキャッシュ対象と説明。
+- **監査で見つけたキーの正しさの問題（ed76ba4）**: YMM4 は乱数の種に `GetHashCode()`（どこも override していない＝オブジェクトの同一性）を使う。`Animation.GetValue` のランダム移動（`GetRandomMoveRate(this, …)`）、`RandomEffectBase` 系（ランダム移動・回転・拡大・傾き・透明度）、RandomDuplicator・Crash・InOutCrash・RandomLine・InOutRandomLine・Noise（unique seed、`NoiseParameter` の hash）、TextSource/JimakuSource のランダム表示順（source オブジェクトの hash）。別プロセス・プロジェクトの再読込・idle 先読みの複製で違う乱数になるため、別の起動時や複製の絵が混ざり得た（出力キャッシュも）。
+  - `FrameCacheKey.IdentitySeeds`: YMM4 自身の `GetAnimatables`（protected、reflection）と Character のプロパティ（Character には GetAnimatables が無い）をたどり、ランダム移動の Animation と上記エフェクト（`IsIdentitySeeded`）の `RuntimeHelpers.GetHashCode` をアイテムの resource `identity://…` に入れる。そのフレームは「このオブジェクトの間だけ」のキー（`FrameDependencyIndex` の `Session`、他タイムラインは `nestedSession`）。idle 先読みは複製では乱数が違うので飛ばす（`RendersNormally` に含めた）。たどれなかったランダム移動は JSON の `"ランダム移動"` で検出して uncacheable（root アイテム・他タイムライン・キャラクター）。
+  - ランダムな表示/消去順のテキスト・字幕は、種が YMM4 の text source（アイテムがフレームに戻るたびに作り直し）なので uncacheable。
+  - ノイズ音声エフェクト（`Project.Effects.Audio.NoiseEffect`）は seed なしの `Random` → AudioOnly（音声を読むフレームだけ通常描画）。
+  - 試験: CacheChecks（ランダム移動・RandomMoveEffect はキー取得・Session、JSON で複製したプロジェクトでは別キー、乱数の無いフレームは同じキー、ランダム表示順のテキストは通常描画、ランダムをやめると Session でない）、StoreChecksHarness（Session の伝播: そのフレーム、後ろのトランジション、他タイムラインはシーンのフレームだけ）。verify run 25 成功。
+- **Community の監査（f17d389、`KnownCode.VerifiedCommunity`）**: 4.56.1.0 の Community（MVID `ac765de8-d44f-44f1-a094-961becf4d22e`、YMM4 フォルダーから読み込まれたもの）だけ。逆コンパイルした各 namespace を、他アイテム・シーン・音声・ファイル・時計・seed なし乱数・設定・native・通信・可変 static・持ち越す bitmap/履歴で走査し、怪しいものは読んだ。対象外と理由はコードのコメント（MotionBlur は前に描いたフレームの変換との差でぼかす＝描画順に依存、AfterImage は feedback bitmap、AudioVolume は音声、Arrange/Tiling/RadialArrangeGroupItems・Container・Scene ブラシは他アイテム/シーン、OpenFx は外部バイナリ、Lut・GradientMap はファイルを GetFiles で報告しない、ShuffleText・NumberText はフォントをキーで解決していない、DirectionalColorKey・FillSame*・Particle*・PuppetDeformation・VectorFieldWarp・Pen は読み切っていない）。CameraShake・RectangleGlitchNoise・StripeGlitchNoise・WaveClipping は effect の同一性が種なので Session で。Output* は同じアイテムの effect chain の `DrawDescription` custom value だけでやり取り（アイテム単位で可）。YMM4 を更新して Community の MVID が変わると自動で対象外になる（監査をやり直して MVID とリストを更新する）。
+- **信頼するプラグイン（f17d389）**: 設定（ツールと YMM4 の設定画面）に、読み込まれたユーザープラグインのアセンブリ一覧（`PluginLoader.UserPlugins`・`UserVideoEffects`・`UserAudioEffects`）のチェックボックス。`FrameCacheToolSettings.TrustedPlugins`（既定は空）→ `KnownCode.Trusted`。チェックしたアセンブリの型・図形・アイテム・トランジション・resource・読み込みプラグインは既知のコードとしてアイテム単位でキー化（AE のプラグインと同じ前提）。読み込まれている信頼アセンブリの名前と MVID（と監査済み Community の MVID）を snapshot の `Code` に入れる（全フレームのキー。更新や信頼の変更で作り直し）。`.OpenFx.`・`.Vst3.` の型は信頼しても対象外。tracker は `KnownCode.Generation` の変化で記述し直す。
+- あわせて: `TransitionItem.TransitionType`（Type）を確認していなかった（パラメーター型が YMM4 側のトランジションプラグインなら既知扱いになり得た）。`KnownCode.Knows` で確認。
+- 試験: CacheChecks（テスト用の外部エフェクトを信頼するとキー化・全キーが変わる、外すと戻る。Community: Bloom はキー化、MotionBlur は通常描画、CameraShake は Session、LensFlare 図形はキー化）。gui-smoke: 2 つ目の四角に Community の Bloom。
+- 未確認: ユーザーが実際に追加した外部プラグインでの動作、設定画面の一覧の表示（GUI の写真では未確認）。
 
 ### 2026-10-01 追記（9）— 起動中に上書きされた素材（キーの正しさ）
 
