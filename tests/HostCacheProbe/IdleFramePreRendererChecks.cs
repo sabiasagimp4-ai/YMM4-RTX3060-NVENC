@@ -72,7 +72,7 @@ internal static class IdleFramePreRendererChecks
         using (liveCapture)
         using (cloneCapture)
         {
-            Check(liveCapture.Key == cloneCapture.Key, "Live and cloned test captures do not match");
+            Check(CaptureKey(liveCapture) == CaptureKey(cloneCapture), "Live and cloned test captures do not match");
             var cache = assembly.GetType("NVEncVideoWriterPlugin.TimelineFrameCache", true)!;
             var viewportType = cache.GetNestedType("PreviewViewport", BindingFlags.NonPublic)!;
             var viewport = viewportType.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).Single()
@@ -110,6 +110,10 @@ internal static class IdleFramePreRendererChecks
         capture = (IDisposable)args[0]!;
         return (IDisposable)tracker;
     }
+
+    // The plugin's KeyCapture is internal to its assembly; read its key by reflection.
+    private static string CaptureKey(IDisposable capture) =>
+        (string)capture.GetType().GetProperty("Key", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.GetValue(capture)!;
 
     private static bool CountPrimePreview(ref bool __result)
     {
