@@ -341,9 +341,39 @@ internal static class IdleFramePreRenderer
 
     private static void OnInput(object sender, PreProcessInputEventArgs args)
     {
-        if (args.StagingItem.Input is not null && session is { } current)
+        if (session is { } current && IsUserInput(args.StagingItem.Input))
             MarkActivity(current, "操作を検知したため、先読みを中断しました。");
     }
+
+    private static CursorPoint lastCursor;
+
+    // Keys, text, buttons, wheel, pen and touch, and mouse moves that move the cursor. WPF also raises mouse moves
+    // without any input whenever the layout under the cursor may have changed, for example when the cache bars
+    // repaint because a frame was stored; counting those let the pre-renderer cancel itself.
+    private static bool IsUserInput(InputEventArgs? input)
+    {
+        switch (input)
+        {
+            case MouseButtonEventArgs or MouseWheelEventArgs:
+                return true;
+            case MouseEventArgs when input.RoutedEvent == Mouse.PreviewMouseMoveEvent:
+                if (!GetCursorPos(out var cursor)) return true;
+                bool moved = cursor.X != lastCursor.X || cursor.Y != lastCursor.Y;
+                lastCursor = cursor;
+                return moved;
+            case MouseEventArgs or KeyboardFocusChangedEventArgs:
+                return false;
+            case KeyboardEventArgs or TextCompositionEventArgs or StylusEventArgs or TouchEventArgs:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private struct CursorPoint { public int X, Y; }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out CursorPoint point);
 
     private static void SubscribeInput()
     {

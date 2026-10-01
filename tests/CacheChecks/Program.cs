@@ -285,6 +285,24 @@ internal static class Program
             var image = new ImageItem { FilePath = imageFile, Frame = 100, Length = 10, Layer = 2 };
             timeline.Items = timeline.Items.Add(image);
             string withFile = WaitForFrameKey(tracker, 105);
+            // The cache bars of another preview that only showed frame 10: frame 105 was stored by another tracker,
+            // so this one verifies its file in the background and then shows it.
+            var barsTimeline = new Timeline();
+            barsTimeline.Items = barsTimeline.Items.Add(new ShapeItem { Frame = 0, Length = 30 })
+                .Add(new ImageItem { FilePath = imageFile, Frame = 100, Length = 10, Layer = 1 });
+            var barsScenes = new Scenes(false);
+            barsScenes.AddScene(barsTimeline);
+            var barsScene = new Scene(barsTimeline, barsScenes, []);
+            using (var stored = new KeyDependencyTracker(barsScene))
+            using (var display = new KeyDependencyTracker(barsScene))
+            {
+                string storedKey = WaitForFrameKey(stored, 105);
+                Check(display.TryCapture(10, out var shown, out string shownReason), "The bars' tracker could not capture a frame without files: " + shownReason);
+                shown!.Dispose();
+                var peeked = new string?[1];
+                Check(SpinWait.SpinUntil(() => display.TryPeekFrameKeys([105], peeked, out _) && peeked[0] is not null, TimeSpan.FromSeconds(15))
+                    && peeked[0] == storedKey, "The cache bars never showed a frame whose file only another tracker had verified");
+            }
             Check(WaitForFrameKey(tracker, 10) == at10, "Adding an item elsewhere changed unrelated frames");
             File.Delete(imageFile);
             Check(!tracker.TryCapture(105, out _, out string missing) && missing.Length != 0, "A frame whose file is missing did not bypass");

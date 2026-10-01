@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory)] [string] $HostDir,
     [Parameter(Mandatory)] [string] $Project,
     [Parameter(Mandatory)] [string] $PluginDir,
-    [int] $SettleSeconds = 48
+    [int] $SettleSeconds = 60
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms, WindowsBase, UIAutomationClient, UIAutomationTypes
@@ -228,27 +228,17 @@ try {
     List-Windows $process
     Shot 'tool-opened'
 
-    # The idle pre-renderer renders ahead of the playhead while the preview has drawn recently (10 s). Selecting items
-    # on the timeline (Layer 00 and Layer 01, default layout at 1600x900) redraws it, the way editing does, and shows
-    # the selection rectangle that the plugin keeps on cached frames.
-    $points = @(@(180, 546), @(330, 578))
-    $end = (Get-Date).AddSeconds($SettleSeconds)
-    $n = 0
-    while ((Get-Date) -lt $end -and -not $process.HasExited) {
-        Answer-Dialogs $process
-        $point = $points[$n % 2]
-        Click-At $point[0] $point[1] "item $($n % 2)"
-        $n++
-        Start-Sleep -Seconds 8
-        if ($n -eq 3) { Shot 'prerendering' }
-    }
-    # Layer 00 is on screen at the playhead: its selection rectangle shows in the preview.
-    Click-At $points[0][0] $points[0][1] 'item 0'
-    Start-Sleep -Seconds 4
+    # Select the Layer 00 item (on screen at the playhead, so the preview draws its selection rectangle), then leave
+    # YMM4 alone: the idle pre-renderer fills the cache ahead of the playhead and the bars turn green/blue.
+    Click-At 180 546 'the Layer 00 item'
+    Start-Sleep -Seconds 20
+    Shot 'prerendering'
+    Start-Sleep -Seconds ([Math]::Max(5, $SettleSeconds - 20))
     Shot 'settled'
-    # Without input for a while (the tool shows what the pre-renderer waits for).
-    Start-Sleep -Seconds 15
-    Shot 'idle'
+    # Seek to 00:00:05 on the ruler: that frame (both rectangles and the text) comes from the cache.
+    Click-At 250 518 'the ruler at 5 s'
+    Start-Sleep -Seconds 4
+    Shot 'seek'
     List-Windows $process
     foreach ($window in Windows-Of $process) { Texts ($ae::FromHandle($window.Handle)) $window.Title }
 }

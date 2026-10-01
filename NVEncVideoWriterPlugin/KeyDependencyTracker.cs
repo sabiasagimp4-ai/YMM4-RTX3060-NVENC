@@ -131,30 +131,7 @@ internal sealed class KeyDependencyTracker : IDisposable
                     reason = "外部素材の内容を背景で検査しています。通常描画を使用します。";
                     return false;
                 }
-                if (fingerprintRevision == before)
-                {
-                    if (fingerprintTask.IsCompletedSuccessfully && fingerprintTask.Result.Files is { } fingerprinted)
-                    {
-                        fingerprints = fingerprinted;
-                        cachedKey = string.Empty;
-                        frameKeys.Clear();
-                        cachedReason = string.Empty;
-                        // Files that could not be verified only disable the frames that use them; retry later.
-                        if (fingerprintTask.Result.Reason.Length != 0)
-                        {
-                            cachedPartialReason = fingerprintTask.Result.Reason;
-                            nextFingerprintAttempt = Environment.TickCount64 + 5000;
-                        }
-                    }
-                    else
-                    {
-                        cachedReason = fingerprintTask.IsCompletedSuccessfully ? fingerprintTask.Result.Reason
-                            : "外部素材の内容確認に失敗しました。しばらくして再試行します。";
-                        nextFingerprintAttempt = Environment.TickCount64 + 1000;
-                    }
-                }
-                fingerprintTask = null;
-                fingerprintCancellation = null;
+                AdoptFingerprints(before);
             }
             // Zero hash budget makes this a metadata-only lease. Cold/changed files are hashed once off-thread.
             if (fingerprints is not null && files.All(fingerprints.ContainsKey)
@@ -173,23 +150,7 @@ internal sealed class KeyDependencyTracker : IDisposable
                 lease.Dispose();
             }
             long now = Environment.TickCount64;
-            if (now >= nextFingerprintAttempt && FingerprintSlot.Wait(0))
-            {
-                var cancellation = new CancellationTokenSource();
-                fingerprintCancellation = cancellation;
-                fingerprintRevision = before;
-                cachedPartialReason = string.Empty;
-                string[] paths = cachedPaths;
-                var previous = fingerprints;
-                CancellationToken token = cancellation.Token;
-                fingerprintTask = Task.Run(() =>
-                {
-                    try { return Fingerprint(paths, previous, token); }
-                    finally { FingerprintSlot.Release(); cancellation.Dispose(); }
-                });
-            }
-            else if (now >= nextFingerprintAttempt)
-                nextFingerprintAttempt = now + 250;
+            StartFingerprinting(before, now);
             reason = cachedPartialReason.Length != 0 ? "外部素材の一部を検証できません: " + cachedPartialReason
                 : now < nextFingerprintAttempt && !string.IsNullOrEmpty(cachedReason)
                 ? cachedReason : "外部素材の内容確認を準備中のため、通常描画を使用します。";
@@ -199,22 +160,79 @@ internal sealed class KeyDependencyTracker : IDisposable
 
     // For display only (cache status bars): the keys of these frames from the current description, without
     // verifying or leasing files. False while an edit is not described yet; null for frames with unhashed files.
+    // Frames another tracker stored (the idle pre-renderer, export) can be ones this tracker never captured, so
+    // their files are verified here in the background too.
     internal bool TryPeekFrameKeys(IReadOnlyList<int> frames, string?[] keys, out string model)
     {
         lock (gate)
         {
             model = string.Empty;
             if (disposed || cachedRevision != Revision || !cachedEligible || cachedFrames is null) return false;
+            if (fingerprintTask is { IsCompleted: true }) AdoptFingerprints(cachedRevision);
+            bool unverified = false;
             for (int i = 0; i < frames.Count; i++)
             {
                 var dependencies = cachedFrames.For(frames[i]);
-                keys[i] = dependencies.Cacheable && (dependencies.Files.Length == 0
-                    || (fingerprints is not null && dependencies.Files.All(fingerprints.ContainsKey)))
-                    ? KeyFor(dependencies, dependencies.Files) : null;
+                bool verified = dependencies.Files.Length == 0
+                    || (fingerprints is not null && dependencies.Files.All(fingerprints.ContainsKey));
+                unverified |= dependencies.Cacheable && !verified;
+                keys[i] = dependencies.Cacheable && verified ? KeyFor(dependencies, dependencies.Files) : null;
             }
+            if (unverified && fingerprintTask is null) StartFingerprinting(cachedRevision, Environment.TickCount64);
             model = cachedModel;
             return true;
         }
+    }
+
+    // Under gate, with a finished fingerprintTask: keeps its fingerprints if they describe this revision's files.
+    private void AdoptFingerprints(long current)
+    {
+        if (fingerprintRevision == current)
+        {
+            if (fingerprintTask!.IsCompletedSuccessfully && fingerprintTask.Result.Files is { } fingerprinted)
+            {
+                fingerprints = fingerprinted;
+                cachedKey = string.Empty;
+                frameKeys.Clear();
+                cachedReason = string.Empty;
+                // Files that could not be verified only disable the frames that use them; retry later.
+                if (fingerprintTask.Result.Reason.Length != 0)
+                {
+                    cachedPartialReason = fingerprintTask.Result.Reason;
+                    nextFingerprintAttempt = Environment.TickCount64 + 5000;
+                }
+            }
+            else
+            {
+                cachedReason = fingerprintTask.IsCompletedSuccessfully ? fingerprintTask.Result.Reason
+                    : "外部素材の内容確認に失敗しました。しばらくして再試行します。";
+                nextFingerprintAttempt = Environment.TickCount64 + 1000;
+            }
+        }
+        fingerprintTask = null;
+        fingerprintCancellation = null;
+    }
+
+    // Under gate, with no fingerprintTask: verifies the project's files in the background (one tracker at a time).
+    private void StartFingerprinting(long current, long now)
+    {
+        if (now >= nextFingerprintAttempt && FingerprintSlot.Wait(0))
+        {
+            var cancellation = new CancellationTokenSource();
+            fingerprintCancellation = cancellation;
+            fingerprintRevision = current;
+            cachedPartialReason = string.Empty;
+            string[] paths = cachedPaths;
+            var previous = fingerprints;
+            CancellationToken token = cancellation.Token;
+            fingerprintTask = Task.Run(() =>
+            {
+                try { return Fingerprint(paths, previous, token); }
+                finally { FingerprintSlot.Release(); cancellation.Dispose(); }
+            });
+        }
+        else if (now >= nextFingerprintAttempt)
+            nextFingerprintAttempt = now + 250;
     }
 
     // Called under gate with verified fingerprints for `files`.
