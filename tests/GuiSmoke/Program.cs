@@ -64,6 +64,7 @@ internal static class Program
             && Assembly.LoadFrom(communityFile).GetType("YukkuriMovieMaker.Plugin.Community.Effect.Video.Bloom.BloomEffect") is { } bloomType
             && Activator.CreateInstance(bloomType, nonPublic: true) is YukkuriMovieMaker.Plugin.Effects.IVideoEffect bloom)
             second.VideoEffects = second.VideoEffects.Add(bloom);
+        timeline.RefreshTimelineLengthAndMaxLayer();
         var scenes = new Scenes(false);
         scenes.AddScene(timeline);
         var project = new YukkuriMovieMaker.Project.Project(0, scenes, output, string.Empty, new Dictionary<string, SerializableToolState>());
@@ -108,6 +109,7 @@ internal static class Program
         string audioFile = Path.Combine(assets, "clock.wav");
         if (!File.Exists(audioFile)) throw new FileNotFoundException("Audio clock missing", audioFile);
         timeline.Items = timeline.Items.Add(new AudioItem { FilePath = audioFile, Frame = 0, Length = 900, Layer = 22 });
+        timeline.RefreshTimelineLengthAndMaxLayer();
         var scenes = new Scenes(false); scenes.AddScene(timeline);
         var project = new YukkuriMovieMaker.Project.Project(0, scenes, output, string.Empty, new Dictionary<string, SerializableToolState>());
         YukkuriMovieMaker.Json.Json.Save(project, output);
