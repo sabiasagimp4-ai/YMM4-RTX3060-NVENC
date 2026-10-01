@@ -43,6 +43,7 @@ internal static class Program
         Check(!FrameCacheKey.IsBuiltInSourceReader(typeof(Program)), "Custom reader assembly was trusted");
         CheckBundledReaders();
         CheckBundledTachie();
+        CheckFramePreparesOwnFiles();
         Type[][] readerTypes = FrameCacheKey.CaptureSourceReaderTypes();
         Check(FrameCacheKey.SourceReadersMatch(readerTypes), "Unchanged source reader stamp mismatched");
         Check(!FrameCacheKey.SourceReadersMatch([readerTypes[0].Append(typeof(Program)).ToArray(), readerTypes[1], readerTypes[2]]), "Source reader list change was not detected");
@@ -385,6 +386,56 @@ internal static class Program
         capture!.Dispose();
         Check(!tracker.TryCapture(55, out _, out reason) && reason.Contains("立ち絵"), "The tachie frame was keyed: " + reason);
         Console.WriteLine($"Bundled tachie ({parameterType.Name}): frames without it keyed, its frames rendered normally");
+    }
+
+    // A frame only waits for its own files: with 150 large files in the project, a frame whose small file comes last
+    // in the project's order is keyed once that file is verified, while the pass over the others still runs.
+    private static void CheckFramePreparesOwnFiles()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "ymm-cache-priority-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var timeline = new Timeline();
+            var scenes = new Scenes(false);
+            scenes.AddScene(timeline);
+            var content = new byte[2 * 1024 * 1024];
+            Random.Shared.NextBytes(content);
+            var items = new List<IItem>();
+            for (int i = 0; i < 150; i++)
+            {
+                string other = Path.Combine(folder, $"a{i:D3}.png");
+                content[0] = (byte)i;
+                File.WriteAllBytes(other, content);
+                items.Add(new ImageItem { FilePath = other, Frame = i * 10, Length = 10 });
+            }
+            string own = Path.Combine(folder, "z-own.png");
+            File.WriteAllBytes(own, new byte[1024]);
+            items.Add(new ImageItem { FilePath = own, Frame = 2000, Length = 10 });
+            timeline.Items = timeline.Items.AddRange(items);
+            using var tracker = new KeyDependencyTracker(new Scene(timeline, scenes, []));
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            bool passRunning = false;
+            TimeSpan keyed = TimeSpan.Zero;
+            while (clock.Elapsed < TimeSpan.FromSeconds(60))
+            {
+                if (tracker.TryCapture(2005, out var capture, out _))
+                {
+                    passRunning = tracker.FingerprintPassRunning;
+                    keyed = clock.Elapsed;
+                    capture!.Dispose();
+                    break;
+                }
+                Thread.Sleep(1);
+            }
+            Check(keyed != TimeSpan.Zero, "The frame with its own file was never keyed");
+            Check(SpinWait.SpinUntil(() => !tracker.FingerprintPassRunning, TimeSpan.FromSeconds(60)), "The fingerprint pass did not finish");
+            var all = clock.Elapsed;
+            Check(passRunning, $"The frame waited for every file of the project: keyed after {keyed.TotalMilliseconds:F0} ms, pass {all.TotalMilliseconds:F0} ms");
+            Check(WaitForFrameKey(tracker, 5).Length != 0, "Other frames were not keyed after the pass");
+            Console.WriteLine($"Frame-first file preparation: frame keyed after {keyed.TotalMilliseconds:F0} ms, all 151 files (300 MiB) after {all.TotalMilliseconds:F0} ms");
+        }
+        finally { Directory.Delete(folder, recursive: true); }
     }
 
     private static void CheckBundledReaders()

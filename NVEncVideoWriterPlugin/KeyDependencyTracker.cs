@@ -45,6 +45,9 @@ internal sealed class KeyDependencyTracker : IDisposable
     // Never changed in place: a new verification replaces the whole dictionary.
     internal IReadOnlyDictionary<string, FileFingerprint>? VerifiedFingerprints { get { lock (gate) return fingerprints; } }
 
+    // Tests: whether a fingerprint pass is still running.
+    internal bool FingerprintPassRunning { get { lock (gate) return fingerprintTask is { IsCompleted: false }; } }
+
     internal event Action? Invalidated;
     public long Revision => Interlocked.Read(ref revision);
     public long CaptureRevision() => Revision;
@@ -124,15 +127,8 @@ internal sealed class KeyDependencyTracker : IDisposable
                 capture = new KeyCapture(this, KeyFor(dependencies, files), cachedModel, before, cachedParents, null);
                 return true;
             }
-            if (fingerprintTask is not null)
-            {
-                if (!fingerprintTask.IsCompleted)
-                {
-                    reason = "外部素材の内容を背景で検査しています。通常描画を使用します。";
-                    return false;
-                }
-                AdoptFingerprints(before);
-            }
+            if (fingerprintTask is { IsCompleted: true }) AdoptFingerprints(before);
+            // While a pass runs, a frame whose own files it has already verified is keyed (results arrive per chunk).
             // Zero hash budget makes this a metadata-only lease. Cold/changed files are hashed once off-thread.
             if (fingerprints is not null && files.All(fingerprints.ContainsKey)
                 && FileDependencyLease.TryAcquire(files, fingerprints, 0, out var lease, out _))
@@ -149,8 +145,15 @@ internal sealed class KeyDependencyTracker : IDisposable
                 }
                 lease.Dispose();
             }
+            if (fingerprintTask is not null)
+            {
+                reason = "外部素材の内容を背景で検査しています。通常描画を使用します。";
+                return false;
+            }
             long now = Environment.TickCount64;
-            StartFingerprinting(before, now);
+            // This frame's own unverified files first, then the rest of the project.
+            var verified = fingerprints;
+            StartFingerprinting(before, now, verified is null ? files : files.Where(file => !verified.ContainsKey(file)).ToArray());
             reason = cachedPartialReason.Length != 0 ? "外部素材の一部を検証できません: " + cachedPartialReason
                 : now < nextFingerprintAttempt && !string.IsNullOrEmpty(cachedReason)
                 ? cachedReason : "外部素材の内容確認を準備中のため、通常描画を使用します。";
@@ -213,8 +216,9 @@ internal sealed class KeyDependencyTracker : IDisposable
         fingerprintCancellation = null;
     }
 
-    // Under gate, with no fingerprintTask: verifies the project's files in the background (one tracker at a time).
-    private void StartFingerprinting(long current, long now)
+    // Under gate, with no fingerprintTask: verifies the project's files in the background (one tracker at a time),
+    // `first` before the others. Fingerprints are published as each chunk finishes.
+    private void StartFingerprinting(long current, long now, string[]? first = null)
     {
         if (now >= nextFingerprintAttempt && FingerprintSlot.Wait(0))
         {
@@ -223,11 +227,18 @@ internal sealed class KeyDependencyTracker : IDisposable
             fingerprintRevision = current;
             cachedPartialReason = string.Empty;
             string[] paths = cachedPaths;
+            int leading = 0;
+            if (first is { Length: > 0 })
+            {
+                var set = new HashSet<string>(first, StringComparer.OrdinalIgnoreCase);
+                paths = first.Concat(paths.Where(path => !set.Contains(path))).ToArray();
+                leading = first.Length;
+            }
             var previous = fingerprints;
             CancellationToken token = cancellation.Token;
             fingerprintTask = Task.Run(() =>
             {
-                try { return Fingerprint(paths, previous, token); }
+                try { return Fingerprint(paths, previous, token, Publish, leading); }
                 finally { FingerprintSlot.Release(); cancellation.Dispose(); }
             });
         }
@@ -256,31 +267,52 @@ internal sealed class KeyDependencyTracker : IDisposable
 
     // Chunks keep each lease under FileDependencyLease's per-lease limit; a failing chunk is retried file by file
     // so that one unverifiable file only disables the frames that use it.
-    private static (IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason) Fingerprint(string[] paths, IReadOnlyDictionary<string, FileFingerprint>? previous, CancellationToken token)
+    private static (IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason) Fingerprint(string[] paths,
+        IReadOnlyDictionary<string, FileFingerprint>? previous, CancellationToken token,
+        Action<IReadOnlyDictionary<string, FileFingerprint>>? publish = null, int leading = 0)
     {
         var result = new Dictionary<string, FileFingerprint>(StringComparer.OrdinalIgnoreCase);
         string reason = string.Empty;
-        foreach (var chunk in paths.Chunk(FingerprintChunk))
+        // The leading files (a waiting frame's) are chunked on their own, so they are published first.
+        foreach (var chunk in paths[..leading].Chunk(FingerprintChunk).Concat(paths[leading..].Chunk(FingerprintChunk)))
         {
             token.ThrowIfCancellationRequested();
-            if (TryAdd(chunk)) continue;
-            foreach (var path in chunk)
-            {
-                token.ThrowIfCancellationRequested();
-                TryAdd([path]);
-            }
+            var added = new Dictionary<string, FileFingerprint>(StringComparer.OrdinalIgnoreCase);
+            if (!TryAdd(chunk, added))
+                foreach (var path in chunk)
+                {
+                    token.ThrowIfCancellationRequested();
+                    TryAdd([path], added);
+                }
+            if (added.Count != 0) publish?.Invoke(added);
         }
         return (result.Count == 0 ? null : result, reason);
 
-        bool TryAdd(string[] group)
+        bool TryAdd(string[] group, Dictionary<string, FileFingerprint> added)
         {
             if (!FileDependencyLease.TryAcquire(group, previous, MaximumFingerprintBytes, out var lease, out string failure, token))
             {
                 reason = failure;
                 return false;
             }
-            using (lease) foreach (var pair in lease!.Fingerprints) result[pair.Key] = pair.Value;
+            using (lease) foreach (var pair in lease!.Fingerprints) result[pair.Key] = added[pair.Key] = pair.Value;
             return true;
+        }
+    }
+
+    // A chunk's fingerprints, while the pass goes on. They describe files, not a project revision: a capture still
+    // leases its files and compares their stamps, and the finished pass replaces the whole dictionary.
+    private void Publish(IReadOnlyDictionary<string, FileFingerprint> added)
+    {
+        lock (gate)
+        {
+            if (disposed) return;
+            var merged = new Dictionary<string, FileFingerprint>(StringComparer.OrdinalIgnoreCase);
+            if (fingerprints is not null) foreach (var pair in fingerprints) merged[pair.Key] = pair.Value;
+            foreach (var pair in added) merged[pair.Key] = pair.Value;
+            fingerprints = merged;
+            cachedKey = string.Empty;
+            frameKeys.Clear();
         }
     }
 
