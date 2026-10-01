@@ -30,6 +30,11 @@ internal static class Program
         bool unread = args.Contains("--unread");
         bool known = HostIntegration.VerifyHost(host, out var hostReason);
         if (!unread) Check(known, "Host binary verification failed: " + hostReason);
+        if (args.Contains("--preview-performance"))
+        {
+            PreviewPerformanceChecks.Run(host);
+            return 0;
+        }
         if (args.Contains("--integration"))
         {
             HostIntegrationChecks.Run(host);

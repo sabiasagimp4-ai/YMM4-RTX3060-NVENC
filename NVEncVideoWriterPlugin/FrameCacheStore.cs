@@ -195,11 +195,14 @@ internal sealed class FrameCacheStore : IDisposable
                 return;
             }
             var snapshot = owned ? pixels : (byte[])pixels.Clone();
-            AddRam(key, snapshot, fromDisk: false);
+            using (PreviewPerformance.Measure(PreviewStage.RamCommit)) AddRam(key, snapshot, fromDisk: false);
             // ponytail: async disk reads only promote frames that fit RAM; streaming hits need a separate delivery API.
             if (_diskWorker is not null && !_workerFailed && !Volatile.Read(ref _diskBlocked)
                 && snapshot.LongLength <= _ramBudget && snapshot.LongLength <= _diskBudget - HeaderBytes)
+            {
+                using var measurement = PreviewPerformance.Measure(PreviewStage.DiskEnqueue);
                 QueueWrite(key, snapshot, _generation);
+            }
         }
     }
 

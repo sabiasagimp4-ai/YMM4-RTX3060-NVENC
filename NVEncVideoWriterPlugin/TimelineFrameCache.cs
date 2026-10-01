@@ -32,6 +32,7 @@ internal static class TimelineFrameCache
     private static readonly TimeSpan PausedDiskWait = TimeSpan.FromMilliseconds(50);
     private static readonly ConditionalWeakTable<string, ModelTraits> modelTraits = new();
     private static readonly ConditionalWeakTable<object, SourceState> sources = new();
+    private static readonly ConditionalWeakTable<object, UpdateMeasurement> updateMeasurements = new();
     private static readonly ConditionalWeakTable<object, PlayerAssociation> sourcePlayers = new();
     private static readonly ConditionalWeakTable<Timeline, LatestViewport> latestViewports = new();
     private static readonly ConditionalWeakTable<ID2D1DeviceContext, string> renderEnvironments = new();
@@ -91,34 +92,8 @@ internal static class TimelineFrameCache
     }
     // Disk reads queued ahead of the playhead.
     internal static long ReadAheads => Interlocked.Read(ref readAheads);
-    // Update time by path, from the cache's prefix to the end of the host's update (storing excluded).
-    internal static readonly PathTimes RenderTimes = new(), RamTimes = new(), DiskTimes = new(), LiveTimes = new();
-
-    // The last 1024 durations, for percentiles.
-    internal sealed class PathTimes
-    {
-        private readonly long[] samples = new long[1024];
-        private int count, next;
-        internal void Add(long ticks)
-        {
-            lock (samples)
-            {
-                samples[next] = ticks;
-                next = (next + 1) % samples.Length;
-                count = Math.Min(count + 1, samples.Length);
-            }
-        }
-        internal (int Count, double P50, double P95) Summary()
-        {
-            long[] sorted;
-            lock (samples) sorted = samples[..count];
-            if (sorted.Length == 0) return (0, 0, 0);
-            Array.Sort(sorted);
-            double Milliseconds(int percent) => sorted[(sorted.Length - 1) * percent / 100] * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-            return (sorted.Length, Milliseconds(50), Milliseconds(95));
-        }
-        public override string ToString() { var (n, p50, p95) = Summary(); return n == 0 ? "-" : $"{p50:F1}/{p95:F1} ms (n={n})"; }
-    }
+    // Full Update time by path, including deferred work, storing and finalizer cleanup.
+    internal static readonly FrameTimeSamples RenderTimes = new(), RamTimes = new(), DiskTimes = new(), LiveTimes = new();
     internal static FrameCacheStore? StoreIfCreated => store.IsValueCreated ? store.Value : null;
 
     // Tests only: a store with other budgets or in another folder (the caller disposes it).
@@ -224,7 +199,8 @@ internal static class TimelineFrameCache
             patched.Add(dispose);
             if (draw is not null)
             {
-                harmony.Patch(draw, prefix: new HarmonyMethod(typeof(TimelineFrameCache), nameof(ObservePlayer)));
+                harmony.Patch(draw, prefix: new HarmonyMethod(typeof(TimelineFrameCache), nameof(ObservePlayer)),
+                    finalizer: new HarmonyMethod(typeof(TimelineFrameCache), nameof(DrawFinalizer)));
                 patched.Add(draw);
             }
             if (refreshSupported)
@@ -312,8 +288,7 @@ internal static class TimelineFrameCache
         internal readonly bool WantRects = wantRects;
         internal readonly bool RectsReusable = rectsReusable;
         internal bool CacheHit;
-        internal long Started;
-        internal PathTimes? Path;
+        internal FrameTimeSamples? Path;
         private int handedOver;
         // A pending preview store keeps the capture past this update; Harmony's finalizer still calls Dispose.
         internal void HandOver() => Volatile.Write(ref handedOver, 1);
@@ -328,12 +303,43 @@ internal static class TimelineFrameCache
         public void Dispose() { Readback.Dispose(); Pending.Release(); }
     }
 
-    private static bool Prefix(object __instance, TimeSpan time, object usage, out Pending? __state)
+    private sealed class UpdateMeasurement(bool preview)
+    {
+        internal readonly long Started = PreviewPerformance.Timestamp;
+        internal readonly int ThreadId = Environment.CurrentManagedThreadId;
+        internal readonly bool Preview = preview;
+        internal Pending? Pending;
+        internal bool RunsHost, HostEnded, Completed, Consumed;
+        internal long HostStarted, TotalTicks;
+        internal void EndHost()
+        {
+            if (Preview && RunsHost && !HostEnded)
+            {
+                PreviewPerformance.End(PreviewStage.HostRender, HostStarted);
+                HostEnded = true;
+            }
+        }
+    }
+
+    private static bool Prefix(object __instance, TimeSpan time, object usage, out UpdateMeasurement __state)
+    {
+        string name = usage.ToString() ?? string.Empty;
+        __state = new UpdateMeasurement(name is "Playing" or "Paused");
+        updateMeasurements.Remove(__instance);
+        updateMeasurements.Add(__instance, __state);
+        __state.RunsHost = CachePrefix(__instance, time, usage, out var pending);
+        __state.Pending = pending;
+        __state.HostStarted = PreviewPerformance.Timestamp;
+        return __state.RunsHost;
+    }
+
+    private static bool CachePrefix(object __instance, TimeSpan time, object usage, out Pending? __state)
     {
         __state = null;
         if (sources.TryGetValue(__instance, out var existing)) CompleteDeferred(existing);
         if (!Enabled) return true;
-        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        long keyStarted = PreviewPerformance.Timestamp;
+        bool keyMeasured = false;
         KeyCapture? capture = null;
         Pending? pending = null;
         try
@@ -366,8 +372,11 @@ internal static class TimelineFrameCache
             long revision = capture.Revision;
             var previousOutput = (ID2D1CommandList?)outputField.GetValue(__instance);
             pending = new Pending(state, scene, devices, previousOutput, capture, liveKey, cacheKey,
-                currentGeneration, time, usageKey, viewport, wantRects, traits.RectsReusable, usageName == "Playing") { Started = started };
+                currentGeneration, time, usageKey, viewport, wantRects, traits.RectsReusable, usageName == "Playing");
             capture = null;
+            if (preview) PreviewPerformance.End(PreviewStage.KeyGeneration, keyStarted);
+            keyMeasured = true;
+            using var lookup = preview ? PreviewPerformance.Measure(PreviewStage.CacheLookup) : default;
             // With rects requested, a reused frame restores the rects of an earlier render of the same key and
             // project revision, keeps the live ones, or (paused, pointer away from the preview) is shown without
             // them until BeforeEdit asks the player to re-render it. Otherwise the frame is rendered normally.
@@ -424,14 +433,24 @@ internal static class TimelineFrameCache
             return true;
         }
         catch (Exception error) { pending?.Dispose(); return Bypass("キャッシュを使用しませんでした: " + error.GetType().Name); }
-        finally { capture?.Dispose(); }
+        finally
+        {
+            capture?.Dispose();
+            if (!keyMeasured && usage.ToString() is "Playing" or "Paused")
+                PreviewPerformance.End(PreviewStage.KeyGeneration, keyStarted);
+        }
     }
 
-    private static void Postfix(object __instance, Pending? __state)
+    private static void Postfix(object __instance, UpdateMeasurement __state)
+    {
+        __state.EndHost();
+        CachePostfix(__instance, __state.Pending);
+    }
+
+    private static void CachePostfix(object __instance, Pending? __state)
     {
         if (__state is null) return;
         bool deferred = false;
-        __state.Path?.Add(System.Diagnostics.Stopwatch.GetTimestamp() - __state.Started);
         try
         {
             if (__state.CacheHit) return;
@@ -548,7 +567,19 @@ internal static class TimelineFrameCache
         catch { } // optional
     }
 
-    private static Exception? Finalizer(Exception? __exception, Pending? __state) { __state?.Dispose(); return __exception; }
+    private static Exception? Finalizer(Exception? __exception, UpdateMeasurement? __state)
+    {
+        if (__state is not null)
+        {
+            __state.EndHost();
+            __state.Pending?.Dispose();
+            __state.TotalTicks = PreviewPerformance.Timestamp - __state.Started;
+            __state.Pending?.Path?.Add(__state.TotalTicks);
+            if (__state.Preview) PreviewPerformance.Add(PreviewStage.TotalUpdate, __state.TotalTicks);
+            __state.Completed = __exception is null;
+        }
+        return __exception;
+    }
 
     private static bool StillCurrent(Pending value) => EnabledFor(value.UsageKey == "Exporting") && value.Generation == Interlocked.Read(ref generation)
         && value.Capture.Validate() && MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.UsageKey, value.Devices.DeviceContext, null) == value.LiveKey
@@ -785,11 +816,21 @@ internal static class TimelineFrameCache
         return IsValidViewport(viewport, context.MaximumBitmapSize);
     }
 
-    private static void ObservePlayer(object __instance)
+    private readonly record struct DrawMeasurement(long Started, UpdateMeasurement? Update);
+
+    private static void ObservePlayer(object __instance, out DrawMeasurement __state)
     {
+        __state = new(PreviewPerformance.Timestamp, null);
         try
         {
             var source = playerSourceField.GetValue(__instance);
+            if (source is not null && updateMeasurements.TryGetValue(source, out var measurement)
+                && measurement.Preview && measurement.Completed && !measurement.Consumed
+                && measurement.ThreadId == Environment.CurrentManagedThreadId)
+            {
+                measurement.Consumed = true;
+                __state = __state with { Update = measurement };
+            }
             if (source is null || !TryGetPreviewViewportForPlayer(__instance, source, out var viewport)) return;
             var scene = (Scene)sceneField.GetValue(source)!;
             var association = sourcePlayers.GetValue(source, _ => new PlayerAssociation());
@@ -806,6 +847,16 @@ internal static class TimelineFrameCache
             }
         }
         catch { }
+    }
+
+    private static Exception? DrawFinalizer(Exception? __exception, DrawMeasurement __state)
+    {
+        long drawTicks = PreviewPerformance.Timestamp - __state.Started;
+        PreviewPerformance.Add(PreviewStage.PreviewDraw, drawTicks);
+        // CPU time in Update + Draw, excluding the gap, Present, audio and playback/scheduler waits.
+        if (__exception is null && __state.Update is { } update)
+            PreviewPerformance.Add(PreviewStage.TotalPreview, update.TotalTicks + drawTicks);
+        return __exception;
     }
 
     private static bool TryGetPreviewViewportForPlayer(object player, object source, out PreviewViewport viewport)
@@ -990,6 +1041,7 @@ internal static class TimelineFrameCache
     // Draws the frame as the player would and queues its copy to a CPU-readable bitmap, without waiting for the GPU.
     internal static PreviewReadback? BeginPreviewReadback(ID2D1DeviceContext context, ID2D1Image output, PreviewViewport viewport)
     {
+        using var measurement = PreviewPerformance.Measure(PreviewStage.BeginGpuCopy);
         long bytes = checked((long)viewport.Width * viewport.Height * 4);
         if (!IsValidViewport(viewport, context.MaximumBitmapSize) || bytes > FrameCacheStore.MaxFrameBytes - PreviewRecordHeader
             || !Reserve(bytes * 2)) return null;
@@ -1058,7 +1110,9 @@ internal static class TimelineFrameCache
     internal static byte[] FinishPreviewReadback(PreviewReadback readback)
     {
         var viewport = readback.Viewport;
+        long allocationStarted = PreviewPerformance.Timestamp;
         var record = new byte[checked(viewport.Width * viewport.Height * 4 + PreviewRecordHeader)];
+        PreviewPerformance.End(PreviewStage.CpuAllocation, allocationStarted);
         "YMPX"u8.CopyTo(record);
         BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(4), viewport.Width);
         BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(8), viewport.Height);
@@ -1067,9 +1121,12 @@ internal static class TimelineFrameCache
         BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(20), 2);
         BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(24), viewport.DpiX);
         BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(28), viewport.DpiY);
+        long mapStarted = PreviewPerformance.Timestamp;
         var mapped = readback.Readable.Map(MapOptions.Read);
+        PreviewPerformance.End(PreviewStage.MapWait, mapStarted);
         try
         {
+            using var measurement = PreviewPerformance.Measure(PreviewStage.CpuMemcpy);
             for (var row = 0; row < viewport.Height; row++)
                 Marshal.Copy(mapped.Bits + row * mapped.Pitch, record, PreviewRecordHeader + row * viewport.Width * 4, viewport.Width * 4);
         }

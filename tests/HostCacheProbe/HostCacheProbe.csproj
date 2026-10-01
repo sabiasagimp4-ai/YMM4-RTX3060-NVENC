@@ -12,6 +12,7 @@
     <Compile Include="..\..\NVEncVideoWriterPlugin\HostIntegration.cs" Link="HostIntegration.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\HostExportScope.cs" Link="HostExportScope.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\TimelineFrameCache.cs" Link="TimelineFrameCache.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\PreviewPerformance.cs" Link="PreviewPerformance.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameRenderReadiness.cs" Link="FrameRenderReadiness.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\HostFeatures.cs" Link="HostFeatures.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\HostContracts.cs" Link="HostContracts.cs" />
