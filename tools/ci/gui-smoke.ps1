@@ -102,6 +102,11 @@ try {
         $windows = @(Windows-Of $process)
         $windows | ForEach-Object { Write-Output ("window: [{0}] '{1}' {2}" -f $_.Class, $_.Title, $_.Rect) }
         $candidate = $windows | Where-Object { $_.Title -match 'gui-smoke' } | Sort-Object Area -Descending | Select-Object -First 1
+        # The first start shows the "about" window (ShowDialog) before the main window.
+        foreach ($window in $windows | Where-Object { -not $candidate -and $_.Class -like 'HwndWrapper*' -and $_.Title -match '^About' }) {
+            Write-Output "closing '$($window.Title)'"
+            [Win]::PostMessage($window.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+        }
         foreach ($window in $windows | Where-Object { $_.Class -eq '#32770' }) {
             Texts ($ae::FromHandle($window.Handle)) 'dialog'
             [Win]::PostMessage($window.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
@@ -127,11 +132,13 @@ try {
     $root = $ae::FromHandle($main.Handle)
     $menuItems = $root.FindAll($scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition ($ae::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem)))
     $menuItems | ForEach-Object { Write-Output "menu: '$($_.Current.Name)'" }
-    $tools = $menuItems | Where-Object { $_.Current.Name -like "*$toolMenu*" } | Select-Object -First 1
+    $tools = $menuItems | Where-Object { $_.Current.Name -like "*$toolMenu*" -or $_.Current.Name -match '^_?Tools?\b' } | Select-Object -First 1
     if ($tools) {
         $tools.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
         Start-Sleep -Seconds 2
-        $entry = $ae::RootElement.FindFirst($scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition ($ae::NameProperty, $cacheTool)))
+        $named = New-Object System.Windows.Automation.PropertyCondition ($ae::NameProperty, $cacheTool)
+        $entry = $tools.FindFirst($scope::Descendants, $named)
+        if (-not $entry) { $entry = $root.FindFirst($scope::Descendants, $named) }
         if ($entry) {
             Write-Output "tool menu entry: $($entry.Current.ControlType.ProgrammaticName)"
             $pattern = $null
