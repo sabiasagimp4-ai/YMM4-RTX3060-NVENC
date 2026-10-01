@@ -174,7 +174,7 @@ jobs:
           verdict=$(sed -n 's/^# verdict: //p' verdict.txt 2>/dev/null)
           case "$verdict" in
             "baseline (none)"*) cache="**使いません**（キャッシュが前提とする本体のコードが、検証済みの版と異なります）";;
-            baseline*) cache="使います（${verdict%%;*} と同じコード）";;
+            baseline*) read_build=${verdict%%;*}; cache="使います（検証済みの ${read_build#baseline } と同じコード）";;
             *) cache="判定できませんでした";;
           esac
           {
