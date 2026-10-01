@@ -20,7 +20,8 @@ internal static class Program
             string path = Path.Combine(hostDir, name.Name + ".dll");
             return File.Exists(path) ? AssemblyLoadContext.Default.LoadFromAssemblyPath(path) : null;
         };
-        return Write(Path.GetFullPath(args[1]));
+        return args.Length >= 4 && args[2] == "--stress"
+            ? WriteStress(Path.GetFullPath(args[1]), Path.GetFullPath(args[3])) : Write(Path.GetFullPath(args[1]));
     }
 
     private static int Write(string output)
@@ -72,4 +73,56 @@ internal static class Program
     }
 
     private static bool Skip() => false;
+
+    // 30 s, 12 simultaneously decoded Full-HD streams, 120 video clips, 300 independently animated texts.
+    private static int WriteStress(string output, string assets)
+    {
+        // Reuse the bootstrap, then replace its small timeline with the stress fixture.
+        Write(output);
+        var timeline = new Timeline { Name = "cache-stress-30s" };
+        timeline.VideoInfo.Width = 1920; timeline.VideoInfo.Height = 1080; timeline.VideoInfo.FPS = 30;
+        for (int track = 0; track < 12; track++)
+        {
+            string path = Path.Combine(assets, $"video-{track:00}.mp4");
+            if (!File.Exists(path)) throw new FileNotFoundException("Stress video missing", path);
+            for (int segment = 0; segment < 10; segment++)
+            {
+                var video = new VideoItem { FilePath = path, Frame = segment * 90, Length = 90, Layer = track };
+                video.X.SetFirstValue((track % 4 - 1.5) * 480);
+                video.Y.SetFirstValue((track / 4 - 1) * 270);
+                video.Zoom.SetFirstValue(25);
+                video.Opacity.SetFirstValue(90);
+                timeline.Items = timeline.Items.Add(video);
+            }
+        }
+        for (int row = 0; row < 10; row++) for (int second = 0; second < 30; second++)
+        {
+            var text = new TextItem { Frame = second * 30, Length = 30, Layer = 12 + row,
+                Text = $"STRESS {row:00} / {second:00}s  動画と文字のキャッシュ検証 0123456789", Font = "Arial" };
+            text.X.SetFirstValue((row % 2 == 0 ? -1 : 1) * (80 + second * 3));
+            text.Y.SetFirstValue(-440 + row * 95);
+            text.FontSize.SetFirstValue(32 + row % 3 * 4);
+            if (row % 3 == 0) text.VideoEffects = text.VideoEffects.Add(new YukkuriMovieMaker.Project.Effects.GaussianBlurEffect());
+            timeline.Items = timeline.Items.Add(text);
+        }
+        string audioFile = Path.Combine(assets, "clock.wav");
+        if (!File.Exists(audioFile)) throw new FileNotFoundException("Audio clock missing", audioFile);
+        timeline.Items = timeline.Items.Add(new AudioItem { FilePath = audioFile, Frame = 0, Length = 900, Layer = 22 });
+        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var project = new YukkuriMovieMaker.Project.Project(0, scenes, output, string.Empty, new Dictionary<string, SerializableToolState>());
+        YukkuriMovieMaker.Json.Json.Save(project, output);
+        // User artifact uses relative media paths; the GUI copy keeps absolute paths for reliable host lookup.
+        string portable = Path.Combine(Path.GetDirectoryName(output)!, "stress-30s-portable.ymmp");
+        foreach (var item in timeline.Items.OfType<VideoItem>()) item.FilePath = "assets/" + Path.GetFileName(item.FilePath);
+        foreach (var item in timeline.Items.OfType<AudioItem>()) item.FilePath = "assets/" + Path.GetFileName(item.FilePath);
+        YukkuriMovieMaker.Json.Json.Save(new YukkuriMovieMaker.Project.Project(0, scenes, portable, string.Empty, new Dictionary<string, SerializableToolState>()), portable);
+        var manifest = new { DurationSeconds = 30, Width = 1920, Height = 1080, FPS = 30, Frames = timeline.Length,
+            VideoItems = 120, UniqueVideoFiles = 12, SimultaneousVideos = 12, TextItems = 300, SimultaneousTexts = 10, AudioItems = 1,
+            Host = typeof(Scene).Assembly.GetName().Version?.ToString(), Files = Directory.GetFiles(assets).Select(path => new
+            { Name = Path.GetFileName(path), Bytes = new FileInfo(path).Length, Sha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))) }).ToArray() };
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(output)!, "stress-fixture.json"), System.Text.Json.JsonSerializer.Serialize(manifest, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        if (timeline.Length != 900 || timeline.Items.Count != 421) throw new InvalidDataException("Stress fixture shape changed");
+        Console.WriteLine($"STRESS-FIXTURE {output}: 120 videos + 300 texts + 1 audio / 900 frames / 1920x1080 / 30 fps");
+        return 0;
+    }
 }

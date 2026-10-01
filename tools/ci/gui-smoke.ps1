@@ -7,7 +7,9 @@ param(
     [Parameter(Mandatory)] [string] $Project,
     [Parameter(Mandatory)] [string] $PluginDir,
     [int] $SettleSeconds = 60,
-    [string] $TracePath = ""
+    [string] $TracePath = "",
+    [switch] $Stress,
+    [string] $ArtifactDirectory = ""
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms, WindowsBase, UIAutomationClient, UIAutomationTypes
@@ -67,6 +69,11 @@ function Shot([string] $name) {
     $stream = New-Object System.IO.MemoryStream
     $bitmap.Save($stream, $codec, $parameters)
     $bitmap.Dispose()
+    if ($ArtifactDirectory) {
+        New-Item -ItemType Directory -Path $ArtifactDirectory -Force | Out-Null
+        [IO.File]::WriteAllBytes((Join-Path $ArtifactDirectory ($name + '.jpg')), $stream.ToArray())
+    }
+    if ($Stress) { Write-Output "SCREENSHOT $name $($stream.Length) bytes"; $stream.Dispose(); return }
     $base64 = [Convert]::ToBase64String($stream.ToArray())
     Write-Output "=====SHOT $name $($bounds.Width)x$($bounds.Height) $($stream.Length)"
     for ($i = 0; $i -lt $base64.Length; $i += 4000) { Write-Output ('B64 ' + $base64.Substring($i, [Math]::Min(4000, $base64.Length - $i))) }
@@ -137,7 +144,8 @@ foreach ($file in 'YMM4Rtx3060Nvenc.dll', '0Harmony.dll', 'NvencNative.dll') {
 $version = (Get-Item (Join-Path $HostDir 'YukkuriMovieMaker.dll')).VersionInfo.FileVersion
 $settings = Join-Path $HostDir "user\setting\$version"
 New-Item -ItemType Directory -Path $settings -Force | Out-Null
-[IO.File]::WriteAllText((Join-Path $settings 'NVEncVideoWriterPlugin.FrameCacheToolSettings.json'), '{"Enabled":true}')
+$cacheSettings = if ($Stress) { '{"SettingsVersion":1,"Enabled":true,"PreviewCache":true,"ExportCache":false,"AutomaticRamBudget":false,"RamLimitMiB":256,"CacheFramesWhenIdle":false}' } else { '{"Enabled":true}' }
+[IO.File]::WriteAllText((Join-Path $settings 'NVEncVideoWriterPlugin.FrameCacheToolSettings.json'), $cacheSettings)
 # YMM4's own settings for a first start: this version was already seen (no "about" window) and the file extension
 # question was answered (no message box). Everything else keeps YMM4's defaults.
 [IO.File]::WriteAllText((Join-Path $settings 'YukkuriMovieMaker.Settings.YMMSettings.json'),
@@ -153,7 +161,7 @@ $process = Start-Process (Join-Path $HostDir 'YukkuriMovieMaker.exe') -ArgumentL
 try {
     # Wait for the main window; close dialogs (message boxes, the first-run "about" window) on the way.
     $main = $null
-    $deadline = (Get-Date).AddSeconds(150)
+    $deadline = (Get-Date).AddSeconds($(if ($Stress) { 300 } else { 150 }))
     $shotAt = (Get-Date).AddSeconds(25)
     while ((Get-Date) -lt $deadline -and -not $process.HasExited) {
         Start-Sleep -Seconds 2
@@ -260,6 +268,100 @@ try {
         }
         Write-Output "TRACE-SCENARIO $name"
     }
+    if ($Stress) {
+        $requiredScenarios = @('off-playback', 'cold-playback', 'warm-playback', 'stress-seek', 'stress-delete', 'stress-undo', 'stress-redo', 'stress-purge')
+        $telemetry = New-Object System.Collections.Generic.List[object]
+        function Snapshot-Stress([string] $phase) {
+            $process.Refresh()
+            if ($process.HasExited) { throw "YMM4 exited during $phase ($($process.ExitCode))" }
+            $countsElement = Trace-Control 'FrameCacheCounts'
+            $statusElement = Trace-Control 'FrameCacheStatus'
+            $record = [pscustomobject]@{ Utc=(Get-Date).ToUniversalTime().ToString('o'); Phase=$phase; CpuSeconds=$process.TotalProcessorTime.TotalSeconds;
+                PrivateBytes=$process.PrivateMemorySize64; WorkingSetBytes=$process.WorkingSet64; Handles=$process.HandleCount;
+                Counts=$(if ($countsElement) { $countsElement.Current.Name } else { '' }); Status=$(if ($statusElement) { $statusElement.Current.Name } else { '' }) }
+            $telemetry.Add($record)
+            $record | ConvertTo-Json -Compress | Write-Output
+        }
+        function Save-Stress([string] $phase) {
+            [Win]::SetForegroundWindow($main.Handle) | Out-Null
+            [System.Windows.Forms.SendKeys]::SendWait('^s')
+            Start-Sleep -Seconds 2
+            Copy-Item $Project (Join-Path $ArtifactDirectory ($phase + '.ymmp')) -Force
+        }
+        function Set-Preview([bool] $on) {
+            $control = Trace-Control 'FrameCachePreviewEnabled'
+            if (-not $control) { throw 'Preview switch UI Automation peer missing' }
+            $toggle = $control.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+            if (($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On) -ne $on) { $toggle.Toggle() }
+            Start-Sleep -Seconds 2
+        }
+        function Seek-Start {
+            [Win]::SetForegroundWindow($main.Handle) | Out-Null
+            Click-At 180 518 'the timeline ruler'
+            [System.Windows.Forms.SendKeys]::SendWait('{HOME}')
+            Start-Sleep -Seconds 2
+        }
+        function Play-Stress([string] $phase) {
+            Seek-Start
+            Scenario $phase
+            [Win]::SetForegroundWindow($main.Handle) | Out-Null
+            [System.Windows.Forms.SendKeys]::SendWait(' ')
+            for ($second=0; $second -lt 35; $second+=5) {
+                Start-Sleep -Seconds 5
+                Snapshot-Stress $phase
+            }
+            # Home seeks and stops playback through the timeline's normal key handling.
+            [System.Windows.Forms.SendKeys]::SendWait('{HOME}')
+            Start-Sleep -Seconds 2
+            Snapshot-Stress ($phase + '-end')
+            Shot $phase
+        }
+        Set-Preview $false
+        Play-Stress 'off-playback'
+        Set-Preview $true
+        Play-Stress 'cold-playback'
+        Play-Stress 'warm-playback'
+        Scenario 'stress-seek'
+        foreach ($x in @(250, 580, 350, 700, 190)) {
+            Click-At $x 518 'the ruler during stress seek'
+            Start-Sleep -Seconds 2
+            Snapshot-Stress 'stress-seek'
+        }
+        Shot 'stress-seek'
+        Click-At 180 546 'a video item for edit'
+        Scenario 'stress-delete'
+        [Win]::SetForegroundWindow($main.Handle) | Out-Null
+        [System.Windows.Forms.SendKeys]::SendWait('{DELETE}')
+        Start-Sleep -Seconds 3
+        Snapshot-Stress 'stress-delete'
+        Save-Stress 'stress-delete'
+        Scenario 'stress-undo'
+        [System.Windows.Forms.SendKeys]::SendWait('^z')
+        Start-Sleep -Seconds 3
+        Snapshot-Stress 'stress-undo'
+        Save-Stress 'stress-undo'
+        Shot 'stress-undo'
+        Scenario 'stress-redo'
+        [System.Windows.Forms.SendKeys]::SendWait('^y')
+        Start-Sleep -Seconds 3
+        Snapshot-Stress 'stress-redo'
+        Save-Stress 'stress-redo'
+        [System.Windows.Forms.SendKeys]::SendWait('^z')
+        Start-Sleep -Seconds 2
+        Scenario 'stress-purge'
+        $purge = Trace-Control 'FrameCachePurge'
+        if (-not $purge) { throw 'Purge UI Automation peer missing' }
+        $purge.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        Start-Sleep -Seconds 5
+        Snapshot-Stress 'stress-purge'
+        Shot 'stress-purge'
+        $telemetry | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $ArtifactDirectory 'stress-process.json') -Encoding UTF8
+        # Save the edited/undone fixture through YMM4 itself for item-count verification outside the GUI.
+        [Win]::SetForegroundWindow($main.Handle) | Out-Null
+        [System.Windows.Forms.SendKeys]::SendWait('^s')
+        Start-Sleep -Seconds 3
+    } else {
+        $requiredScenarios = @('idle-fill', 'paused-seek', 'playback-1', 'playback-2', 'edit-delete', 'undo', 'redo', 'preview-wheel')
     Scenario 'idle-fill'
 
     # Select the Layer 00 item (on screen at the playhead, so the preview draws its selection rectangle), then leave
@@ -312,6 +414,7 @@ try {
     [Win]::SetCursorPos(470, 237) | Out-Null
     [Win]::mouse_event(2048, 0, 0, 120, [UIntPtr]::Zero)
     Start-Sleep -Seconds 3
+    }
     if ($TracePath) {
         $toggle = Trace-Control 'CacheTraceToggle'
         if ($toggle) {
@@ -334,7 +437,7 @@ try {
         }
         if (-not $finished) { throw 'Trace did not finish before YMM4 exit' }
         $raw = Get-Content $TracePath -Raw -Encoding UTF8
-        foreach ($name in @('idle-fill', 'paused-seek', 'playback-1', 'playback-2', 'edit-delete', 'undo', 'redo', 'preview-wheel')) {
+        foreach ($name in $requiredScenarios) {
             if (-not $raw.Contains('"Component":"' + $name + '"')) { throw "Scenario marker missing: $name" }
         }
         Write-Output "TRACE-SAVED $TracePath"

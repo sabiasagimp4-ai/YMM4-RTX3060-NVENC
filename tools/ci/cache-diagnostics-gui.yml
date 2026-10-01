@@ -8,6 +8,10 @@ on:
     branches: ['ci/cache-diagnostics-gui']
   workflow_dispatch:
 
+concurrency:
+  group: cache-diagnostics-gui-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -39,16 +43,28 @@ jobs:
         run: |
           dotnet build NVEncVideoWriterPlugin\NVEncVideoWriterPlugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --nologo -v q
           if ($LASTEXITCODE -ne 0) { throw 'Plugin build failed' }
+      - name: Full-HD stress media and Media Foundation
+        run: |
+          $feature = Get-WindowsFeature Server-Media-Foundation
+          if ($feature -and -not $feature.Installed) { Install-WindowsFeature Server-Media-Foundation | Format-List }
+          & .\tools\ci\make-stress-media.ps1 -OutputDirectory "$env:GITHUB_WORKSPACE\dist\assets"
+          if ($LASTEXITCODE -ne 0) { throw 'Stress media generation failed' }
       - name: Test project
         run: |
-          dotnet run --project tests\GuiSmoke\GuiSmoke.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR "$env:RUNNER_TEMP\gui-smoke.ymmp"
+          dotnet run --project tests\GuiSmoke\GuiSmoke.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR "$env:GITHUB_WORKSPACE\dist\stress-30s.ymmp" --stress "$env:GITHUB_WORKSPACE\dist\assets"
           if ($LASTEXITCODE -ne 0) { throw 'Project generation failed' }
       - name: YMM4 with the plugin (screenshots in this log)
         shell: powershell
         run: |
-          & .\tools\ci\gui-smoke.ps1 -HostDir $env:YMM4_DIR -Project "$env:RUNNER_TEMP\gui-smoke.ymmp" -PluginDir 'NVEncVideoWriterPlugin\bin\Release\net10.0-windows10.0.19041.0' -TracePath "$env:GITHUB_WORKSPACE\dist\gui-trace.jsonl"
+          & .\tools\ci\gui-smoke.ps1 -HostDir $env:YMM4_DIR -Project "$env:GITHUB_WORKSPACE\dist\stress-30s.ymmp" -PluginDir 'NVEncVideoWriterPlugin\bin\Release\net10.0-windows10.0.19041.0' -TracePath "$env:GITHUB_WORKSPACE\dist\gui-trace.jsonl" -Stress -ArtifactDirectory "$env:GITHUB_WORKSPACE\dist"
 
 
+      - name: Assert actual playback and trace coverage
+        if: always()
+        run: |
+          if (-not (Test-Path dist/gui-trace.jsonl)) { throw 'No real GUI trace produced' }
+          python tools/analyze-stress-trace.py dist/gui-trace.jsonl --output dist/stress-summary.json
+          if ($LASTEXITCODE -ne 0) { throw 'Stress evidence checks failed; see retained logs and screenshots' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

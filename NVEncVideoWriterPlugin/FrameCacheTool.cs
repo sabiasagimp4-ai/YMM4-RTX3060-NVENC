@@ -117,6 +117,7 @@ public sealed class PluginSettingsPanel : StackPanel
     private readonly CheckBox nvenc = new() { Content = "RTX 3060 NVENC 出力を使う", Margin = new Thickness(0, 4, 0, 0) };
     private readonly TextBlock note = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0), Foreground = SystemColors.GrayTextBrush };
     private readonly StackPanel plugins = new() { Margin = new Thickness(12, 2, 0, 0) };
+    internal IEnumerable<UIElement> AutomationControls => [preview, export, nvenc];
 
     public PluginSettingsPanel()
     {
@@ -146,6 +147,7 @@ public sealed class PluginSettingsPanel : StackPanel
         Children.Add(plugins);
         var settings = FrameCacheToolSettings.Default;
         Bind(preview, nameof(FrameCacheToolSettings.PreviewCache));
+        System.Windows.Automation.AutomationProperties.SetAutomationId(preview, "FrameCachePreviewEnabled");
         Bind(export, nameof(FrameCacheToolSettings.ExportCache));
         Bind(nvenc, nameof(FrameCacheToolSettings.NvencOutput));
         var automatic = new CheckBox { Content = "空きメモリに応じてRAMを自動配分する", Margin = new Thickness(0, 10, 0, 0) };
@@ -245,7 +247,7 @@ public sealed class FrameCacheToolView : UserControl
         protected override List<System.Windows.Automation.Peers.AutomationPeer>? GetChildrenCore()
         {
             var children = base.GetChildrenCore() ?? [];
-            foreach (var element in new UIElement[] { view.trace, view.scenario })
+            foreach (var element in new UIElement[] { view.trace, view.scenario, view.purge, view.status, view.counts }.Concat(view.settingsPanel.AutomationControls))
                 if (System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(element) is { } peer && !children.Contains(peer))
                     children.Add(peer);
             return children;
@@ -259,6 +261,7 @@ public sealed class FrameCacheToolView : UserControl
     private readonly TextBlock traceInfo = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 8) };
     private readonly Button purge = new() { Content = "保存したキャッシュを消去", HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(12, 6, 12, 6) };
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly PluginSettingsPanel settingsPanel = new();
 
     public FrameCacheToolView()
     {
@@ -270,6 +273,9 @@ public sealed class FrameCacheToolView : UserControl
         var traceRow = new StackPanel { Orientation = Orientation.Horizontal };
         System.Windows.Automation.AutomationProperties.SetAutomationId(trace, "CacheTraceToggle");
         System.Windows.Automation.AutomationProperties.SetAutomationId(scenario, "CacheTraceScenario");
+        System.Windows.Automation.AutomationProperties.SetAutomationId(purge, "FrameCachePurge");
+        System.Windows.Automation.AutomationProperties.SetAutomationId(status, "FrameCacheStatus");
+        System.Windows.Automation.AutomationProperties.SetAutomationId(counts, "FrameCacheCounts");
         traceRow.Children.Add(trace); traceRow.Children.Add(scenario);
         panel.Children.Add(traceRow); panel.Children.Add(traceInfo);
         trace.Click += async (_, _) =>
@@ -285,7 +291,7 @@ public sealed class FrameCacheToolView : UserControl
             finally { trace.IsEnabled = true; Refresh(); }
         };
         scenario.TextChanged += (_, _) => { if (CacheDiagnostics.IsRecording) CacheDiagnostics.MarkScenario(scenario.Text); };
-        panel.Children.Add(new PluginSettingsPanel());
+        panel.Children.Add(settingsPanel);
         panel.Children.Add(status);
         panel.Children.Add(new TextBlock { Text = "キャッシュ状況（タイムライン全体）", Margin = new Thickness(0, 12, 0, 4) });
         var bar = new CacheStatusBar(() => IdleFramePreRenderer.CurrentTimeline,
