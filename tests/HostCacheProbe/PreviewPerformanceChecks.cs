@@ -226,10 +226,16 @@ internal static class PreviewPerformanceChecks
                 Update(0);
                 Check(TimelineFrameCache.GpuHits == priorGpuHits && TimelineFrameCache.GpuRetainedBytes == 0,
                     "Purge retained or reused an old generation");
-                TimelineFrameCache.CompletePendingStore(source);
-                Update(1); TimelineFrameCache.CompletePendingStore(source);
-                Update(0); Update(1);
-                Check(TimelineFrameCache.GpuRetainedBytes > 0, "Disposal fixture did not retain GPU frames");
+                // Model edit/purge can leave background dependency capture unsettled. Warm the disposal
+                // fixture explicitly rather than assuming four immediate updates produced byte-store hits.
+                var disposalWarmup = Stopwatch.StartNew();
+                while (TimelineFrameCache.GpuRetainedBytes == 0 && disposalWarmup.Elapsed < TimeSpan.FromSeconds(30))
+                {
+                    Update(0); Draw(); TimelineFrameCache.CompletePendingStore(source);
+                    Update(1); Draw(); TimelineFrameCache.CompletePendingStore(source);
+                    Thread.Sleep(10);
+                }
+                Check(TimelineFrameCache.GpuRetainedBytes > 0, "Disposal fixture did not retain GPU frames: " + TimelineFrameCache.Status);
                 source.Dispose(); source = null;
                 Check(TimelineFrameCache.GpuRetainedBytes == 0 && TimelineFrameCache.GpuBytes == 0,
                     "Source disposal leaked retained or borrowed GPU images");
