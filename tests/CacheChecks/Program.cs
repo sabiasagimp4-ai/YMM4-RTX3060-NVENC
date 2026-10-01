@@ -175,36 +175,44 @@ internal static class Program
     }
 
     // What an edit costs before the next frame can be keyed: the whole project is serialized and split per item again
-    // (v2 handoff: measure before replacing it with per-item updates). Shapes with an effect, and texts.
+    // (v2 handoff: measure before replacing it with per-item updates). By kind of item, to see where the time goes.
     private static void MeasureDescribeCost()
     {
-        foreach (int count in new[] { 100, 1000, 5000 })
+        var readers = FrameCacheKey.CaptureSourceReaderTypes();
+        foreach (var (label, count, make) in new (string, int, Func<int, IItem>)[]
+        {
+            ("shapes", 100, i => Shape(i, blur: false)),
+            ("shapes+blur", 100, i => Shape(i, blur: true)),
+            ("texts (Arial)", 100, Text),
+            ("shapes", 1000, i => Shape(i, blur: false)),
+            ("texts (Arial)", 1000, Text),
+            ("shapes+blur / texts", 1000, i => i % 2 == 0 ? Shape(i, blur: true) : Text(i)),
+            ("shapes+blur / texts", 3000, i => i % 2 == 0 ? Shape(i, blur: true) : Text(i)),
+            ("shapes+blur / texts", 5000, i => i % 2 == 0 ? Shape(i, blur: true) : Text(i)),
+        })
         {
             var timeline = new Timeline();
             var scenes = new Scenes(false);
             scenes.AddScene(timeline);
-            var items = new List<IItem>(count);
-            for (int i = 0; i < count; i++)
-            {
-                if (i % 2 == 0)
-                {
-                    var shape = new ShapeItem { Frame = i * 3, Length = 30, Layer = i % 10 };
-                    shape.X.SetFirstValue(i);
-                    shape.VideoEffects = shape.VideoEffects.Add(new YukkuriMovieMaker.Project.Effects.GaussianBlurEffect());
-                    items.Add(shape);
-                }
-                else items.Add(new TextItem { Frame = i * 3, Length = 30, Layer = i % 10, Text = "item " + i, Font = "Arial" });
-            }
-            timeline.Items = timeline.Items.AddRange(items);
+            timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, count).Select(make));
             var scene = new Scene(timeline, scenes, []);
-            var readers = FrameCacheKey.CaptureSourceReaderTypes();
-            Check(FrameCacheKey.TryDescribe(scene, readers, out string model, out _, out _, out string reason), "Describe failed: " + reason);
+            bool described = FrameCacheKey.TryDescribe(scene, readers, out string model, out _, out _, out string reason);
             var clock = System.Diagnostics.Stopwatch.StartNew();
             const int runs = 3;
             for (int run = 0; run < runs; run++) FrameCacheKey.TryDescribe(scene, readers, out _, out _, out _, out _);
             clock.Stop();
-            Console.WriteLine($"Describe after an edit, {count} items: {clock.Elapsed.TotalMilliseconds / runs:F1} ms, model {model.Length / 1024} KiB ({runs} samples; no threshold)");
+            Console.WriteLine($"Describe after an edit, {count} {label}: {clock.Elapsed.TotalMilliseconds / runs:F1} ms, "
+                + (described ? $"model {model.Length / 1024} KiB" : "bypassed: " + reason) + $" ({runs} samples; no threshold)");
         }
+
+        static IItem Shape(int i, bool blur)
+        {
+            var shape = new ShapeItem { Frame = i * 3, Length = 30, Layer = i % 10 };
+            shape.X.SetFirstValue(i);
+            if (blur) shape.VideoEffects = shape.VideoEffects.Add(new YukkuriMovieMaker.Project.Effects.GaussianBlurEffect());
+            return shape;
+        }
+        static IItem Text(int i) => new TextItem { Frame = i * 3, Length = 30, Layer = i % 10, Text = "item " + i, Font = "Arial" };
     }
 
     // What per-frame keys save on every cached frame: a frame verifies only its own files (FileDependencyLease),
