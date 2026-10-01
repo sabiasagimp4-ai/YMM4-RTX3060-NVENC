@@ -135,9 +135,19 @@ internal static class Program
                 && readerReason.Contains("カスタム読み込み", StringComparison.Ordinal), "External media with a custom source reader did not bypass");
             Check(!tracker.TryGetKey(out _, out _), "Cold external assets did not bypass while hashing");
             string fileKey = WaitForKey(tracker);
+            // The idle pre-renderer's clone: seeded with the verified files, it has the same key at once.
+            var verified = tracker.VerifiedFingerprints;
+            using (var seeded = new KeyDependencyTracker(scene, verified))
+                Check(seeded.TryGetKey(out string seededKey, out string seededReason) && seededKey == fileKey,
+                    "A tracker seeded with verified files did not capture the same key: " + seededReason);
             DateTime modified = File.GetLastWriteTimeUtc(imageFile);
             File.WriteAllBytes(imageFile, [4, 3, 2, 1]);
             File.SetLastWriteTimeUtc(imageFile, modified);
+            using (var stale = new KeyDependencyTracker(scene, verified))
+                Check(!stale.TryGetKey(out _, out _), "A tracker seeded before a same-metadata replacement accepted the replaced file");
+            // Another tracker (export, the other preview) verifies the new content first, so the shared index knows it.
+            using (var other = new KeyDependencyTracker(scene))
+                Check(WaitForKey(other) != fileKey, "A new tracker kept the key of the replaced content");
             Check(!tracker.TryGetKey(out _, out _), "Changed external assets did not bypass while rehashing");
             Check(WaitForKey(tracker) != fileKey, "Same-size same-timestamp content replacement failed to invalidate");
             File.Delete(imageFile);

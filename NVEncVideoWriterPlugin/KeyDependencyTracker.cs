@@ -37,6 +37,14 @@ internal sealed class KeyDependencyTracker : IDisposable
 
     public KeyDependencyTracker(Scene scene) => this.scene = scene;
 
+    // For a copy of a scene whose files another tracker has verified (the idle pre-renderer's clone, which lives for
+    // one batch and would otherwise never finish hashing): captures still lease every file and compare it with these
+    // fingerprints, so a file changed since then bypasses.
+    internal KeyDependencyTracker(Scene scene, IReadOnlyDictionary<string, FileFingerprint>? verified) : this(scene) => fingerprints = verified;
+
+    // Never changed in place: a new verification replaces the whole dictionary.
+    internal IReadOnlyDictionary<string, FileFingerprint>? VerifiedFingerprints { get { lock (gate) return fingerprints; } }
+
     internal event Action? Invalidated;
     public long Revision => Interlocked.Read(ref revision);
     public long CaptureRevision() => Revision;
@@ -153,9 +161,16 @@ internal sealed class KeyDependencyTracker : IDisposable
                 && FileDependencyLease.TryAcquire(files, fingerprints, 0, out var lease, out _))
             {
                 if (!ValidateRevision(before)) { lease!.Dispose(); reason = "検査中にプロジェクトが変更されました。"; return false; }
-                capture = new KeyCapture(this, KeyFor(dependencies, files), cachedModel, before, cachedParents, lease);
-                reason = string.Empty;
-                return true;
+                // The key is built from this tracker's fingerprints. The lease can also accept a file by a newer
+                // fingerprint that another tracker recorded after the file changed; then this one is out of date.
+                var known = fingerprints;
+                if (lease!.Fingerprints.All(pair => known.TryGetValue(pair.Key, out var own) && own == pair.Value))
+                {
+                    capture = new KeyCapture(this, KeyFor(dependencies, files), cachedModel, before, cachedParents, lease);
+                    reason = string.Empty;
+                    return true;
+                }
+                lease.Dispose();
             }
             long now = Environment.TickCount64;
             if (now >= nextFingerprintAttempt && FingerprintSlot.Wait(0))

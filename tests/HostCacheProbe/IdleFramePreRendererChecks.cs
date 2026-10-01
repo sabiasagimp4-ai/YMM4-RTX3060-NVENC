@@ -30,6 +30,9 @@ internal static class IdleFramePreRendererChecks
         var shape = new ShapeItem { Frame = 4, Length = 90 };
         shape.X.SetFirstValue(-12.25);
         timeline.Items = timeline.Items.Add(shape);
+        // As YMM4 does on load and after edits; setting Items alone leaves Length at 1.
+        timeline.RefreshTimelineLengthAndMaxLayer();
+        Check(timeline.Length == 94, "Test timeline length: " + timeline.Length);
         var scenes = new Scenes(false);
         scenes.AddScene(timeline);
         var live = new Scene(timeline, scenes, []);
@@ -48,6 +51,7 @@ internal static class IdleFramePreRendererChecks
         Check(clonedShape.X.GetValue(0, 100, 30) == shape.X.GetValue(0, 100, 30), "Clone changed item parameters");
         Check(clone.Timeline.VideoInfo.Width == timeline.VideoInfo.Width && clone.Timeline.VideoInfo.Height == timeline.VideoInfo.Height,
             "Clone changed video dimensions");
+        Check(clone.Timeline.Length == timeline.Length, $"Clone changed the timeline length ({clone.Timeline.Length}, live {timeline.Length})");
         Check(FrameCacheKey.TryDescribe(clone, out var clonedModel, out _, out reason), reason);
         Check(clonedModel == model, "Clone changed the serialized drawing state used for cache identity");
         bootstrap.UnpatchAll(bootstrap.Id);

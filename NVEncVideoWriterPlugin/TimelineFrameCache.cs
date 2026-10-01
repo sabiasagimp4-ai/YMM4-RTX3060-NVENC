@@ -413,6 +413,11 @@ internal static class TimelineFrameCache
 
     private static string Bits(float value) => BitConverter.SingleToInt32Bits(value).ToString("X8", System.Globalization.CultureInfo.InvariantCulture);
 
+    // How long after the preview last drew the idle pre-renderer still renders for its view. The preview does not
+    // redraw while nothing changes, and the work is bounded by the horizon ahead of the playhead, so the first
+    // minutes after an edit fill it even when one frame takes long.
+    internal static readonly TimeSpan IdleViewportLifetime = TimeSpan.FromMinutes(2);
+
     internal static bool TryGetLatestPreviewViewport(Timeline timeline, Scenes scenes, out PreviewViewport viewport)
     {
         viewport = default;
@@ -502,7 +507,7 @@ internal static class TimelineFrameCache
             if (viewport is null ? !exporting : !playing || !IsValidViewport(viewport.Value, int.MaxValue)
                 || viewport.Value.SceneId != scene.ID || viewport.Value.TimelineId != scene.Timeline.ID) return false;
             if (viewport is { } preview && (preview.IsPlaying || preview.LastDrawTimestamp <= 0
-                || System.Diagnostics.Stopwatch.GetElapsedTime(preview.LastDrawTimestamp) > TimeSpan.FromSeconds(30))) return false;
+                || System.Diagnostics.Stopwatch.GetElapsedTime(preview.LastDrawTimestamp) > IdleViewportLifetime)) return false;
             var picker = pickerField.GetValue(timelineSource)!;
             if (picker.GetType() != pickerType || pickerType.GetFields(Instance).Any(f => f.GetValue(picker) != null)) return false;
             var devices = (IGraphicsDevicesAndContext)devicesField.GetValue(timelineSource)!;

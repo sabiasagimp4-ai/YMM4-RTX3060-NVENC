@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -196,7 +197,7 @@ internal static class IdleFramePreRenderer
                 var snapshot = YukkuriMovieMaker.Json.Json.LoadFromText<ModelSnapshot>(initial.Model)
                     ?? throw new InvalidDataException("描画状態を読み込めませんでした。");
                 var cloneScene = CloneScene(snapshot);
-                using var cloneTracker = new KeyDependencyTracker(cloneScene);
+                using var cloneTracker = new KeyDependencyTracker(cloneScene, current.Tracker.VerifiedFingerprints);
                 using var source = new TimelineSourceAndDevices(cloneScene);
 
                 for (int frame = startFrame; frame <= endFrame; frame++)
@@ -288,7 +289,9 @@ internal static class IdleFramePreRenderer
         latest with { LastDrawTimestamp = 0 } == expected with { LastDrawTimestamp = 0 };
 
     private static bool IsViewportFresh(TimelineFrameCache.PreviewViewport viewport) =>
-        viewport.LastDrawTimestamp != 0 && Stopwatch.GetElapsedTime(viewport.LastDrawTimestamp) <= TimeSpan.FromSeconds(10);
+        viewport.LastDrawTimestamp != 0 && Stopwatch.GetElapsedTime(viewport.LastDrawTimestamp) <= TimelineFrameCache.IdleViewportLifetime;
+
+    private static readonly MethodInfo? TimelineLength = typeof(Timeline).GetProperty(nameof(Timeline.Length))?.GetSetMethod(nonPublic: true);
 
     private static Scene CloneScene(ModelSnapshot snapshot)
     {
@@ -307,6 +310,10 @@ internal static class IdleFramePreRenderer
             timeline.VideoInfo.Hz = model.VideoInfo.Hz;
             timeline.VideoInfo.BackgroundColor = model.VideoInfo.BackgroundColor;
             timeline.LayerSettings.CopyFrom(model.LayerSettings);
+            // Setting Items leaves Length at 1: YMM4 refreshes it on load and edits (private setter), and it can stay
+            // longer than the items. It is part of the drawing state, so the clone takes the live value.
+            TimelineLength?.Invoke(timeline, [model.Length]);
+            if (timeline.Length != model.Length) throw new NotSupportedException("タイムラインの長さを複製できません。");
             timelines.Add(timeline.ID, timeline);
             cloneScenes.AddScene(timeline);
         }
