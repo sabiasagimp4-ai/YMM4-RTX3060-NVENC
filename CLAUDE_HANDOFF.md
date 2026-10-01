@@ -1,8 +1,28 @@
 # Claude 引継ぎ — YMM4 RTX3060 NVENC / AE風キャッシュ
 
-更新日: 2026-10-01（追記4まで）。これは **未完成の作業保存（WIP checkpoint）** です。製品完成・配布可能・AE完全再現を意味しません。
+更新日: 2026-10-01（追記5まで）。これは **未完成の作業保存（WIP checkpoint）** です。製品完成・配布可能・AE完全再現を意味しません。
 
 ## 最初に読むこと
+
+### 2026-10-01 追記（5）— 実 YMM4 の画面で見つけて直した不具合
+
+ユーザー:「今のUIをスクショ撮ってみて欲しい」「スクショ取れるまで止めないで。全画面表示とかもね」。CI の YMM4 コピー（release 0.1 の 4.56.1.0、ユーザーの PC ではない）を GUI で起動し、最大化した画面写真を撮りました（`tools/ci/gui-smoke.ps1`、下の GUI 起動テスト）。最終の run 8 で: ツール「描画キャッシュ」に「先読み範囲（10秒分）に到達しました」、ツールとルーラーの帯が 0〜10 秒すべて埋まる（古い分は青=ディスク、新しい分は緑=RAM）、5 秒へシークすると四角 2 つと文字のフレームが出て、先読みが 151 フレームから再開。GPU は runner の基本アダプター（WARP 相当）で、RTX 3060 での見た目・速度は未確認。
+
+写真で見つかり、直した不具合（どれも以前の単体テストでは出ていなかったもの）:
+1. **同梱の MIDI 読み込みでキャッシュ全体が止まる**: `IsBuiltInSourceReader` が `YukkuriMovieMaker.Plugin.FileSource.*` だけを組み込み扱いにしていたが、YMM4 は `YukkuriMovieMaker.Plugin.Community`（`MidiAudioSourcePlugin`）も既定で読み込むため、素材ファイルやフォントを使うプロジェクト（文字アイテムだけでも）は常に「外部素材でカスタム読み込みプラグインが有効」で通常描画になっていた。YMM4 のフォルダーにある `YukkuriMovieMaker.Plugin.*`（`PluginAssemblyLoader` の既定一覧と同じ場所）を組み込み扱いに。`user\plugin` の同名は外部のまま。CacheChecks が実 host の全読み込みプラグイン型（13 種）を確認。
+2. **アイドル時の先読みが実プロジェクトで一度も働かない**: 複製（`CloneScene`）が `Timeline.Length` を写していなかった（`Items` を設定しても長さは 1 のまま。YMM4 は読み込み・編集時に private setter で更新）ため、描画状態が live と一致せず「ライブ状態と複製状態が一致しない」で毎回中止。live の値を setter で写す。HostCacheProbe の複製テストを長さ 94 のタイムラインに。
+3. **素材を使うフレームで先読みが止まる**: 複製のトラッカーがバッチごとに新規作成され、素材（フォントを含む）のハッシュが終わる前に破棄されていた。live のトラッカーの検証済み指紋を引き継ぐ（`KeyDependencyTracker(scene, verified)`、毎回 lease で stamp を照合）。
+4. **（キャッシュの正しさ）ファイル更新後に古いキーが通り得た**: lease は共有の指紋索引で新しい stamp を受け入れるが、キーはトラッカー自身の古い指紋で作っていた。別のトラッカー（出力・別プレビュー）が先に新しい内容を確認すると、古い画素を出し得た。lease の指紋がキーの指紋と同じときだけ capture を返す。CacheChecks に「別トラッカーが先に検証」ケース。
+5. **先読みが自分で自分を止める**: WPF は配置が変わり得るたびに入力なしのマウス移動を発生させ、帯の再描画（フレームが保存されるたび）で `PreProcessInput` → 「操作を検知」→ ジョブ中止を繰り返していた。キー・文字・ボタン・ホイール・ペン/タッチと、カーソル位置が実際に変わったマウス移動だけを操作とみなす（`IsUserInput`）。
+6. **帯が一部しか出ない**: 帯はプレビュー側トラッカーの `TryPeekFrameKeys` を使うが、そのトラッカーはプレビューが素材のあるフレームに来るまで素材を検証しないので、先読み済みでも文字のフレームが帯に出なかった。表示時にも背景検証を始める（`AdoptFingerprints`/`StartFingerprinting` に整理）。CacheChecks に別トラッカーの保存を帯が表示するケース。
+7. 先読みは最後のプレビュー描画から 10 秒（`TryPrimePreview` は 30 秒）で止まっていた。プレビューは変化が無いと再描画しないため、重いフレームでは 10 秒分の先読みが終わらない。`IdleViewportLifetime` = 2 分に（仕事量は再生位置から 10 秒分で上限があるので増えない）。
+
+検証: verify run 8〜10（CacheChecks、HostCacheProbe --integration / --gpu を含む）と GUI run 8 が成功。
+
+残り（次の Claude 向け）:
+- 先読みは保存済みのフレームも描き直す（`RenderBatch` は保存の有無を見ずに `source.Update`）。シークで戻ったとき、ディスクにだけあるフレームを描き直している（新規描画 296→368）。RAM にあれば飛ばす・ディスクだけなら読み込み要求にする、が候補。キーは `TryPrimeCore` と同じ組み立て（`MakeKey`、usage の ShowOnlyPreview、device context）が要る。
+- 写真では選択したアイテムの選択枠がプレビューに見えていない（YMM4 がマウスをプレビューに乗せたときだけ描く可能性。未調査）。
+- ユーザーの PC（4.55.1.1、RTX 3060）では GUI 未確認。この版は `HostFeatures` で preview のみ。
 
 ### 2026-10-01 追記（4）— YMM4 の版が変わっても止まらないようにする
 
@@ -24,7 +44,7 @@
 
 **新しい版の自動確認（`.github/workflows/ymm4-watch.yml`、main に取り込まれてから有効）**: 毎日 06:17 JST に versionlist2.php を見て、未報告の版があれば `tools/ci/fetch-ymm4.sh`（YMM4 自身の更新手順: `YukkuriMovieMaker.json` のハッシュを照合）で Actions cache に取得 → contracts 判定 → Windows でプラグインのビルド・CacheChecks・`HostCacheProbe --unread --gpu`（照合で ON の機能だけ画素一致などを検査）→ issue「YMM4 <版> の確認結果」を作成。`ci/ymm4-watch` への push は試行（issue を作らず summary に出す）。YMM4-dlls の同名ブランチに `CI_WATCH_VERSION` を置くと版を指定できます。**試行（4.56.0.1 を未確認の版として）は全ジョブ成功**: 照合は 4.56.1.0 と core 一致（FFmpeg の assembly だけ `FFmpegAudioFileSource` の変更で不一致→FFmpeg の動画は保存しない）、プラグインのビルド、CacheChecks、`HostCacheProbe --unread --gpu`（画素一致・無効化・選択枠・MF のデコード失敗）すべて成功。取得は `--top`（アプリのフォルダー直下 404 ファイル、2 並列で約 2.5 分）。
 
-**実 YMM4 の GUI 起動テスト（`tools/ci/gui-smoke.yml` / `gui-smoke.ps1` / `tests/GuiSmoke`、YMM4-dlls の `ci/gui-smoke` に push で実行）**: runner（Windows Server 2022、1600x900、英語 UI）で release 0.1 の YMM4 にプラグインを `user\plugin\YMM4Rtx3060Nvenc\` へ入れ、`user\setting\<版>\NVEncVideoWriterPlugin.FrameCacheToolSettings.json` で有効化し、生成したプロジェクトを開きます。初回の About ウィンドウ（ShowDialog）は WM_CLOSE で閉じ、UI Automation でツールメニューから「描画キャッシュ」を開き、画面写真を JPEG/base64 でログに出します（artifact の blob は cloud から取れないため）。ログ→画像は scratchpad の extract.py 相当で復元。スクリプトは Windows PowerShell 5.1 が ANSI で読むので ASCII のみ（日本語は `\uXXXX` を `[regex]::Unescape`）。
+**実 YMM4 の GUI 起動テスト（`tools/ci/gui-smoke.yml` / `gui-smoke.ps1` / `tests/GuiSmoke`、YMM4-dlls の `ci/gui-smoke` に push で実行）**: runner（Windows Server 2022、1600x900、英語 UI）で release 0.1 の YMM4 にプラグインを `user\plugin\YMM4Rtx3060Nvenc\` へ入れ、`user\setting\<版>\NVEncVideoWriterPlugin.FrameCacheToolSettings.json` で有効化し、生成したプロジェクトを開きます。初回の About と拡張子の関連付けの確認は YMM4 自身の設定（`YukkuriMovieMaker.Settings.YMMSettings.json` の `Version` と `IsYMM?AssociationChecked`）で出さず（出たら WM_CLOSE / UIA / `WM_COMMAND IDNO`）、最大化し、UI Automation でツールメニューの項目（名前は中の Text、親の MenuItem を Invoke）から「描画キャッシュ」を開いて右側へ移動、Layer 00 のアイテムを選択して放置、5 秒へシークし、各段階の画面写真を JPEG/base64 でログに出します（artifact の blob は cloud から取れないため）。ログ→画像は scratchpad の extract.py 相当で復元。スクリプトは Windows PowerShell 5.1 が ANSI で読むので ASCII のみ（日本語は `\uXXXX` を `[regex]::Unescape`）。
 
 **新しい版で core が一致しなかったときの手順（次の Claude 向け）**
 1. ymm4-watch の issue / host-versions（`TYPES` 入力で `members` 差分）で、どの型・メソッドが変わったか見る。
