@@ -248,7 +248,7 @@ internal static class TimelineFrameCache
             var context = devices.DeviceContext;
             if (!ValidContext(context)) return Bypass("描画コンテキストの状態が対象外のため、通常描画を使用します。");
             var state = sources.GetValue(__instance, _ => new SourceState(scene));
-            if (!state.Tracker.TryCapture(out capture, out var reason, settle: true)) return Bypass(reason);
+            if (!state.Tracker.TryCapture(FrameOf(time, scene), out capture, out var reason, settle: true)) return Bypass(reason);
             var traits = modelTraits.GetValue(capture!.Model, static model => new ModelTraits(model));
             string usageKey = exporting ? usageName : PreviewUsage.KeyFor(usageName, traits.ShowOnlyPreview);
             PreviewViewport? viewport = preview && TryGetPreviewViewportForSource(__instance, out var currentViewport)
@@ -386,6 +386,9 @@ internal static class TimelineFrameCache
             driver, typeof(TimelineFrameCache).Assembly.ManifestModule.ModuleVersionId.ToString("N"));
     });
 
+    // The frame TimelineSource.Update renders for this time.
+    internal static int FrameOf(TimeSpan time, Scene scene) => FrameTime.TimeToFrame(time, scene.Timeline.VideoInfo.FPS);
+
     private static string Bits(float value) => BitConverter.SingleToInt32Bits(value).ToString("X8", System.Globalization.CultureInfo.InvariantCulture);
 
     internal static bool TryGetLatestPreviewViewport(Timeline timeline, Scenes scenes, out PreviewViewport viewport)
@@ -433,7 +436,7 @@ internal static class TimelineFrameCache
             var context = devices.DeviceContext;
             if (!ValidContext(context)) return false;
             var state = sources.GetValue(timelineSource, _ => new SourceState(scene));
-            if (!state.Tracker.TryCapture(out var capture, out _)) return false;
+            if (!state.Tracker.TryCapture(FrameOf(time, scene), out var capture, out _)) return false;
             using (capture)
             {
                 if (expectedModelKey is not null && capture!.Key != expectedModelKey) return false;

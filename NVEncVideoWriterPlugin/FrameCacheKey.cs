@@ -13,7 +13,8 @@ namespace NVEncVideoWriterPlugin;
 
 internal static class FrameCacheKey
 {
-    private const int MaximumFiles = 256;
+    // Files are fingerprinted in the background and each frame only verifies its own (see FrameDependencyIndex).
+    private const int MaximumFiles = 4096;
     private const int MaximumModelCharacters = 16 * 1024 * 1024;
 
     public static bool TryCreate(Scene scene, out string key) => TryCreate(scene, out key, out _);
@@ -56,9 +57,14 @@ internal static class FrameCacheKey
     }
 
     internal static bool TryDescribe(Scene scene, Type[][] sourceReaders, out string model, out string[] dependencies, out string reason)
+        => TryDescribe(scene, sourceReaders, out model, out dependencies, out _, out reason);
+
+    internal static bool TryDescribe(Scene scene, Type[][] sourceReaders, out string model, out string[] dependencies,
+        out FrameDependencyIndex? frames, out string reason)
     {
         model = string.Empty;
         dependencies = [];
+        frames = null;
         reason = string.Empty;
         try
         {
@@ -68,23 +74,41 @@ internal static class FrameCacheKey
             var characters = items.Select(GetCharacter).OfType<Character>().Distinct().OrderBy(c => c.Name, StringComparer.Ordinal).ToArray();
             var paths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             var resources = new SortedSet<string>(StringComparer.Ordinal);
-            foreach (var item in items)
+            var nestedPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            var rootItems = scene.Timeline.Items.ToArray();
+            var rootDependencies = new List<(SortedSet<string> Paths, SortedSet<string> Resources)>(rootItems.Length);
+            foreach (var timeline in timelines)
             {
-                if (item.GetType().Assembly != typeof(Scene).Assembly)
-                    return Bypass("外部アイテムの描画状態を検証できません: " + item.GetType().FullName, out reason);
-                if (item is TachieItem)
-                    return Bypass("立ち絵の非同期口パクと外部描画状態は通常描画を使用します。", out reason);
-                if (item is ShapeItem shape && !IsBuiltIn(shape.ShapeType2))
-                    return Bypass("外部図形プラグインの描画状態を検証できません。", out reason);
-                foreach (var file in item.GetFiles()) AddPath(file, paths);
-                if (item is VoiceItem voice && !string.IsNullOrWhiteSpace(voice.FilePath)) AddPath(voice.FilePath, paths);
-                foreach (var resource in item.GetResources()) AddResource(resource, paths, resources);
+                bool root = ReferenceEquals(timeline, scene.Timeline);
+                foreach (var item in timeline.Items)
+                {
+                    if (item.GetType().Assembly != typeof(Scene).Assembly)
+                        return Bypass("外部アイテムの描画状態を検証できません: " + item.GetType().FullName, out reason);
+                    if (item is TachieItem)
+                        return Bypass("立ち絵の非同期口パクと外部描画状態は通常描画を使用します。", out reason);
+                    if (item is ShapeItem shape && !IsBuiltIn(shape.ShapeType2))
+                        return Bypass("外部図形プラグインの描画状態を検証できません。", out reason);
+                    var itemPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var itemResources = new SortedSet<string>(StringComparer.Ordinal);
+                    foreach (var file in item.GetFiles()) AddPath(file, itemPaths);
+                    if (item is VoiceItem voice && !string.IsNullOrWhiteSpace(voice.FilePath)) AddPath(voice.FilePath, itemPaths);
+                    foreach (var resource in item.GetResources()) AddResource(resource, itemPaths, itemResources);
+                    paths.UnionWith(itemPaths);
+                    resources.UnionWith(itemResources);
+                    if (root) rootDependencies.Add((itemPaths, itemResources));
+                    else nestedPaths.UnionWith(itemPaths);
+                }
             }
+            if (rootDependencies.Count != rootItems.Length) return Bypass("タイムラインの状態が検査中に変化しました。", out reason);
+            var characterPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            var characterResources = new SortedSet<string>(StringComparer.Ordinal);
             foreach (var character in characters)
             {
-                foreach (var file in character.GetFiles()) AddPath(file, paths);
-                foreach (var resource in character.GetResources()) AddResource(resource, paths, resources);
+                foreach (var file in character.GetFiles()) AddPath(file, characterPaths);
+                foreach (var resource in character.GetResources()) AddResource(resource, characterPaths, characterResources);
             }
+            paths.UnionWith(characterPaths);
+            resources.UnionWith(characterResources);
             if (resources.Any(IsExternalPluginResource))
                 return Bypass("外部エフェクト・プラグインの描画状態は通常描画を使用します。", out reason);
             if (sourceReaders.Length != 3) return Bypass("読み込みプラグインの状態を確認できません。", out reason);
@@ -118,8 +142,12 @@ internal static class FrameCacheKey
             model = YukkuriMovieMaker.Json.Json.GetJsonText(snapshot);
             if (model.Length > MaximumModelCharacters)
                 return Bypass("プロジェクトの描画状態がキャッシュ検査の上限を超えています。", out reason);
+            // Strings stay strings (no date parsing), so distinct texts never serialize to the same token.
+            JObject parsed;
+            using (var reader = new Newtonsoft.Json.JsonTextReader(new StringReader(model)) { DateParseHandling = Newtonsoft.Json.DateParseHandling.None })
+                parsed = JObject.Load(reader);
             // Runtime types in polymorphic parameters/effects must also belong to the inspected host.
-            foreach (var typeProperty in JObject.Parse(model).Descendants().OfType<JProperty>().Where(p => p.Name == "$type"))
+            foreach (var typeProperty in parsed.Descendants().OfType<JProperty>().Where(p => p.Name == "$type"))
             {
                 string type = typeProperty.Value.Value<string>() ?? string.Empty;
                 string assembly = type.Split(',').Skip(1).FirstOrDefault()?.Trim() ?? string.Empty;
@@ -127,6 +155,7 @@ internal static class FrameCacheKey
                     return Bypass("外部描画パラメーターを検証できません: " + type, out reason);
             }
             if (paths.Count > MaximumFiles) return Bypass("外部素材の数がキャッシュ検査の上限を超えています。", out reason);
+            frames = DescribeFrames(parsed, scene.Timeline.ID, rootItems, rootDependencies, characterPaths, characterResources, nestedPaths);
             dependencies = paths.ToArray();
             return true;
         }
@@ -135,6 +164,36 @@ internal static class FrameCacheKey
             reason = "描画キャッシュの状態検査を省略しました: " + ex.GetType().Name;
             return false;
         }
+    }
+
+    // Splits the serialized model into the part every frame depends on (everything but timeline items), the
+    // other timelines (only read by frames with a scene item), and one hash per root timeline item.
+    private static FrameDependencyIndex DescribeFrames(JObject parsed, Guid rootId, IItem[] rootItems,
+        List<(SortedSet<string> Paths, SortedSet<string> Resources)> rootDependencies,
+        SortedSet<string> characterPaths, SortedSet<string> characterResources, SortedSet<string> nestedPaths)
+    {
+        var timelines = (JArray)parsed["Timelines"]!;
+        var root = timelines.OfType<JObject>().Single(t => Guid.TryParse(t["ID"]?.ToString(), out var id) && id == rootId);
+        var rootTokens = (JArray)root["Items"]!;
+        if (rootTokens.Count != rootItems.Length) throw new InvalidDataException("Serialized root items do not match the timeline");
+        var nested = new JArray(timelines.Where(t => !ReferenceEquals(t, root)).Select(t => t.DeepClone()));
+        var global = (JObject)parsed.DeepClone();
+        var rootSettings = (JObject)root.DeepClone();
+        rootSettings.Remove("Items");
+        global["Timelines"] = new JArray(rootSettings);
+        global["Resources"] = new JArray(characterResources);
+        var entries = new FrameDependencyIndex.Entry[rootItems.Length];
+        for (int i = 0; i < rootItems.Length; i++)
+        {
+            var item = rootItems[i];
+            string text = rootTokens[i].ToString(Newtonsoft.Json.Formatting.None);
+            string identity = item.GetType().FullName + "\n" + text + "\n" + string.Join("\n", rootDependencies[i].Resources);
+            // Scene items render other timelines; audio spectrum shapes read the timeline's or a scene's audio.
+            bool wide = item is SceneItem || text.Contains("AudioSpectrum", StringComparison.Ordinal);
+            entries[i] = new(item.Frame, item.Length, item is TransitionItem, wide, FrameDependencyIndex.Hash(identity), rootDependencies[i].Paths.ToArray());
+        }
+        return new FrameDependencyIndex(FrameDependencyIndex.Hash(global.ToString(Newtonsoft.Json.Formatting.None)), characterPaths,
+            FrameDependencyIndex.Hash(nested.ToString(Newtonsoft.Json.Formatting.None)), nestedPaths, entries);
     }
 
     internal static Character? GetCharacter(IItem item) => item switch

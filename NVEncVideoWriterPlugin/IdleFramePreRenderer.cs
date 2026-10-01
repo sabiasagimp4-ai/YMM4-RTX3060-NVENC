@@ -180,7 +180,7 @@ internal static class IdleFramePreRenderer
         int rendered = 0;
         try
         {
-            if (!current.Tracker.TryCapture(out var initial, out string reason))
+            if (!current.Tracker.TryCapture(startFrame, out var initial, out string reason))
             {
                 SetStatus(reason);
                 return;
@@ -200,7 +200,7 @@ internal static class IdleFramePreRenderer
                         || !TimelineFrameCache.TryGetLatestPreviewViewport(current.Info.Timeline, current.Info.Scenes, out var latestViewport)
                         || !SameView(latestViewport, viewport) || !IsViewportFresh(latestViewport) || latestViewport.IsPlaying)
                         return;
-                    if (!TryCapturePair(current.Tracker, cloneTracker, out var liveCapture, out var cloneCapture, out reason))
+                    if (!TryCapturePair(current.Tracker, cloneTracker, frame, out var liveCapture, out var cloneCapture, out reason))
                     {
                         SetStatus(reason);
                         return;
@@ -237,12 +237,12 @@ internal static class IdleFramePreRenderer
         }
     }
 
-    private static bool TryCapturePair(KeyDependencyTracker liveTracker, KeyDependencyTracker cloneTracker,
+    private static bool TryCapturePair(KeyDependencyTracker liveTracker, KeyDependencyTracker cloneTracker, int frame,
         out KeyCapture? liveCapture, out KeyCapture? cloneCapture, out string reason)
     {
         liveCapture = cloneCapture = null;
-        if (!liveTracker.TryCapture(out liveCapture, out reason)) return false;
-        if (!cloneTracker.TryCapture(out cloneCapture, out reason))
+        if (!liveTracker.TryCapture(frame, out liveCapture, out reason)) return false;
+        if (!cloneTracker.TryCapture(frame, out cloneCapture, out reason))
         {
             liveCapture!.Dispose();
             liveCapture = null;

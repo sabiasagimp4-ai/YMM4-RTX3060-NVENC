@@ -148,6 +148,8 @@ internal static class Program
             Directory.Delete(folder);
         }
 
+        CheckFrameKeys(timeline, nested, tracker);
+
         timeline.Items = timeline.Items.Add(new TachieItem());
         Check(!FrameCacheKey.TryCreate(scene, out _, out string reason) && reason.Contains("非同期"), "Transient lip-sync was cached");
         tracker.Dispose();
@@ -165,12 +167,83 @@ internal static class Program
     private static string WaitForKey(KeyDependencyTracker tracker)
     {
         long deadline = Environment.TickCount64 + 15_000;
+        string reason;
         do
         {
-            if (tracker.TryGetKey(out string key, out _)) return key;
+            if (tracker.TryGetKey(out string key, out reason)) return key;
             Thread.Sleep(5);
         } while (Environment.TickCount64 < deadline);
-        throw new TimeoutException("External file fingerprinting did not become ready.");
+        throw new TimeoutException("External file fingerprinting did not become ready: " + reason);
+    }
+
+    private static string WaitForFrameKey(KeyDependencyTracker tracker, int frame)
+    {
+        long deadline = Environment.TickCount64 + 15_000;
+        string reason;
+        do
+        {
+            if (tracker.TryCapture(frame, out var capture, out reason))
+                using (capture!) return capture!.Key;
+            Thread.Sleep(5);
+        } while (Environment.TickCount64 < deadline);
+        throw new TimeoutException($"Frame {frame} key did not become ready: {reason}");
+    }
+
+    // Per-frame keys: an edit changes only the frames of the edited item, and a frame only needs its own files.
+    private static void CheckFrameKeys(Timeline timeline, Timeline nested, KeyDependencyTracker tracker)
+    {
+        var early = new ShapeItem { Frame = 0, Length = 30, Layer = 1 };
+        var late = new ShapeItem { Frame = 60, Length = 30, Layer = 1 };
+        timeline.Items = timeline.Items.Add(early).Add(late);
+        string at10 = WaitForFrameKey(tracker, 10), at45 = WaitForFrameKey(tracker, 45), at70 = WaitForFrameKey(tracker, 70);
+        Check(at10 != at45 && at10 != at70 && at45 != at70, "Frames with different items shared a key");
+        Check(WaitForFrameKey(tracker, 29) == at10 && WaitForFrameKey(tracker, 30) == at45, "Item boundaries were not respected");
+        late.X.SetFirstValue(5);
+        Check(WaitForFrameKey(tracker, 10) == at10 && WaitForFrameKey(tracker, 45) == at45, "Editing one item invalidated unrelated frames");
+        string edited70 = WaitForFrameKey(tracker, 70);
+        Check(edited70 != at70, "Editing an item did not invalidate its frames");
+        late.X.SetFirstValue(0);
+        Check(WaitForFrameKey(tracker, 70) == at70, "Restoring an item did not restore its frame keys");
+        timeline.VideoInfo.Width++;
+        Check(WaitForFrameKey(tracker, 45) != at45, "A timeline setting did not invalidate every frame");
+        timeline.VideoInfo.Width--;
+        Check(WaitForFrameKey(tracker, 45) == at45, "Restoring a timeline setting did not restore frame keys");
+
+        string folder = Path.Combine(Path.GetTempPath(), "ymm-frame-key-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        string imageFile = Path.Combine(folder, "frame.png");
+        try
+        {
+            File.WriteAllBytes(imageFile, [5, 6, 7, 8]);
+            var image = new ImageItem { FilePath = imageFile, Frame = 100, Length = 10, Layer = 2 };
+            timeline.Items = timeline.Items.Add(image);
+            string withFile = WaitForFrameKey(tracker, 105);
+            Check(WaitForFrameKey(tracker, 10) == at10, "Adding an item elsewhere changed unrelated frames");
+            File.Delete(imageFile);
+            Check(!tracker.TryCapture(105, out _, out string missing) && missing.Length != 0, "A frame whose file is missing did not bypass");
+            Check(tracker.TryCapture(10, out var unaffected, out string reason), "A frame without the missing file bypassed: " + reason);
+            unaffected!.Dispose();
+            File.WriteAllBytes(imageFile, [5, 6, 7, 9]);
+            Check(WaitForFrameKey(tracker, 105) != withFile, "Replaced file content did not change the frame key");
+            timeline.Items = timeline.Items.Remove(image);
+        }
+        finally
+        {
+            if (File.Exists(imageFile)) File.Delete(imageFile);
+            Directory.Delete(folder);
+        }
+
+        var scene = new SceneItem { Frame = 200, Length = 10, Layer = 3 };
+        timeline.Items = timeline.Items.Add(scene);
+        string sceneFrame = WaitForFrameKey(tracker, 205);
+        Check(WaitForFrameKey(tracker, 10) == at10, "A scene item changed frames it does not cover");
+        nested.VideoInfo.Height++;
+        Check(WaitForFrameKey(tracker, 205) != sceneFrame, "Another timeline's edit did not invalidate a scene item frame");
+        Check(WaitForFrameKey(tracker, 10) == at10 && WaitForFrameKey(tracker, 70) == at70, "Another timeline's edit invalidated ordinary frames");
+        nested.VideoInfo.Height--;
+        Check(WaitForFrameKey(tracker, 205) == sceneFrame, "Restoring another timeline did not restore the scene item frame");
+        timeline.Items = timeline.Items.Remove(scene).Remove(early).Remove(late);
+        Console.WriteLine("Per-frame keys: unrelated frames survive edits, boundaries, settings, per-frame files, scene items OK");
     }
     private static bool SkipLoader() => false;
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
