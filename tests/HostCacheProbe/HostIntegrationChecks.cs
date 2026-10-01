@@ -6,9 +6,26 @@ using NVEncVideoWriterPlugin;
 
 internal static class HostIntegrationChecks
 {
-    // The parts of this host, described on Windows, equal the 4.56.1.0 baseline that the tool recorded on Linux.
+    // Validate the older exact binaries separately from the 4.56.1.0 code baseline.
     internal static void CheckContracts(Assembly host, string hostDirectory)
     {
+        var hostVersion = host.GetName().Version?.ToString();
+        if (hostVersion == "4.55.1.1")
+        {
+            Check(HostIntegration.VerifyHost(host, out var verifiedVersion, out var olderDetail)
+                && verifiedVersion == hostVersion, "Host binary verification failed: " + olderDetail);
+            var olderFeatures = HostFeatures.For(host);
+            Check(olderFeatures is { Basis: "4.55.1.1", Preview: true, SelectionRects: false, WrappedSources: true, RulerBars: false, VerifiedDecoders: null },
+                "Expected the known 4.55.1.1 cache features: " + olderFeatures);
+            var olderWrapper = HostContracts.Describe(hostDirectory)[HostContracts.WrappedSources];
+            var readWrapper = HostContracts.Baselines.Single(b => b.Version == "4.56.1.0").Features[HostContracts.WrappedSources];
+            Check(HostContracts.Difference(readWrapper, olderWrapper) is null,
+                "The 4.55.1.1 video factory/wrapper contract must equal the verified 4.56.1.0 contract.");
+            Console.WriteLine("Host 4.55.1.1 exact binaries and wrapped video sources verified; selection rects and ruler bars remain disabled.");
+            return;
+        }
+        Check(hostVersion == "4.56.1.0", $"No HostCacheProbe contract baseline is defined for YMM4 {hostVersion ?? "?"}.");
+
         var clock = Stopwatch.StartNew();
         var parts = HostContracts.Describe(hostDirectory);
         var described = clock.Elapsed;

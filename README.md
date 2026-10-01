@@ -1,8 +1,10 @@
 # YMM4 RTX 3060 NVENC 出力
 
-> **開発途中のcheckpointです。** YMM4 4.56.1.0 の DLL を使ったビルドと、GPU（WARP）を使う自動テストの一部は GitHub Actions の Windows 環境で実行しています（新しい YMM4 の版も自動で検査します）。同じ環境で実際の YMM4 4.56.1.0 を起動し、先読み・キャッシュの帯・シーク後の表示を画面写真で確認しましたが、この PC（RTX 3060、4.55.1.1）の YMM4 での動作と NVENC 出力は未確認です。完了を確認できない動画を含むフレームは保存しません。既存 `dist` は最新ソースに対応しません。続きは [Claude引継ぎ資料](CLAUDE_HANDOFF.md) を参照してください。
+> **開発途中のcheckpointです。** YMM4 4.56.1.0 の DLL を使ったビルドと、GPU（WARP）を使う自動テストは GitHub Actions の Windows 環境で実行しています（新しい YMM4 の版も自動で検査します）。同じ環境で実際の YMM4 4.56.1.0 を起動し、先読み・キャッシュの帯・シーク後の表示を画面写真で確認しました。この PC でも RTX 3060（ドライバー 610.62）で H.264/HEVC と AAC のオフライン出力・全フレームデコード、および取消・異常入力・並行書き込み時の処理を確認しました（320×180、30 fps、30 フレーム）。この PC の YMM4 GUI での実プロジェクトの動作と長時間出力は未確認です。完了を確認できない動画を含むフレームは保存しません。配布パッケージは `build.ps1 -Smoke` の成功後に生成します。続きは [Claude引継ぎ資料](CLAUDE_HANDOFF.md) を参照してください。
 
 RTX 3060 を搭載したこの PC 向けの、ゆっくりMovieMaker4 動画出力・描画キャッシュプラグインです。YMM4 の GPU フレームを Direct3D 11 経由で NVENC に渡し、MP4（H.264 または HEVC、AAC 音声）を出力します。対応版では合成済みフレームを RAM・ディスクへ保存し、変更のないフレームを再利用します。
+
+ツール「描画キャッシュ」は縦スクロールに対応しています。外部プラグインが多い場合も下部の状態表示・キャッシュ消去へ移動でき、説明文はパネル幅に合わせて折り返します。
 
 MIT ライセンスの [YMM4_NVEncPlugin](https://github.com/tarutaru247/YMM4_NVEncPlugin) を基にしています。[Radeon AMF 実装](https://github.com/disnana/YMM4_AMF_Plugin) と [GPU 出力の解析記事](https://qiita.com/harupython/items/f03cd6f04375115f82f9) を出力経路の参考にし、指定された [高速化の記事](https://qiita.com/harupython/items/4be768e58cba3a2921b3) を実行時フック・更新省略の調査に使いました。Radeon 用 AMF と libvips は組み込んでいません。
 
@@ -17,6 +19,8 @@ MIT ライセンスの [YMM4_NVEncPlugin](https://github.com/tarutaru247/YMM4_NV
 ## ビルドとインストール
 
 この PC には .NET 10 SDK、Visual Studio 2022 の C++ ツール、Windows SDK 10.0.26100.0 が必要です。YMM4 の配置を変えた場合は `-Ymm4DirPath` を指定してください。
+
+配布するプラグインは、対応する最も古い YMM4 の DLL でビルドしてください。この PC の 4.55.1.1 向けには既定の配置を使います。4.56.1.0 の DLL でビルドしたものを 4.55.1.1 に入れると、起動時に `YukkuriMovieMaker, Version=4.56.1.0` を読み込めないエラーになります。ビルドでは、指定した YMM4 でプラグインの型を読み込めることをパッケージ生成前に確認します。
 
 ```powershell
 .\build.ps1 -Smoke

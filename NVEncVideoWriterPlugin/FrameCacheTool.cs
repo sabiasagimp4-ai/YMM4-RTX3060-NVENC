@@ -100,6 +100,8 @@ public sealed class PluginSettingsPanel : StackPanel
         HostIntegration.EnsureInstalled();
         PluginSettings.Apply();
         Margin = new Thickness(0, 8, 0, 12);
+        foreach (var box in new[] { preview, export, nvenc })
+            box.Content = new TextBlock { Text = (string)box.Content, TextWrapping = TextWrapping.Wrap };
         Children.Add(preview);
         Children.Add(export);
         Children.Add(nvenc);
@@ -109,6 +111,7 @@ public sealed class PluginSettingsPanel : StackPanel
             Text = "外部プラグインを使うフレームもキャッシュする（チェックしたプラグインだけ）",
             Margin = new Thickness(0, 10, 0, 0),
             FontWeight = FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
         });
         Children.Add(new TextBlock
         {
@@ -149,7 +152,7 @@ public sealed class PluginSettingsPanel : StackPanel
         {
             var box = new CheckBox
             {
-                Content = $"{assembly}（{provides}）",
+                Content = new TextBlock { Text = $"{assembly}（{provides}）", TextWrapping = TextWrapping.Wrap },
                 IsChecked = settings.TrustedPlugins.Contains(assembly, StringComparer.OrdinalIgnoreCase),
                 Margin = new Thickness(0, 2, 0, 0),
             };
@@ -204,7 +207,12 @@ public sealed class FrameCacheToolView : UserControl
         panel.Children.Add(counts);
         panel.Children.Add(purge);
         panel.Children.Add(error);
-        Content = panel;
+        Content = new ScrollViewer
+        {
+            Content = panel,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
         purge.Click += async (_, _) =>
         {
             purge.IsEnabled = false;

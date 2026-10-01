@@ -26,6 +26,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Managed build failed.' }
 
 $managed = Join-Path $root 'NVEncVideoWriterPlugin\bin\Release\net10.0-windows10.0.19041.0\YMM4Rtx3060Nvenc.dll'
 $native = Join-Path $root 'NvencNative\bin\Release\NvencNative.dll'
+& dotnet run --project (Join-Path $root 'tests\HostLoadChecks\HostLoadChecks.csproj') -c Release --no-launch-profile -- $hostDir $managed
+if ($LASTEXITCODE -ne 0) { throw 'Plugin assembly loading against the target YMM4 failed.' }
 $dist = Join-Path $root 'dist'
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
 function Write-PluginPackage {
@@ -57,7 +59,11 @@ try {
             } finally { $input.Dispose() }
         }
     } finally { $archive.Dispose() }
-    [IO.File]::Move($partial, $package, $true)
+    if ([IO.File]::Exists($package)) {
+        [IO.File]::Replace($partial, $package, [System.Management.Automation.Language.NullString]::Value)
+    } else {
+        [IO.File]::Move($partial, $package)
+    }
 } finally {
     if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
 }
