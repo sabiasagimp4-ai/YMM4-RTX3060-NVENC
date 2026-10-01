@@ -8,6 +8,8 @@
 
 統合実装の [main CI](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/36878854622) は成功（`970debc7da66b537871035cb3088e657b5fa792d`）。`cache-development` はmainへのpush・対象ファイルのPR・手動実行で動作する。YMM4バイナリはコミットしない。
 
+動的計算・依存provider・費用判断・圧縮・指定範囲の [Windows／portable CI](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/36891225375) も成功（`741df2af59dd8461c02f1804b3c969f3e3c2d1ca`）。実4.56.1.0のprovider発見・隠れた状態の変更、従来のdecoder／編集／Undo／再起動／WARP画素一致・GPU借用寿命を確認した。RTX 3060やAE 26.3での実機性能を測った結果ではない。
+
 ## 実装済みの範囲
 
 | 領域 | 現状 |

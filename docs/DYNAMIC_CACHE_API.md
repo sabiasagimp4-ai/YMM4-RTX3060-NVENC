@@ -62,3 +62,5 @@ disk読込・展開の観測費用から再生先読みを0.5〜2秒へ伸ばし
 ## 検証
 
 portable harnessで計算共有・取消・借用寿命・purge中の完成・失敗再試行・例外deleter・再帰・入力と時間とcontextのキー差・要求充足・費用判断・指定範囲・圧縮とrawの往復・破損拒否を検証する。Windows CIは実4.56.1.0で動的providerの発見と隠れた状態の変更、既存の編集／Undo／デコード／WARP画素一致・GPU保持を検証する。
+
+実行済みの [main CI](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/36891225375) は `741df2af59dd8461c02f1804b3c969f3e3c2d1ca` で全job成功。portableとWindowsの両方で共有計算・圧縮を確認し、実YMM4 DLLのprovider検証とWARP画素一致も成功。AE本体やRTX 3060での比較計測は未実施。
