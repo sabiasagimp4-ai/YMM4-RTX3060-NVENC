@@ -73,7 +73,7 @@ internal static partial class HostContracts
                 ["YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.GroupItem"] = "33DFD0A3118EE20AB934A77D3F03FC0C",
                 ["YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.IItem"] = "30F408343CEE88235CADF2377414630F",
                 ["YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.ImageItem"] = "F2C369CA1A966F0B26C6E961EBFC3BC6",
-                ["YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.ItemEx"] = "94986CAC7E594D9F6B214CF43E05C750",
+                ["YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.ItemEx::Contains"] = "E7E1D4F0AD0741CF77991C1E6180DD52",
                 ["YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.SceneItem"] = "0F9045D1D594230CF879F9492F68E73B",
                 ["YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.ShapeItem"] = "440A73B03B7AEB4493487CB35A6EFD3A",
                 ["YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.StrokeShapeParameterBase"] = "90CE0EAD781307F513224E39D20D4E0C",

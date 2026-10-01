@@ -89,13 +89,13 @@ internal sealed class CacheStatusBar : FrameworkElement
     }
 }
 
-// Puts a cache bar along the bottom edge of YMM4's timeline ruler. Only on the host whose views were read
-// (YMM4 4.56.1.0): x = frame * TimelineZoom / 100 - TimelineViewModel.Viewport.X, as TimelineScaleViewModel
-// places the playhead. Anything unexpected leaves the ruler untouched.
+// Puts a cache bar along the bottom edge of YMM4's timeline ruler. Only where the ruler's code is that of the
+// build whose views were read (YMM4 4.56.1.0; HostFeatures.RulerBars): x = frame * TimelineZoom / 100 -
+// TimelineViewModel.Viewport.X, as TimelineScaleViewModel places the playhead. Anything unexpected leaves the
+// ruler untouched.
 internal static class TimelineCacheBars
 {
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-    private static readonly Guid VerifiedHost = Guid.Parse("23e5b5b5-adcf-43b7-b976-b6b63f8dadea");
     private static readonly ConditionalWeakTable<FrameworkElement, CacheStatusBar> attached = new();
     private static Type scaleViewType = null!, timelineViewModelType = null!;
     private static FieldInfo timelineField = null!;
@@ -106,7 +106,7 @@ internal static class TimelineCacheBars
     {
         try
         {
-            if (host.ManifestModule.ModuleVersionId != VerifiedHost)
+            if (!HostFeatures.For(host).RulerBars)
                 throw new NotSupportedException("タイムラインの表示を確認していない版です。");
             scaleViewType = host.GetType("YukkuriMovieMaker.Views.TimelineScaleView", true)!;
             timelineViewModelType = host.GetType("YukkuriMovieMaker.ViewModels.TimelineViewModel", true)!;

@@ -26,6 +26,12 @@ internal static class Program
         var host = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(hostDir, "YukkuriMovieMaker.dll"));
         var plugin = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(hostDir, "YukkuriMovieMaker.Plugin.dll"));
         Check(HostIntegration.VerifyHost(host, out var hostReason), "Host binary verification failed: " + hostReason);
+        if (args.Contains("--integration"))
+        {
+            HostIntegrationChecks.Run(host);
+            return 0;
+        }
+        HostIntegrationChecks.CheckContracts(host, hostDir);
         var sourceType = host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!;
         var update = sourceType.GetMethods(All).Single(m => m.Name == "Update" && m.GetParameters().Length == 2);
         var dispose = sourceType.GetMethod("Dispose", All, [typeof(bool)])!;

@@ -58,6 +58,13 @@ internal sealed partial class HostFingerprint : IDisposable
     }
 
     internal Guid Mvid => reader.GetGuid(reader.GetModuleDefinition().Mvid);
+
+    internal static Guid ReadMvid(string path)
+    {
+        using var pe = new PEReader(File.OpenRead(path));
+        var reader = pe.GetMetadataReader();
+        return reader.GetGuid(reader.GetModuleDefinition().Mvid);
+    }
     internal string AssemblyName => reader.GetString(reader.GetAssemblyDefinition().Name);
     internal IEnumerable<string> TypeNames => types.Keys;
     internal bool Contains(string typeName) => types.ContainsKey(typeName);

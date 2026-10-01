@@ -44,11 +44,12 @@ internal static class FrameRenderReadiness
 
     private sealed record UpdateResult(bool Ready, TimeSpan Time);
 
-    private sealed class HostBinding(Harmony harmony, Type videoSource, MethodInfo interfaceUpdate, string hostDirectory, bool sourcesAlwaysWrapped)
+    private sealed class HostBinding(Harmony harmony, Type videoSource, MethodInfo interfaceUpdate, string hostDirectory, HostFeatures features)
     {
         // The host creates every rendered video source through VideoFileSourceFactory, which wraps it in
         // CachedVideoFileSource (read in YMM4 4.56.1.0), so the wrapper's hook sees every decode.
-        internal readonly bool SourcesAlwaysWrapped = sourcesAlwaysWrapped;
+        internal readonly bool SourcesAlwaysWrapped = features.WrappedSources;
+        internal readonly HostFeatures Features = features;
         internal readonly object Gate = new();
         internal readonly Harmony Harmony = harmony;
         internal readonly Type VideoSource = videoSource;
@@ -326,8 +327,7 @@ internal static class FrameRenderReadiness
         var videoSource = interfaces[0];
         var interfaceUpdate = new[] { videoSource }.Concat(videoSource.GetInterfaces()).SelectMany(i => i.GetMethods())
             .Single(m => m.Name == "Update" && m.ReturnType == typeof(void) && m.GetParameters() is [{ ParameterType: var p }] && p == typeof(TimeSpan));
-        var hostBinding = new HostBinding(harmony, videoSource, interfaceUpdate, hostDirectory,
-            host.ManifestModule.ModuleVersionId == SourcesAlwaysWrappedHost);
+        var hostBinding = new HostBinding(harmony, videoSource, interfaceUpdate, hostDirectory, HostFeatures.For(host));
         foreach (var assembly in assemblies) hostBinding.Assemblies.Add(assembly.FullName ?? string.Empty);
         implementations = Implementations(videoSource, types);
         return hostBinding;
@@ -350,7 +350,12 @@ internal static class FrameRenderReadiness
         var targets = types.ToDictionary(type => type, type => ImplementationOf(type, hostBinding.InterfaceUpdate));
         var names = new Dictionary<Type, string>();
         foreach (var type in types)
-            if (DescribeVerified(type) is { } verified) { hostBinding.Verified[type] = verified.Holds; names[type] = verified.Name; }
+            // A decoder whose assembly differs from the read builds' is not trusted by its shape alone.
+            if (hostBinding.Features.DecoderVerified(type) && DescribeVerified(type) is { } verified)
+            {
+                hostBinding.Verified[type] = verified.Holds;
+                names[type] = verified.Name;
+            }
         foreach (var type in types)
         {
             if (hostBinding.Verified.TryGetValue(type, out var verified)) hostBinding.Classifiers[type] = verified;
@@ -456,7 +461,6 @@ internal static class FrameRenderReadiness
     internal const string FFmpegTypeName = "YukkuriMovieMaker.Plugin.FileSource.FFmpeg.FFmpegVideoFileSource";
     internal const string WicGifTypeName = "YukkuriMovieMaker.Plugin.FileSource.WIC.WICGifVideoSource";
     internal const string WicWebpTypeName = "YukkuriMovieMaker.Plugin.FileSource.WIC.WICWebpVideoSource";
-    private static readonly Guid SourcesAlwaysWrappedHost = Guid.Parse("23e5b5b5-adcf-43b7-b976-b6b63f8dadea");
     internal const string WrapperTypeName = "YukkuriMovieMaker.Plugin.CachedVideoFileSource";
 
     private static (string Name, Func<object, TimeSpan, bool> Holds)? DescribeVerified(Type type) => type.FullName switch

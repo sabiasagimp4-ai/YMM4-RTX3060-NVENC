@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace NVEncVideoWriterPlugin;
@@ -20,7 +21,8 @@ internal static partial class HostContracts
     internal const string DecoderPrefix = "decoder:";
     internal const string Missing = "missing";
 
-    // Types: "Assembly|Type" (exactly that type) or "Assembly|Type+" (the type and its nested types).
+    // Types: "Assembly|Type" (exactly that type), "Assembly|Type+" (the type and its nested types) or
+    // "Assembly|Type::Method" (that type's methods of that name only).
     // Assemblies: every type of those assemblies. Witnesses: types of the given assemblies (optionally only those
     // whose name matches TypePattern) that name something matching Pattern (HostFingerprint.References), or with
     // Defines, that define a method matching it.
@@ -59,7 +61,7 @@ internal static partial class HostContracts
                 "YukkuriMovieMaker|YukkuriMovieMaker.Project.Scenes",
                 "YukkuriMovieMaker|YukkuriMovieMaker.Project.Timeline",
                 "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.IItem",
-                "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.ItemEx",
+                "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.ItemEx::Contains",
                 "YukkuriMovieMaker.Plugin|YukkuriMovieMaker.Player.Video.ITimelineSource",
                 "YukkuriMovieMaker.Plugin|YukkuriMovieMaker.Player.Video.TimelineSourceUsage",
                 "YukkuriMovieMaker.Plugin|YukkuriMovieMaker.Player.Video.TimelineSourceDescription",
@@ -154,6 +156,14 @@ internal static partial class HostContracts
                 foreach (var spec in rule.Types)
                 {
                     var (assembly, type) = Split(spec);
+                    if (type.Split("::") is [var declaring, var method])
+                    {
+                        var methods = Open(assembly)?.MemberHashes(declaring)
+                            .Where(member => Regex.IsMatch(member.Key, $@"^method [^(]*\b{Regex.Escape(method)}(<\d+>)?\("))
+                            .Select(member => member.Key + "=" + member.Value).ToArray() ?? [];
+                        members[spec] = methods.Length == 0 ? Missing : HostFingerprint.HashText(string.Join("\n", methods));
+                        continue;
+                    }
                     bool nested = type.EndsWith('+');
                     type = type.TrimEnd('+');
                     Add(assembly, type);
@@ -234,6 +244,39 @@ internal static partial class HostContracts
             best ??= evaluation;
         }
         return best ?? new Evaluation(null, new HashSet<string>(), new Dictionary<string, string> { [Core] = "検証済みの版の記録がありません" });
+    }
+
+    private sealed record CachedVerdict(string Key, string? Baseline, string[] Features, Dictionary<string, string> Problems);
+
+    // Evaluate(Describe(hostDirectory)), remembered in cacheFile for the same host binaries and plugin build.
+    internal static Evaluation EvaluateCached(string hostDirectory, string cacheFile, string pluginIdentity)
+    {
+        string key = pluginIdentity + ";" + string.Join(";", Directory.GetFiles(hostDirectory, "YukkuriMovieMaker*.dll")
+            .Order(StringComparer.OrdinalIgnoreCase).Select(path => $"{Path.GetFileName(path)}={Identity(path)}"));
+        try
+        {
+            if (File.Exists(cacheFile) && JsonSerializer.Deserialize<CachedVerdict>(File.ReadAllText(cacheFile)) is { } cached && cached.Key == key)
+                return new Evaluation(cached.Baseline, cached.Features.ToHashSet(StringComparer.Ordinal),
+                    new SortedDictionary<string, string>(cached.Problems, StringComparer.Ordinal));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or NotSupportedException) { }
+        var evaluation = Evaluate(Describe(hostDirectory));
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(cacheFile)!);
+            string temporary = cacheFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            File.WriteAllText(temporary, JsonSerializer.Serialize(new CachedVerdict(key, evaluation.Baseline,
+                evaluation.Features.Order(StringComparer.Ordinal).ToArray(), evaluation.Problems.ToDictionary(p => p.Key, p => p.Value))));
+            File.Move(temporary, cacheFile, true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        return evaluation;
+
+        static string Identity(string path)
+        {
+            try { return HostFingerprint.ReadMvid(path).ToString("N"); }
+            catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException) { return "native:" + new FileInfo(path).Length; }
+        }
     }
 
     // Null when equal; otherwise the first few differences, by type name.

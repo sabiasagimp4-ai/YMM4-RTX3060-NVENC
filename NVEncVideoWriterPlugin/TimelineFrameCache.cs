@@ -26,8 +26,6 @@ internal static class TimelineFrameCache
     private const int RecordHeader = 24;
     private const int PreviewRecordHeader = 32;
     private const long GpuBudget = 384L * 1024 * 1024;
-    // Rect reuse depends on which preview controllers the host builds and from what state; read in YMM4 4.56.1.0.
-    private static readonly Guid RectReuseVerifiedHost = Guid.Parse("23e5b5b5-adcf-43b7-b976-b6b63f8dadea");
     private static readonly TimeSpan RectsRefreshDelay = TimeSpan.FromMilliseconds(100);
     private static readonly ConditionalWeakTable<string, ModelTraits> modelTraits = new();
     private static readonly ConditionalWeakTable<object, SourceState> sources = new();
@@ -45,7 +43,7 @@ internal static class TimelineFrameCache
     private static Type pickerType = null!;
     private static long hits, misses, gpuBytes, generation;
     private static string status = "自動キャッシュは停止中です";
-    private static bool enabled, rectsSupported, refreshSupported;
+    private static bool enabled, previewSupported, rectsSupported, refreshSupported;
 
     internal static bool Enabled
     {
@@ -91,6 +89,7 @@ internal static class TimelineFrameCache
         var patched = new List<MethodBase>();
         try
         {
+            var features = HostFeatures.For(host);
             var type = host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!;
             pickerType = host.GetType("YukkuriMovieMaker.Player.Video.CompositeItemPicker", true)!;
             sceneField = type.GetField("scene", Instance)!;
@@ -104,48 +103,58 @@ internal static class TimelineFrameCache
                 || collectorField.FieldType != typeof(DisposeCollector) || needRects.PropertyType != typeof(bool))
                 throw new NotSupportedException("TimelineSource contract changed");
 
-            var playerType = host.GetType("YukkuriMovieMaker.Player.TimelineVideoPlayer", true)!;
-            playerSourceField = playerType.GetField("timelineVideo", Instance)!;
-            playerContextField = playerType.GetField("devicesAndContext", Instance)!;
-            playerTargetField = playerType.GetField("renderTarget", Instance)!;
-            previewZoom = playerType.GetProperty("PreviewDisplayZoom")!;
-            previewCenter = playerType.GetProperty("PreviewViewCenter")!;
-            playerIsPlaying = playerType.GetProperty("IsPlaying", Instance)!;
-            visibleVideoSize = playerType.GetMethod("GetVisibleVideoSize", Instance)!;
-            previewTransform = playerType.GetMethod("CreatePreviewViewTransform", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)!;
-            backBuffer = playerTargetField.FieldType.GetProperty("BackBuffer")!;
-            var draw = playerType.GetMethods(Instance).Single(m => m.Name == "Draw" && m.GetParameters().Length == 0);
             var update = type.GetMethods(Instance).Single(m => m.Name == "Update" && m.GetParameters().Length == 2
                 && m.GetParameters()[0].ParameterType == typeof(TimeSpan));
             var dispose = type.GetMethod("Dispose", Instance, [typeof(bool)])!;
-            var edit = playerType.GetMethod("Edit", Instance, Type.EmptyTypes);
-            if (playerSourceField.FieldType != type || playerContextField.FieldType != typeof(IGraphicsDevicesAndContext)
-                || previewZoom.PropertyType != typeof(float) || previewCenter.PropertyType != typeof(Vector2)
-                || playerIsPlaying.PropertyType != typeof(bool) || backBuffer.PropertyType != typeof(ID2D1Bitmap1)
-                || visibleVideoSize.GetParameters().Length != 1 || visibleVideoSize.GetParameters()[0].ParameterType != typeof(float)
-                || !previewTransform.GetParameters().Select(p => p.ParameterType)
-                    .SequenceEqual([typeof(Vector2), typeof(Vector2), typeof(float), typeof(float)])
-                || draw.ReturnType != typeof(void))
-                throw new NotSupportedException("TimelineVideoPlayer preview contract changed");
-
             EnsureNoExternalHarmonyOwners(update, harmony.Id);
             EnsureNoExternalHarmonyOwners(dispose, harmony.Id);
-            EnsureNoExternalHarmonyOwners(draw, harmony.Id);
-            // Optional: without them, frames that need item rects are rendered normally.
-            rectsSupported = host.ManifestModule.ModuleVersionId == RectReuseVerifiedHost && itemRects.PropertyType == typeof(List<ItemRect>);
-            timelineChangedField = playerType.GetField("isTimelineChanged", Instance);
-            pointerOverPreviewField = playerType.GetField("isMouseOverPreviewArea", Instance);
-            refreshSupported = rectsSupported && edit?.ReturnType == typeof(void)
-                && timelineChangedField?.FieldType == typeof(bool) && pointerOverPreviewField?.FieldType == typeof(bool)
-                && (Harmony.GetPatchInfo(edit)?.Owners.All(owner => owner == harmony.Id) ?? true);
+            // The preview (player) part is used only where the player's code is known (HostFeatures).
+            MethodInfo? draw = null, edit = null;
+            previewSupported = rectsSupported = refreshSupported = false;
+            if (features.Preview)
+            {
+                var playerType = host.GetType("YukkuriMovieMaker.Player.TimelineVideoPlayer", true)!;
+                playerSourceField = playerType.GetField("timelineVideo", Instance)!;
+                playerContextField = playerType.GetField("devicesAndContext", Instance)!;
+                playerTargetField = playerType.GetField("renderTarget", Instance)!;
+                previewZoom = playerType.GetProperty("PreviewDisplayZoom")!;
+                previewCenter = playerType.GetProperty("PreviewViewCenter")!;
+                playerIsPlaying = playerType.GetProperty("IsPlaying", Instance)!;
+                visibleVideoSize = playerType.GetMethod("GetVisibleVideoSize", Instance)!;
+                previewTransform = playerType.GetMethod("CreatePreviewViewTransform", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)!;
+                backBuffer = playerTargetField.FieldType.GetProperty("BackBuffer")!;
+                draw = playerType.GetMethods(Instance).Single(m => m.Name == "Draw" && m.GetParameters().Length == 0);
+                edit = playerType.GetMethod("Edit", Instance, Type.EmptyTypes);
+                if (playerSourceField.FieldType != type || playerContextField.FieldType != typeof(IGraphicsDevicesAndContext)
+                    || previewZoom.PropertyType != typeof(float) || previewCenter.PropertyType != typeof(Vector2)
+                    || playerIsPlaying.PropertyType != typeof(bool) || backBuffer.PropertyType != typeof(ID2D1Bitmap1)
+                    || visibleVideoSize.GetParameters().Length != 1 || visibleVideoSize.GetParameters()[0].ParameterType != typeof(float)
+                    || !previewTransform.GetParameters().Select(p => p.ParameterType)
+                        .SequenceEqual([typeof(Vector2), typeof(Vector2), typeof(float), typeof(float)])
+                    || draw.ReturnType != typeof(void))
+                    throw new NotSupportedException("TimelineVideoPlayer preview contract changed");
+
+                EnsureNoExternalHarmonyOwners(draw, harmony.Id);
+                previewSupported = true;
+                // Optional: without them, frames that need item rects are rendered normally.
+                rectsSupported = features.SelectionRects && itemRects.PropertyType == typeof(List<ItemRect>);
+                timelineChangedField = playerType.GetField("isTimelineChanged", Instance);
+                pointerOverPreviewField = playerType.GetField("isMouseOverPreviewArea", Instance);
+                refreshSupported = rectsSupported && edit?.ReturnType == typeof(void)
+                    && timelineChangedField?.FieldType == typeof(bool) && pointerOverPreviewField?.FieldType == typeof(bool)
+                    && (Harmony.GetPatchInfo(edit)?.Owners.All(owner => owner == harmony.Id) ?? true);
+            }
             harmony.Patch(update, prefix: new HarmonyMethod(typeof(TimelineFrameCache), nameof(Prefix)),
                 postfix: new HarmonyMethod(typeof(TimelineFrameCache), nameof(Postfix)),
                 finalizer: new HarmonyMethod(typeof(TimelineFrameCache), nameof(Finalizer)));
             patched.Add(update);
             harmony.Patch(dispose, postfix: new HarmonyMethod(typeof(TimelineFrameCache), nameof(Disposed)));
             patched.Add(dispose);
-            harmony.Patch(draw, prefix: new HarmonyMethod(typeof(TimelineFrameCache), nameof(ObservePlayer)));
-            patched.Add(draw);
+            if (draw is not null)
+            {
+                harmony.Patch(draw, prefix: new HarmonyMethod(typeof(TimelineFrameCache), nameof(ObservePlayer)));
+                patched.Add(draw);
+            }
             if (refreshSupported)
             {
                 harmony.Patch(edit!, prefix: new HarmonyMethod(typeof(TimelineFrameCache), nameof(BeforeEdit)));
@@ -241,6 +250,7 @@ internal static class TimelineFrameCache
             string usageName = usage.ToString() ?? string.Empty;
             bool exporting = usageName == "Exporting", paused = usageName == "Paused", preview = paused || usageName == "Playing";
             if (!exporting && !preview) return Bypass("キャッシュの対象はプレビュー（再生・一時停止）と動画出力の描画だけです。");
+            if (preview && !previewSupported) return Bypass("このYMM4ではプレビューのキャッシュを使いません（動画出力のみ）。");
             bool wantRects = (bool)needRects.GetValue(__instance)!;
             if (wantRects && (exporting || !rectsSupported)) return Bypass("アイテムの表示枠が必要な描画のため、通常描画を使用します。");
             var scene = (Scene)sceneField.GetValue(__instance)!;

@@ -8,7 +8,7 @@ namespace NVEncVideoWriterPlugin;
 
 internal static class HostIntegration
 {
-    private const string PatchId = "sabiasagimp4-ai.ymm4-rtx3060-nvenc.host";
+    internal const string PatchId = "sabiasagimp4-ai.ymm4-rtx3060-nvenc.host";
     private static readonly object installLock = new();
     private static readonly Harmony harmony = new(PatchId);
     private static readonly Harmony cacheHarmony = new(PatchId + ".cache");
@@ -34,16 +34,43 @@ internal static class HostIntegration
             }
             if (ReferenceEquals(checkedHost, host)) return installed;
             checkedHost = host;
+            bool verified = VerifyHost(host, out var version, out _);
+            return Install(host, verified, version);
+        }
+    }
+
+    // verified: one of KnownHosts (VerifyHost). Separate from EnsureInstalled so that probes can install on the
+    // real host as if it were another build.
+    internal static bool Install(Assembly host, bool verified, string version)
+    {
+        lock (installLock)
+        {
             try
             {
-                if (!VerifyHost(host, out var version, out var reason)) throw new NotSupportedException(reason);
-                if (!HostExportScope.TryInstall(host, harmony, out reason)) throw new NotSupportedException(reason);
+                // The export hook only needs its own contract: whatever the host does, an output replaces the
+                // file only when every frame of the range arrived without cancellation. The cache depends on
+                // how the host renders, so it is installed only on builds whose code was checked.
+                if (!HostExportScope.TryInstall(host, harmony, out var reason)) throw new NotSupportedException(reason);
                 installed = true;
+                string features = string.Empty;
+                if (!verified)
+                {
+                    // A build that was not read: the cache only where its code is that of a read build.
+                    version = HostVersion(host);
+                    if (!TryMatchReadBuild(host, out var matched, out var detail))
+                    {
+                        cacheAvailable = false;
+                        status = $"YMM4 {version}（未確認の版）: 取消保護つきの出力は使えます。自動キャッシュは使いません: {detail}";
+                        return true;
+                    }
+                    HostFeatures.Decide(host, matched);
+                    features = $"キャッシュが前提とする本体のコードが検証済みの {matched.Basis} と同じため使います。{detail}";
+                }
                 cacheAvailable = TimelineFrameCache.TryInstall(host, cacheHarmony, out reason);
                 if (!cacheAvailable) cacheHarmony.UnpatchAll(cacheHarmony.Id);
                 else TimelineCacheBars.TryInstall(host, out _);
                 status = cacheAvailable
-                    ? $"YMM4 {version}: 取消保護・自動キャッシュの接続を確認しました。"
+                    ? $"YMM4 {version}: 取消保護・自動キャッシュの接続を確認しました。{features}"
                     : "取消保護は有効です。自動キャッシュは利用できません: " + reason;
                 return true;
             }
@@ -73,7 +100,7 @@ internal static class HostIntegration
     private sealed record KnownHost(string Version, KnownBinary Host, KnownBinary Plugin, KnownBinary Settings);
 
     // Exact host builds whose hooked internals were inspected. 4.56.1.0 was read with ILSpy from the official
-    // Lite zip (see CLAUDE_HANDOFF.md); anything else keeps the integration disabled.
+    // Lite zip (see CLAUDE_HANDOFF.md); on any other build only the export hook is installed.
     private static readonly KnownHost[] KnownHosts =
     [
         new("4.55.1.1",
@@ -110,6 +137,49 @@ internal static class HostIntegration
         catch (Exception ex)
         {
             reason = ex.GetBaseException().Message;
+            return false;
+        }
+    }
+
+    private static string HostVersion(Assembly host) => host.GetName().Version?.ToString() ?? "?";
+
+    // HostContracts against the read builds. The verdict is kept per set of host binaries (and plugin build), so
+    // only the first start after a YMM4 update spends the few seconds of reading them.
+    internal static bool TryMatchReadBuild(Assembly host, out HostFeatures features, out string detail)
+    {
+        features = null!;
+        try
+        {
+            string directory = Path.GetDirectoryName(Path.GetFullPath(host.Location))!;
+            if (HostFingerprint.ReadMvid(host.Location) != host.ManifestModule.ModuleVersionId)
+            {
+                detail = "読み込まれた YukkuriMovieMaker.dll がフォルダーのファイルと異なります。";
+                return false;
+            }
+            string cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "YMM4-RTX3060-NVENC", "host-contracts.json");
+            var evaluation = HostContracts.EvaluateCached(directory, cache,
+                typeof(HostIntegration).Assembly.ManifestModule.ModuleVersionId.ToString("N"));
+            if (evaluation.Baseline is null)
+            {
+                detail = "キャッシュが前提とする本体のコードが、検証済みの版と異なります"
+                    + (evaluation.Problems.TryGetValue(HostContracts.Core, out var core) ? $"（{core}）。" : "。");
+                return false;
+            }
+            features = new HostFeatures(evaluation.Baseline,
+                evaluation.Has(HostContracts.Preview),
+                evaluation.Has(HostContracts.SelectionRects),
+                evaluation.Has(HostContracts.WrappedSources),
+                evaluation.Has(HostContracts.RulerBars),
+                evaluation.Features.Where(f => f.StartsWith(HostContracts.DecoderPrefix, StringComparison.Ordinal))
+                    .Select(f => f[HostContracts.DecoderPrefix.Length..]).ToHashSet(StringComparer.Ordinal));
+            detail = evaluation.Problems.Count == 0 ? string.Empty
+                : "使わない機能: " + string.Join(" / ", evaluation.Problems.Select(p => $"{p.Key}（{p.Value}）"));
+            return true;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            detail = "本体のコードを照合できませんでした: " + ex.GetBaseException().Message;
             return false;
         }
     }

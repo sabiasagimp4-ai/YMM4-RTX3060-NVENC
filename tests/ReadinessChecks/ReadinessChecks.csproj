@@ -10,6 +10,7 @@
   <ItemGroup>
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameRenderReadiness.cs" Link="FrameRenderReadiness.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/HostFeatures.cs" Link="HostFeatures.cs" />
     <Compile Include="../../tools/HostShapeReport/ShapeRules.cs" Link="ShapeRules.cs" />
   </ItemGroup>
 </Project>
