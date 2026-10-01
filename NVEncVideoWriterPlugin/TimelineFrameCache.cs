@@ -37,7 +37,7 @@ internal static class TimelineFrameCache
     private static readonly ConditionalWeakTable<Timeline, LatestViewport> latestViewports = new();
     private static readonly ConditionalWeakTable<ID2D1DeviceContext, string> renderEnvironments = new();
     private static readonly object cacheGate = new();
-    private static Lazy<FrameCacheStore> store = new(() => new FrameCacheStore(Path.Combine(
+    private static Lazy<FrameCacheStore> store = new(() => CacheMemoryController.CreateStore(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YMM4-RTX3060-NVENC", "cache")));
     private static FieldInfo sceneField = null!, devicesField = null!, outputField = null!, collectorField = null!, pickerField = null!;
     private static FieldInfo playerSourceField = null!, playerContextField = null!, playerTargetField = null!;
@@ -64,6 +64,7 @@ internal static class TimelineFrameCache
     {
         lock (cacheGate)
         {
+            if (previewEnabled == preview && exportEnabled == export) return;
             Volatile.Write(ref previewEnabled, preview);
             Volatile.Write(ref exportEnabled, export);
             Interlocked.Increment(ref generation); // in-flight captures of a switched-off use are dropped
@@ -78,6 +79,7 @@ internal static class TimelineFrameCache
     internal static long Hits => Interlocked.Read(ref hits);
     internal static long Misses => Interlocked.Read(ref misses);
     internal static long GpuBytes => Interlocked.Read(ref gpuBytes);
+    internal static long CacheGeneration => Interlocked.Read(ref generation);
     // Hits by path: the frame already in the source (same request again), the RAM store, a frame read back from disk.
     internal static long LiveReuses => Interlocked.Read(ref liveReuses);
     internal static long RamHits => Interlocked.Read(ref ramHits);
@@ -468,8 +470,7 @@ internal static class TimelineFrameCache
                 var record = CaptureScene(__state.Devices.DeviceContext, output, __state.Scene);
                 lock (cacheGate) if (record != null && StillCurrent(__state))
                 {
-                    store.Value.PutOwned(__state.CacheKey, record);
-                    status = "描画したフレームを保存しました。";
+                    if (store.Value.PutOwned(__state.CacheKey, record)) status = "描画したフレームを保存しました。";
                 }
             }
             // Rects of a frame whose decoding was not confirmed are never remembered (returned above).
@@ -521,7 +522,7 @@ internal static class TimelineFrameCache
             var record = FinishPreviewReadback(deferred.Readback);
             lock (cacheGate) if (StillCurrent(deferred.Pending))
             {
-                store.Value.PutOwned(deferred.Pending.CacheKey!, record);
+                if (!store.Value.PutOwned(deferred.Pending.CacheKey!, record)) return;
                 Interlocked.Increment(ref previewStored);
                 status = "描画したプレビューのフレームを保存しました。";
             }
@@ -624,11 +625,6 @@ internal static class TimelineFrameCache
 
     private static string Bits(float value) => BitConverter.SingleToInt32Bits(value).ToString("X8", System.Globalization.CultureInfo.InvariantCulture);
 
-    // How long after the preview last drew the idle pre-renderer still renders for its view. The preview does not
-    // redraw while nothing changes, and the work is bounded by the horizon ahead of the playhead, so the first
-    // minutes after an edit fill it even when one frame takes long.
-    internal static readonly TimeSpan IdleViewportLifetime = TimeSpan.FromMinutes(2);
-
     internal static bool TryGetLatestPreviewViewport(Timeline timeline, Scenes scenes, out PreviewViewport viewport)
     {
         viewport = default;
@@ -723,10 +719,15 @@ internal static class TimelineFrameCache
         PreviewViewport viewport, string? expectedModelKey = null) =>
         TryPrimeCore(timelineSource, time, usage, viewport, expectedModelKey);
 
+    internal static bool TryPrimePreviewIfCurrent(object timelineSource, TimeSpan time, object usage,
+        PreviewViewport viewport, string? expectedModelKey, CancellationToken cancellation) =>
+        TryPrimeCore(timelineSource, time, usage, viewport, expectedModelKey, cancellation);
+
     private static bool TryPrimeCore(object timelineSource, TimeSpan time, object usage,
-        PreviewViewport? viewport, string? expectedModelKey)
+        PreviewViewport? viewport, string? expectedModelKey, CancellationToken cancellation = default)
     {
-        if (!Enabled) return false;
+        if (!Enabled || cancellation.IsCancellationRequested) return false;
+        long captureGeneration = Interlocked.Read(ref generation);
         try
         {
             timelineSource = GetTimelineSource(timelineSource);
@@ -738,8 +739,9 @@ internal static class TimelineFrameCache
             if (!EnabledFor(exporting)) return false;
             if (viewport is null ? !exporting : !playing || !IsValidViewport(viewport.Value, int.MaxValue)
                 || viewport.Value.SceneId != scene.ID || viewport.Value.TimelineId != scene.Timeline.ID) return false;
-            if (viewport is { } preview && (preview.IsPlaying || preview.LastDrawTimestamp <= 0
-                || System.Diagnostics.Stopwatch.GetElapsedTime(preview.LastDrawTimestamp) > IdleViewportLifetime)) return false;
+            // A paused player need not redraw. Identity, live source association and captures determine validity;
+            // wall-clock age must not stop caching a long composition.
+            if (viewport is { } preview && (preview.IsPlaying || preview.LastDrawTimestamp <= 0)) return false;
             var picker = pickerField.GetValue(timelineSource)!;
             if (picker.GetType() != pickerType || pickerType.GetFields(Instance).Any(f => f.GetValue(picker) != null)) return false;
             var devices = (IGraphicsDevicesAndContext)devicesField.GetValue(timelineSource)!;
@@ -757,8 +759,9 @@ internal static class TimelineFrameCache
                 var record = viewport is { } view ? CapturePreview(context, output, view) : CaptureScene(context, output, scene);
                 lock (cacheGate)
                 {
-                    if (record is null || !capture.Validate() || !EnabledFor(exporting)) return false;
-                    store.Value.PutOwned(key, record);
+                    if (record is null || cancellation.IsCancellationRequested || captureGeneration != generation
+                        || !capture.Validate() || !EnabledFor(exporting)) return false;
+                    if (!store.Value.PutOwned(key, record)) return false;
                     status = viewport is null ? "出力フレームを先読みしました。" : "プレビューのフレームを先読みしました。";
                     return true;
                 }

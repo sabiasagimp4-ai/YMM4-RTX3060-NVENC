@@ -1,0 +1,94 @@
+name: cache-development
+
+on:
+  push:
+    branches: ['codex/ae-cache-continuation']
+  pull_request:
+    paths: ['NVEncVideoWriterPlugin/**', 'tests/**', '.github/workflows/cache-development.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cache-development-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet run --project tests/StoreChecksHarness/StoreChecks.csproj -c Release
+      - run: dotnet run --project tests/ReadinessChecks/ReadinessChecks.csproj -c Release
+
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: host
+          key: cache-dev-ymm4-4.56.1.0-top
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bash tools/ci/fetch-ymm4.sh 4.56.1.0 host --top
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host
+          path: host
+          retention-days: 1
+
+  windows:
+    needs: host
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      YMM4_DIR: '${{ github.workspace }}\host\'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: host
+          path: host
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build plugin against the verified host
+        run: |
+          dotnet build NVEncVideoWriterPlugin/NVEncVideoWriterPlugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Plugin build failed' }
+      - name: Native invariants (no NVENC hardware needed)
+        run: |
+          msbuild NvencNative/NvencNative.vcxproj /t:Build /p:Configuration=Release /p:Platform=x64 /m /nologo /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw 'Native build failed' }
+          msbuild tests/NativeChecks.vcxproj /t:Build /p:Configuration=Release /p:Platform=x64 /m /nologo /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw 'Native check build failed' }
+          & tests/bin/Release/NativeChecks.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Native checks failed' }
+      - name: Store, memory policy and idle traversal
+        run: |
+          dotnet run --project tests/StoreChecksHarness/StoreChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Store checks failed' }
+          dotnet run --project tests/ReadinessChecks/ReadinessChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Readiness checks failed' }
+          dotnet run --project tests/FileLeaseChecks/FileLeaseChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'File lease checks failed' }
+      - name: Dependency keys against the real host
+        run: |
+          dotnet run --project tests/CacheChecks/CacheChecks.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR
+          if ($LASTEXITCODE -ne 0) { throw 'Cache checks failed' }
+      - name: Host integration and WARP pixel parity
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --integration
+          if ($LASTEXITCODE -ne 0) { throw 'Integration checks failed' }
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu
+          if ($LASTEXITCODE -ne 0) { throw 'Pixel checks failed' }

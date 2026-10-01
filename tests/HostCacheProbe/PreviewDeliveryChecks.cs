@@ -5,6 +5,7 @@ using System.Numerics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using NVEncVideoWriterPlugin;
+using HarmonyLib;
 using YukkuriMovieMaker.Commons;
 using YukkuriMovieMaker.Player.Video;
 using YukkuriMovieMaker.Project;
@@ -84,6 +85,24 @@ internal static class PreviewDeliveryChecks
             // Edit one item: only its frame changes key; undoing the edit finds the stored frame again.
             CheckEditAndUndo(source, timeline, viewport, dc, baseline, store, shapes[12]);
 
+            // RAM pressure keeps disk frames usable after recovery, including in the actual preview delivery path.
+            store.SetRamBudget(0);
+            Check(store.RamBytes == 0, "RAM pressure did not evict preview pixels");
+            store.SetRamBudget(ram);
+            var recoveredBefore = Counters.Read(store);
+            Update(source, timeline, 7, TimelineSourceUsage.Paused);
+            var recovered = Counters.Read(store) - recoveredBefore;
+            Check(recovered.Renders == 0 && recovered.DiskHits == 1, $"RAM recovery re-rendered a disk frame: {recovered}");
+            Check(TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!.SequenceEqual(baseline[7]), "RAM recovery pixels differ");
+            Console.WriteLine("Preview RAM pressure/recovery: disk delivery, no host render, pixels equal");
+
+            // A paused view can remain unchanged for hours: age alone cannot stop idle cache commits.
+            var oldView = viewport with { LastDrawTimestamp = Math.Max(1, Stopwatch.GetTimestamp() - 180L * Stopwatch.Frequency) };
+            Update(source, timeline, 8, TimelineSourceUsage.Playing);
+            Check(TimelineFrameCache.TryPrimePreview(source, timeline.VideoInfo.GetTimeFrom(8), TimelineSourceUsage.Playing, oldView, null),
+                "an unchanged paused viewport older than two minutes could not prime");
+            Console.WriteLine("Idle prime: unchanged paused viewport remains valid after two minutes");
+
             // Restart: a new store over the same folder and a new source (new tracker) find the frames on disk.
             TimelineFrameCache.TestViewport = null;
             source.Dispose();
@@ -102,6 +121,7 @@ internal static class PreviewDeliveryChecks
             var third = Play(source, timeline, viewport, dc, baseline, store, 11, Frames);
             Check(third.Renders <= Frames / 3 && third.DiskHits >= (Frames - 11) / 2, $"playback after restart did not use the disk: {third}");
             Console.WriteLine($"Preview after restart: paused seek {seek}; playback 11-{Frames - 1} {third}");
+            CheckPrimeCommitGuards(source, timeline, viewport, store);
         }
         finally
         {
@@ -117,6 +137,38 @@ internal static class PreviewDeliveryChecks
         Console.WriteLine($"Update time p50/p95 by path (WARP, this test's frames): render {TimelineFrameCache.RenderTimes}, RAM {TimelineFrameCache.RamTimes}, "
             + $"disk {TimelineFrameCache.DiskTimes}, same frame {TimelineFrameCache.LiveTimes}; preview store {TimelineFrameCache.PreviewStoreMilliseconds:F2} ms/frame on the render thread");
         Console.WriteLine("Preview storage and disk delivery: stored on normal playback, read back from disk on the second pass and after restart, pixels equal to host renders, edit/undo reuse OK");
+    }
+
+    private static Action? afterPrimeCapture;
+    private static int primeCaptures;
+    private static void PrimeCaptured() { primeCaptures++; afterPrimeCapture?.Invoke(); }
+
+    private static void CheckPrimeCommitGuards(ITimelineSource source, Timeline timeline,
+        TimelineFrameCache.PreviewViewport viewport, FrameCacheStore store)
+    {
+        Update(source, timeline, 28, TimelineSourceUsage.Playing);
+        TimelineFrameCache.CompletePendingStore(source);
+        var capture = typeof(TimelineFrameCache).GetMethod("CapturePreview", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var harmony = new Harmony("ymm.tests.idle-prime-commit");
+        harmony.Patch(capture, postfix: new HarmonyMethod(typeof(PreviewDeliveryChecks), nameof(PrimeCaptured)));
+        try
+        {
+            using var cancellation = new CancellationTokenSource();
+            primeCaptures = 0;
+            afterPrimeCapture = cancellation.Cancel;
+            Check(!TimelineFrameCache.TryPrimePreviewIfCurrent(source, timeline.VideoInfo.GetTimeFrom(28),
+                TimelineSourceUsage.Playing, viewport, null, cancellation.Token) && primeCaptures == 1,
+                "cancellation during capture reached the RAM commit");
+
+            primeCaptures = 0;
+            afterPrimeCapture = TimelineFrameCache.Clear;
+            Check(!TimelineFrameCache.TryPrimePreviewIfCurrent(source, timeline.VideoInfo.GetTimeFrom(28),
+                TimelineSourceUsage.Playing, viewport, null, CancellationToken.None) && primeCaptures == 1,
+                "purge during capture reached the RAM commit");
+            Check(store.RamBytes == 0 && store.DiskBytes == 0, "a pre-purge frame was saved into the new generation");
+            Console.WriteLine("Idle prime commit: cancellation and purge during GPU capture reject the completed pixels");
+        }
+        finally { afterPrimeCapture = null; harmony.UnpatchAll(harmony.Id); }
     }
 
     private static Counters Play(ITimelineSource source, Timeline timeline, TimelineFrameCache.PreviewViewport viewport,

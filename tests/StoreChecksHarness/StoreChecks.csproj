@@ -8,6 +8,8 @@
   <ItemGroup>
     <Compile Include="../../NVEncVideoWriterPlugin/FrameCacheStore.cs" Link="FrameCacheStore.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/PreviewPerformance.cs" Link="PreviewPerformance.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/CacheMemoryPolicy.cs" Link="CacheMemoryPolicy.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/IdleFramePlan.cs" Link="IdleFramePlan.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameTimeKey.cs" Link="FrameTimeKey.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/PreviewRects.cs" Link="PreviewRects.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameDependencyIndex.cs" Link="FrameDependencyIndex.cs" />

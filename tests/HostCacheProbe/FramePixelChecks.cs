@@ -170,6 +170,15 @@ internal static class FramePixelChecks
         var fresh = new FrameCacheToolSettings();
         fresh.Initialize();
         Check(!fresh.PreviewCache && !fresh.ExportCache && fresh.NvencOutput, "New settings: caches off, NVENC output on");
+        Check(fresh.AutomaticRamBudget && fresh.RamLimitMiB == 2048 && fresh.CacheFramesWhenIdle && fresh.IdleDelaySeconds == 8,
+            "New memory/idle defaults");
+        fresh.RamLimitMiB = -1;
+        Check(fresh.RamLimitMiB == 64, "RAM minimum setting");
+        fresh.RamLimitMiB = int.MaxValue;
+        Check(fresh.RamLimitMiB == 16384, "RAM maximum setting");
+        fresh.IdleDelaySeconds = double.NaN;
+        fresh.IdleOrder = (IdleCacheOrder)int.MaxValue;
+        Check(fresh.IdleDelaySeconds == 8 && fresh.IdleOrder == IdleCacheOrder.FromCurrentTime, "Invalid idle settings fall back");
         var current = new FrameCacheToolSettings { SettingsVersion = 1, Enabled = true, PreviewCache = false, ExportCache = true, NvencOutput = false };
         current.Initialize();
         Check(!current.PreviewCache && current.ExportCache && !current.NvencOutput, "Current settings were changed on load");

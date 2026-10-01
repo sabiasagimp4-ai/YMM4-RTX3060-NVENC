@@ -26,7 +26,7 @@ internal sealed class FrameCacheStore : IDisposable
     private readonly object _gate = new();
     private long _version;
     private readonly object _clearGate = new();
-    private readonly long _ramBudget;
+    private long _ramBudget;
     private readonly long _diskBudget;
     private readonly string _rootDirectory;
     private string _directory;
@@ -81,6 +81,28 @@ internal sealed class FrameCacheStore : IDisposable
     }
 
     internal long RamBytes { get { lock (_gate) return _ramBytes; } }
+    internal long RamBudget { get { lock (_gate) return _ramBudget; } }
+    internal long QueuedWriteBytes { get { lock (_gate) return _queuedWriteBytes; } }
+
+    // Eviction drops our references only: a borrowed hit or queued write still owns immutable pixels.
+    // Disk records survive a smaller RAM budget and can be promoted again when memory recovers.
+    internal void SetRamBudget(long bytes)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(bytes);
+        lock (_gate)
+        {
+            if (_disposed || _ramBudget == bytes) return;
+            _ramBudget = bytes;
+            while (_ramBytes > bytes && _ramLru.First is { } oldest)
+            {
+                _ramBytes -= _ram[oldest.Value].Pixels.LongLength;
+                _ram.Remove(oldest.Value);
+                _ramLru.RemoveFirst();
+            }
+            Interlocked.Increment(ref _version);
+            Monitor.PulseAll(_gate);
+        }
+    }
     internal long DiskBytes => Interlocked.Read(ref _diskBytes);
     internal long Hits { get { lock (_gate) return _hits; } }
     internal long Misses { get { lock (_gate) return _misses; } }
@@ -160,6 +182,7 @@ internal sealed class FrameCacheStore : IDisposable
                 }
                 else if (disk && _disk.TryGetValue(key, out var entry))
                 {
+                    if (entry.Bytes - HeaderBytes > _ramBudget) continue;
                     bytes += entry.Bytes - HeaderBytes;
                     if (bytes > _ramBudget / 2) break;
                     if (QueueRead(key, _generation)) queued++;
@@ -175,14 +198,14 @@ internal sealed class FrameCacheStore : IDisposable
     internal void Put(string key, byte[] pixels) => Put(key, pixels, owned: false);
 
     // For a freshly captured array the caller never touches again: stored without a snapshot copy.
-    internal void PutOwned(string key, byte[] pixels) => Put(key, pixels, owned: true);
+    internal bool PutOwned(string key, byte[] pixels) => Put(key, pixels, owned: true);
 
-    private void Put(string key, byte[] pixels, bool owned)
+    private bool Put(string key, byte[] pixels, bool owned)
     {
         ArgumentNullException.ThrowIfNull(pixels);
         lock (_gate)
         {
-            if (_disposed || !ValidKey(key) || pixels.Length == 0 || pixels.Length > MaxFrameBytes) return;
+            if (_disposed || !ValidKey(key) || pixels.Length == 0 || pixels.Length > MaxFrameBytes) return false;
             key = key.ToLowerInvariant();
             if (pixels.LongLength > _ramBudget)
             {
@@ -192,7 +215,7 @@ internal sealed class FrameCacheStore : IDisposable
                     _ramBytes -= previous.Pixels.LongLength;
                     _ramLru.Remove(previous.Node);
                 }
-                return;
+                return false;
             }
             var snapshot = owned ? pixels : (byte[])pixels.Clone();
             using (PreviewPerformance.Measure(PreviewStage.RamCommit)) AddRam(key, snapshot, fromDisk: false);
@@ -203,6 +226,7 @@ internal sealed class FrameCacheStore : IDisposable
                 using var measurement = PreviewPerformance.Measure(PreviewStage.DiskEnqueue);
                 QueueWrite(key, snapshot, _generation);
             }
+            return true;
         }
     }
 
@@ -435,6 +459,10 @@ internal sealed class FrameCacheStore : IDisposable
                 Span<byte> header = stackalloc byte[HeaderBytes];
                 file.ReadExactly(header);
                 if (!ValidHeader(header, file.Length, out int length)) throw new InvalidDataException();
+                // Check the current budget before allocating, separately from record validity. A resize during
+                // I/O is checked again by AddRam; the read's temporary array is bounded by MaxFrameBytes.
+                lock (_gate)
+                    if (_disposed || operation.Generation != _generation || length > _ramBudget) return;
                 pixels = new byte[length];
                 file.ReadExactly(pixels);
                 if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(pixels), header[16..])) throw new InvalidDataException();
@@ -601,7 +629,7 @@ internal sealed class FrameCacheStore : IDisposable
             {
                 using var file = OpenRecord(key);
                 file.ReadExactly(header);
-                if (!ValidHeader(header, file.Length, out int length) || length > _ramBudget || file.Length > _diskBudget ||
+                if (!ValidHeader(header, file.Length, out _) || file.Length > _diskBudget ||
                     _diskBytes > _diskBudget - file.Length || _disk.Count >= MaxDiskEntries)
                 {
                     file.Dispose();

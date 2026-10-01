@@ -27,8 +27,10 @@ internal static class PluginSettings
     private static void ApplyNow(FrameCacheToolSettings settings)
     {
         bool available = HostIntegration.CacheAvailable;
+        CacheMemoryController.Configure(settings.AutomaticRamBudget, settings.RamLimitMiB * CacheMemoryPolicy.MiB);
         TimelineFrameCache.SetEnabled(available && settings.PreviewCache, available && settings.ExportCache);
-        IdleFramePreRenderer.Enabled = available && settings.PreviewCache;
+        IdleFramePreRenderer.Configure(settings.IdleDelaySeconds, settings.IdleOrder);
+        IdleFramePreRenderer.Enabled = available && settings.PreviewCache && settings.CacheFramesWhenIdle;
         KnownCode.Trusted = settings.TrustedPlugins;
         // Switched on after start: hook the export now, before the next one begins.
         if (settings.NvencOutput) HostIntegration.EnsureExportHooks(out _);

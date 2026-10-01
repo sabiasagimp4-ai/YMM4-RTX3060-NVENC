@@ -16,10 +16,9 @@ namespace NVEncVideoWriterPlugin;
 
 internal static class IdleFramePreRenderer
 {
-    private const int IdleDelayMilliseconds = 1200;
     private const int MaximumFrames = 30;
-    // How far ahead of the playhead idle time is spent (shown by the cache status bars).
-    private const int HorizonSeconds = 10;
+    private static double idleDelaySeconds = 8;
+    private static IdleCacheOrder cacheOrder;
     private static readonly object gate = new();
     private static DispatcherTimer? timer;
     private static Session? session;
@@ -36,6 +35,22 @@ internal static class IdleFramePreRenderer
 
     internal static string Status => Volatile.Read(ref status);
 
+    internal static void Configure(double delaySeconds, IdleCacheOrder order) => OnUi(() =>
+    {
+        lock (gate)
+        {
+            if (idleDelaySeconds == delaySeconds && cacheOrder == order) return;
+            idleDelaySeconds = delaySeconds;
+            cacheOrder = order;
+            CancelActiveJobLocked();
+            if (session is { } current)
+            {
+                Interlocked.Exchange(ref current.NextOrdinal, 0);
+                Interlocked.Exchange(ref current.LastActivity, Environment.TickCount64);
+            }
+        }
+    });
+
     // The timeline of the attached timeline tool, if any.
     internal static YukkuriMovieMaker.Project.Timeline? CurrentTimeline => Volatile.Read(ref session)?.Info.Timeline;
 
@@ -45,6 +60,7 @@ internal static class IdleFramePreRenderer
 
     private static void SetEnabled(bool value)
     {
+        if (Enabled == value) return;
         Volatile.Write(ref enabled, value ? 1 : 0);
         if (!value)
         {
@@ -93,7 +109,7 @@ internal static class IdleFramePreRenderer
         }
 
         next.ObservedFrame = info!.Timeline.CurrentFrame;
-        next.NextFrame = Math.Max(0, next.ObservedFrame + 1);
+        next.NextOrdinal = 0;
         if (Enabled)
         {
             SubscribeInput();
@@ -122,9 +138,12 @@ internal static class IdleFramePreRenderer
         int frame = current.Info.Timeline.CurrentFrame;
         if (frame != current.ObservedFrame)
         {
-            current.ObservedFrame = frame;
-            current.NextFrame = Math.Max(0, frame + 1);
-            MarkActivity(current, "タイムライン移動を検知したため、先読みを中断しました。");
+            lock (gate)
+            {
+                MarkActivity(current, "タイムライン移動を検知したため、先読みを中断しました。");
+                current.ObservedFrame = frame;
+                Interlocked.Exchange(ref current.NextOrdinal, 0);
+            }
             return;
         }
 
@@ -135,7 +154,7 @@ internal static class IdleFramePreRenderer
             MarkActivity(current, "YMM4が処理中のため、先読みを中断しました。");
             return;
         }
-        if (Environment.TickCount64 - Interlocked.Read(ref current.LastActivity) < IdleDelayMilliseconds) return;
+        if (Environment.TickCount64 - Interlocked.Read(ref current.LastActivity) < idleDelaySeconds * 1000) return;
 
         lock (gate)
         {
@@ -151,59 +170,76 @@ internal static class IdleFramePreRenderer
             MarkActivity(current, "プレビュー再生中のため、先読みを中断しました。");
             return;
         }
-        if (!IsViewportFresh(viewport))
+        if (viewport.LastDrawTimestamp <= 0)
         {
             SetStatus("最新のプレビュー描画を待っています。");
             return;
         }
 
-        int fps = current.LiveScene.FPS;
-        int frameCount = Math.Min(MaximumFrames, fps);
-        int start = Math.Max(current.ObservedFrame + 1, Volatile.Read(ref current.NextFrame));
-        int horizonEnd = current.ObservedFrame + Math.Max(1, fps) * HorizonSeconds;
-        int end = Math.Min(current.Info.Timeline.Length - 1, horizonEnd);
-        if (fps <= 0 || frameCount <= 0 || start > end)
+        var normalizedView = viewport with { LastDrawTimestamp = 0, IsPlaying = false };
+        lock (gate)
         {
-            SetStatus($"先読み範囲（{HorizonSeconds}秒分）に到達しました。");
+            long cacheGeneration = TimelineFrameCache.CacheGeneration;
+            if (current.PlannedView != normalizedView || current.CacheGeneration != cacheGeneration)
+            {
+                CancelActiveJobLocked();
+                Interlocked.Exchange(ref current.NextOrdinal, 0);
+                current.PlannedView = normalizedView;
+                current.CacheGeneration = cacheGeneration;
+            }
+        }
+        if (TimelineFrameCache.StoreIfCreated is { } cache && cache.RamBudget < 32L + 4L * viewport.Width * viewport.Height)
+        {
+            SetStatus("1フレームを保存できるRAMの空きを待っています。");
             return;
         }
-        end = Math.Min(end, start + frameCount - 1);
 
+        int length = current.Info.Timeline.Length;
+        long start = Interlocked.Read(ref current.NextOrdinal);
+        long end = Math.Min(length - 1L, start + MaximumFrames - 1);
+        if (current.LiveScene.FPS <= 0 || start > end)
+        {
+            SetStatus("タイムライン全体の停止中キャッシュを確認しました。");
+            return;
+        }
         var job = new Job(current);
         lock (gate)
         {
             if (!ReferenceEquals(session, current) || activeJob is not null) return;
             activeJob = job;
-            _ = Task.Factory.StartNew(() => RenderBatch(current, job, viewport, current.ObservedFrame, start, end),
+            _ = Task.Factory.StartNew(() => RenderBatch(current, job, viewport, frame, start, end),
                 CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
-        SetStatus($"フレーム {start}～{end} を先読みしています。");
+        SetStatus($"停止中キャッシュを進めています（{start:N0} / {length:N0} フレーム）。");
     }
 
     private static void RenderBatch(Session current, Job job, TimelineFrameCache.PreviewViewport viewport,
-        int anchorFrame, int startFrame, int endFrame)
+        int anchorFrame, long startOrdinal, long endOrdinal)
     {
-        int rendered = 0, skipped = 0, normal = 0;
+        int rendered = 0, skipped = 0, normal = 0, unavailable = 0;
         try
         {
+            if (!CanContinue(current, job.Token, anchorFrame)) return;
             // Frames that always render normally (a tachie, a plugin's code) are passed over, here and below:
             // stopping at one would retry it on every idle tick and never read further ahead.
             KeyCapture? initial = null;
             string reason = string.Empty;
-            int first = startFrame;
-            while (first <= endFrame && !current.Tracker.TryCapture(first, out initial, out reason) && current.Tracker.RendersNormally(first))
-                first++;
+            long first = startOrdinal;
+            int length = current.Info.Timeline.Length;
+            var order = job.Order;
+            while (first <= endOrdinal && IdleFramePlan.TryGetFrame(length, anchorFrame, order, first, out int candidate)
+                && !current.Tracker.TryCapture(candidate, out initial, out reason) && current.Tracker.RendersNormally(candidate)) first++;
             if (initial is null)
             {
-                if (first > endFrame)
+                if (first > endOrdinal)
                 {
-                    Volatile.Write(ref current.NextFrame, endFrame + 1);
-                    SetStatus($"フレーム {startFrame}～{endFrame} は通常描画のフレームのため、先読みしません。");
+                    Advance(current, job, endOrdinal + 1);
+                    SetStatus("通常描画が必要なフレームを飛ばし、停止中キャッシュを続けます。");
                 }
                 else SetStatus(reason);
                 return;
             }
-            normal += first - startFrame;
+            normal += (int)(first - startOrdinal);
             using (initial)
             {
                 if (!initial!.Validate() || !CanContinue(current, job.Token, anchorFrame)) return;
@@ -213,18 +249,24 @@ internal static class IdleFramePreRenderer
                 using var cloneTracker = new KeyDependencyTracker(cloneScene, current.Tracker.VerifiedFingerprints);
                 using var source = new TimelineSourceAndDevices(cloneScene);
 
-                for (int frame = first; frame <= endFrame; frame++)
+                for (long ordinal = first; ordinal <= endOrdinal; ordinal++)
                 {
+                    if (!IdleFramePlan.TryGetFrame(length, anchorFrame, order, ordinal, out int frame)) return;
+                    if (TimelineFrameCache.StoreIfCreated is { } cache && cache.RamBudget < 32L + 4L * viewport.Width * viewport.Height)
+                    {
+                        SetStatus("1フレームを保存できるRAMの空きを待っています。");
+                        return;
+                    }
                     if (!CanContinue(current, job.Token, anchorFrame)
                         || !TimelineFrameCache.TryGetLatestPreviewViewport(current.Info.Timeline, current.Info.Scenes, out var latestViewport)
-                        || !SameView(latestViewport, viewport) || !IsViewportFresh(latestViewport) || latestViewport.IsPlaying)
+                        || !SameView(latestViewport, viewport) || latestViewport.IsPlaying)
                         return;
                     if (!TryCapturePair(current.Tracker, cloneTracker, frame, out var liveCapture, out var cloneCapture, out reason))
                     {
                         if (current.Tracker.RendersNormally(frame) && cloneTracker.RendersNormally(frame))
                         {
                             normal++;
-                            Volatile.Write(ref current.NextFrame, frame + 1);
+                            Advance(current, job, ordinal + 1);
                             continue;
                         }
                         SetStatus(reason);
@@ -241,20 +283,22 @@ internal static class IdleFramePreRenderer
                         if (TimelineFrameCache.IsPreviewStored(source, time, cloneCapture, latestViewport))
                         {
                             skipped++;
-                            Volatile.Write(ref current.NextFrame, frame + 1);
+                            Advance(current, job, ordinal + 1);
                             continue;
                         }
                         source.Update(time, TimelineSourceUsage.Playing);
                         if (!CanContinue(current, job.Token, anchorFrame)) return;
                         if (TryPrimeIfCurrent(job.Token, current.LiveScene, cloneScene, source, time, latestViewport, liveCapture, cloneCapture))
                             rendered++;
-                        Volatile.Write(ref current.NextFrame, frame + 1);
+                        else unavailable++;
+                        Advance(current, job, ordinal + 1);
                     }
-                    Thread.Sleep(8);
+                    Thread.Yield();
                 }
             }
             string stored = (skipped == 0 ? string.Empty : $"（保存済みの {skipped} フレームは描画せず）")
-                + (normal == 0 ? string.Empty : $"（通常描画の {normal} フレームは対象外）");
+                + (normal == 0 ? string.Empty : $"（通常描画の {normal} フレームは対象外）")
+                + (unavailable == 0 ? string.Empty : $"（保存できない {unavailable} フレームは見送り）");
             SetStatus(rendered == 0
                 ? "先読み範囲の確認が完了しました。" + stored
                 : $"プレビュー範囲の {rendered} フレームを先読みしました。" + stored);
@@ -303,21 +347,27 @@ internal static class IdleFramePreRenderer
             || liveScene.ID != cloneScene.ID || liveScene.Timeline.ID != cloneScene.Timeline.ID
             || viewport.SceneId != cloneScene.ID || viewport.TimelineId != cloneScene.Timeline.ID)
             return false;
-        return TimelineFrameCache.TryPrimePreview(source, time, TimelineSourceUsage.Playing, viewport, liveCapture.Key);
+        return TimelineFrameCache.TryPrimePreviewIfCurrent(source, time, TimelineSourceUsage.Playing, viewport, liveCapture.Key, token);
     }
 
     private static bool CanContinue(Session current, CancellationToken token, int anchorFrame) =>
         !token.IsCancellationRequested && Enabled && TimelineFrameCache.PreviewEnabled
         && Volatile.Read(ref current.IsBusy) == 0
+        && Interlocked.Read(ref current.CacheGeneration) == TimelineFrameCache.CacheGeneration
         && ReferenceEquals(Volatile.Read(ref session), current)
         && current.Info.Timeline.CurrentFrame == anchorFrame;
+
+    // A cancelled worker must not overwrite the cursor reset by an edit, seek or settings change.
+    private static void Advance(Session current, Job job, long ordinal)
+    {
+        lock (gate)
+            if (ReferenceEquals(session, current) && ReferenceEquals(activeJob, job) && !job.Token.IsCancellationRequested)
+                Interlocked.Exchange(ref current.NextOrdinal, ordinal);
+    }
 
     // A redraw of the same view only refreshes the timestamp; it must not abort the batch.
     private static bool SameView(TimelineFrameCache.PreviewViewport latest, TimelineFrameCache.PreviewViewport expected) =>
         latest with { LastDrawTimestamp = 0 } == expected with { LastDrawTimestamp = 0 };
-
-    private static bool IsViewportFresh(TimelineFrameCache.PreviewViewport viewport) =>
-        viewport.LastDrawTimestamp != 0 && Stopwatch.GetElapsedTime(viewport.LastDrawTimestamp) <= TimelineFrameCache.IdleViewportLifetime;
 
     private static readonly MethodInfo? TimelineLength = typeof(Timeline).GetProperty(nameof(Timeline.Length))?.GetSetMethod(nonPublic: true);
 
@@ -458,21 +508,29 @@ internal static class IdleFramePreRenderer
         internal KeyDependencyTracker Tracker { get; } = new(scene);
         internal long LastActivity = Environment.TickCount64;
         internal int ObservedFrame = info.Timeline.CurrentFrame;
-        internal int NextFrame = Math.Max(0, info.Timeline.CurrentFrame + 1);
+        internal long NextOrdinal;
+        internal TimelineFrameCache.PreviewViewport? PlannedView;
+        internal long CacheGeneration = -1;
         internal int IsBusy;
         internal CancellationTokenSource Lifetime { get; } = new();
         internal void OnInvalidated()
         {
-            NextFrame = Math.Max(0, Info.Timeline.CurrentFrame + 1);
-            ObservedFrame = Info.Timeline.CurrentFrame;
-            MarkActivity(this, "プロジェクトの変更を検知したため、先読みを中断しました。");
+            lock (gate)
+            {
+                MarkActivity(this, "プロジェクトの変更を検知したため、先読みを中断しました。");
+                Interlocked.Exchange(ref NextOrdinal, 0);
+                ObservedFrame = Info.Timeline.CurrentFrame;
+            }
         }
         internal void OnTimelineChanged(object? sender, PropertyChangedEventArgs args)
         {
             if (args.PropertyName != nameof(Timeline.CurrentFrame)) return;
-            ObservedFrame = Info.Timeline.CurrentFrame;
-            NextFrame = Math.Max(0, ObservedFrame + 1);
-            MarkActivity(this, "タイムライン移動を検知したため、先読みを中断しました。");
+            lock (gate)
+            {
+                MarkActivity(this, "タイムライン移動を検知したため、先読みを中断しました。");
+                ObservedFrame = Info.Timeline.CurrentFrame;
+                Interlocked.Exchange(ref NextOrdinal, 0);
+            }
         }
         public void Dispose()
         {
@@ -486,6 +544,7 @@ internal static class IdleFramePreRenderer
 
     private sealed class Job(Session session) : IDisposable
     {
+        internal IdleCacheOrder Order { get; } = cacheOrder;
         internal Session Session { get; } = session;
         internal CancellationTokenSource Cancellation { get; } = CancellationTokenSource.CreateLinkedTokenSource(session.Lifetime.Token);
         internal CancellationToken Token => Cancellation.Token;
