@@ -40,33 +40,44 @@ def analyze(path, limit=1_000_000):
     groups = collections.defaultdict(list)
     routes = collections.Counter()
     coverage = collections.Counter()
+    coverage_methods = collections.Counter()
+    bypass_reasons = collections.Counter()
+    operation_routes = {row.get('OperationId'): row.get('Outcome', 'unknown') for row in spans
+                        if row.get('Stage') == 'timeline-update' and row.get('OperationId')}
     for row in spans:
         if row['EndTicks'] < row['StartTicks']:
             parse_errors += 1
             continue
         if row.get('Category') == 'coverage':
             coverage[row.get('Outcome', 'unknown')] += 1
+            coverage_methods[(row.get('Outcome', 'unknown'), row.get('Component') or '', row.get('Detail') or '')] += 1
             continue
         if row.get('Stage') == 'timeline-update':
             routes[row.get('Outcome', 'unknown')] += 1
+        if row.get('Stage') == 'cache-bypass':
+            bypass_reasons[row.get('Detail') or 'unspecified'] += 1
         if row.get('Category') in ('marker', 'state'):
             continue
         i = bisect.bisect_right(marker_ticks, row['StartTicks']) - 1
         scenario = markers[i][1] if i >= 0 else session.get('Scenario', 'unnamed')
-        key = (scenario, row['Stage'], row.get('Category', 'unknown'), row.get('Component') or '')
+        key = (scenario, row['Stage'], row.get('Category', 'unknown'), row.get('Component') or '',
+               row.get('Usage') or 'unspecified', operation_routes.get(row.get('OperationId'), 'unattributed'))
         groups[key].append((row['EndTicks'] - row['StartTicks']) * 1000 / frequency)
     measurements = []
-    for (scenario, stage, category, component), values in groups.items():
+    for (scenario, stage, category, component, usage, route), values in groups.items():
         values.sort()
         def percentile(p):
             return values[max(0, math.ceil(len(values) * p) - 1)]
         measurements.append(dict(Scenario=scenario, Stage=stage, Category=category, Component=component,
-                                 Samples=len(values), MeanMs=sum(values)/len(values),
+                                 Usage=usage, Route=route, Samples=len(values), MeanMs=sum(values)/len(values),
                                  P50Ms=percentile(.5), P95Ms=percentile(.95), P99Ms=percentile(.99), MaxMs=values[-1]))
     measurements.sort(key=lambda r: r['MeanMs'], reverse=True)
     complete = bool(footer) and footer.get('Dropped', 0) == 0 and footer.get('OpenSpans', 0) == 0 and not truncated and parse_errors == 0
     return dict(Session=session, Summary=footer, Complete=complete, AnalysisTruncated=truncated,
                 ParseErrors=parse_errors, RetainedSpans=len(spans), Routes=dict(routes), Coverage=dict(coverage),
+                BypassReasons=dict(bypass_reasons),
+                CoverageMethods=[dict(Outcome=outcome, Component=component, Detail=detail, Records=count)
+                                 for (outcome, component, detail), count in sorted(coverage_methods.items())],
                 PercentileMethod='nearest-rank ceil(n*p)-1 over retained samples',
                 Interpretation='Inclusive CPU wall time, not CPU cycles or GPU execution time. Do not sum nested spans. '
                                'Coverage is only discovered hookable interfaces; dropped/open/missing records invalidate completeness.',

@@ -61,7 +61,10 @@ python tools/analyze-cache-trace.py trace.jsonl --output trace-summary.json
 ```
 
 raw traceを温存して全retained samplesから集計する。CPU spanの加算によるランキングはしない。
-stage/component別のサンプル数・平均・p50/p95/p99/最大、操作区間、経路、coverageを出す。
+stage/component別のサンプル数・平均・p50/p95/p99/最大、操作区間、Usage、経路、coverageを出す。
+root Updateが後で書かれてもoperation IDで子・ディスクworkerを実際の経路へ関連付ける。rootのないspanはunattributed。
+Playing/Paused/ExportingとRAM/live/renderを混ぜない。対象外理由とcoverageのメソッド別重複件数も出す。
+観測記録は [CACHE_TRACE_RESULTS_2026-10-01.md](CACHE_TRACE_RESULTS_2026-10-01.md) を参照。
 既定100万spanの読込上限、破損行、drop、OpenSpans、footerなしはComplete=false。
 
 次の実装判断は、(1)どの処理・時刻が対象外か、(2)未完成decodeや他の待ちが何回出るか、

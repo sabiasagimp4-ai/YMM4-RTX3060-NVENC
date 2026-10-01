@@ -26,6 +26,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - run: python -m unittest discover -s tests/tools -v
       - run: dotnet run --project tests/StoreChecksHarness/StoreChecks.csproj -c Release
       - run: dotnet run --project tests/ReadinessChecks/ReadinessChecks.csproj -c Release
 
