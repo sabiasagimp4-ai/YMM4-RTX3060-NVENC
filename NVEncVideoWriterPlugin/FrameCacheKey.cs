@@ -272,13 +272,17 @@ internal static class FrameCacheKey
     {
         var assembly = type.Assembly;
         if (assembly == typeof(Scene).Assembly || assembly == typeof(CacheProvider).Assembly) return true;
-        if (!(assembly.GetName().Name ?? string.Empty).StartsWith("YukkuriMovieMaker.Plugin.FileSource.", StringComparison.Ordinal)) return false;
-        string location = assembly.Location;
-        if (string.IsNullOrEmpty(location)) return false;
-        string? hostDirectory = Path.GetDirectoryName(typeof(Scene).Assembly.Location);
-        return !string.IsNullOrEmpty(hostDirectory)
-            && string.Equals(Path.GetDirectoryName(Path.GetFullPath(location)), Path.GetFullPath(hostDirectory), StringComparison.OrdinalIgnoreCase);
+        return IsBundledPluginAssembly(assembly.GetName().Name, assembly.Location, Path.GetDirectoryName(typeof(Scene).Assembly.Location));
     }
+
+    // YMM4 loads the plugin assemblies it ships from its own folder: the file sources, and Community with its MIDI
+    // audio reader, which every install has. Plugins users add load from user\plugin and stay external. Each
+    // reader's type, assembly and MVID are also part of the key.
+    internal static bool IsBundledPluginAssembly(string? name, string? location, string? hostDirectory) =>
+        (name ?? string.Empty).StartsWith("YukkuriMovieMaker.Plugin.", StringComparison.Ordinal)
+        && !string.IsNullOrEmpty(location) && !string.IsNullOrEmpty(hostDirectory)
+        && string.Equals(Path.GetDirectoryName(Path.GetFullPath(location)), Path.GetFullPath(hostDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase);
 
     private static string[] SourceReaderIdentities(IEnumerable<Type> types) => types
         .Select(type => $"{type.FullName}|{type.Assembly.GetName().Name}|{type.Assembly.ManifestModule.ModuleVersionId:D}")

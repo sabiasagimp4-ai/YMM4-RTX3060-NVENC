@@ -242,8 +242,13 @@ try {
         Start-Sleep -Seconds 8
         if ($n -eq 3) { Shot 'prerendering' }
     }
-    Start-Sleep -Seconds 3
+    # Layer 00 is on screen at the playhead: its selection rectangle shows in the preview.
+    Click-At $points[0][0] $points[0][1] 'item 0'
+    Start-Sleep -Seconds 4
     Shot 'settled'
+    # Without input for a while (the tool shows what the pre-renderer waits for).
+    Start-Sleep -Seconds 15
+    Shot 'idle'
     List-Windows $process
     foreach ($window in Windows-Of $process) { Texts ($ae::FromHandle($window.Handle)) $window.Title }
 }

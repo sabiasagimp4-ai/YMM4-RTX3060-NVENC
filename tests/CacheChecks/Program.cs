@@ -41,6 +41,7 @@ internal static class Program
         Check(FrameCacheKey.IsBuiltInSourceReader(typeof(Scene)), "Host source reader assembly was not trusted");
         Check(FrameCacheKey.IsBuiltInSourceReader(typeof(YukkuriMovieMaker.Plugin.CacheProvider)), "Plugin API reader assembly was not trusted");
         Check(!FrameCacheKey.IsBuiltInSourceReader(typeof(Program)), "Custom reader assembly was trusted");
+        CheckBundledReaders();
         Type[][] readerTypes = FrameCacheKey.CaptureSourceReaderTypes();
         Check(FrameCacheKey.SourceReadersMatch(readerTypes), "Unchanged source reader stamp mismatched");
         Check(!FrameCacheKey.SourceReadersMatch([readerTypes[0].Append(typeof(Program)).ToArray(), readerTypes[1], readerTypes[2]]), "Source reader list change was not detected");
@@ -310,5 +311,38 @@ internal static class Program
         Console.WriteLine("Per-frame keys: unrelated frames survive edits, boundaries, settings, per-frame files, scene items OK");
     }
     private static bool SkipLoader() => false;
+    // Readers in the plugin assemblies YMM4 ships (its folder) are built in, so a project with a file or a font
+    // stays cacheable; the same assembly names from user\plugin, or other names in YMM4's folder, are not.
+    private static void CheckBundledReaders()
+    {
+        string hostDirectory = Path.GetDirectoryName(typeof(Scene).Assembly.Location)!;
+        const string community = "YukkuriMovieMaker.Plugin.Community";
+        Check(FrameCacheKey.IsBundledPluginAssembly(community, Path.Combine(hostDirectory, community + ".dll"), hostDirectory),
+            "A plugin assembly in YMM4's folder was not built in");
+        Check(FrameCacheKey.IsBundledPluginAssembly(community, Path.Combine(hostDirectory, community + ".dll"), hostDirectory + Path.DirectorySeparatorChar),
+            "A plugin assembly in YMM4's folder (written with a trailing separator) was not built in");
+        Check(!FrameCacheKey.IsBundledPluginAssembly(community, Path.Combine(hostDirectory, "user", "plugin", "Some", community + ".dll"), hostDirectory),
+            "A plugin assembly under user\\plugin was built in");
+        Check(!FrameCacheKey.IsBundledPluginAssembly("OtherReader", Path.Combine(hostDirectory, "OtherReader.dll"), hostDirectory),
+            "An assembly of another name in YMM4's folder was built in");
+        Check(!FrameCacheKey.IsBundledPluginAssembly(community, string.Empty, hostDirectory), "An assembly without a file was built in");
+
+        // The real ones: every file and audio reader type in YMM4's plugin assemblies (4.56.1.0: Community's MIDI reader).
+        var readers = new List<Type>();
+        foreach (string file in Directory.GetFiles(hostDirectory, "YukkuriMovieMaker.Plugin.*.dll"))
+        {
+            Type?[] types;
+            try { types = Assembly.LoadFrom(file).GetTypes(); }
+            catch (ReflectionTypeLoadException partial) { types = partial.Types; }
+            readers.AddRange(types.OfType<Type>().Where(t => !t.IsAbstract && (typeof(YukkuriMovieMaker.Plugin.FileSource.IVideoFileSourcePlugin).IsAssignableFrom(t)
+                || typeof(YukkuriMovieMaker.Plugin.FileSource.IImageFileSourcePlugin).IsAssignableFrom(t)
+                || typeof(YukkuriMovieMaker.Plugin.FileSource.IAudioFileSourcePlugin).IsAssignableFrom(t))));
+        }
+        Check(readers.Count != 0, "No reader types were found in YMM4's plugin assemblies");
+        foreach (var reader in readers)
+            Check(FrameCacheKey.IsBuiltInSourceReader(reader), $"YMM4's own reader {reader.FullName} ({reader.Assembly.GetName().Name}) was not built in");
+        Console.WriteLine($"Built-in readers: {string.Join(", ", readers.Select(r => r.Name))}");
+    }
+
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 }
