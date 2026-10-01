@@ -139,7 +139,8 @@ internal static class FramePixelChecks
         const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         var tryDecode = reader.GetType("YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.Source2.MFFrameDecoder", true)!.GetMethod("TryDecodeAt", Instance)!;
         var legacy = reader.GetType("YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.MFVideoFileSource", true)!;
-        var refresh = legacy.GetMethod("RefreshCurrentFrameWithReload", Instance)!;
+        // RefreshCurrentFrameWithReload has exception filters Harmony 2.4.2 cannot rebuild; Update itself is hookable.
+        var legacyUpdate = legacy.GetMethod("Update", Instance, [typeof(TimeSpan)])!;
         clearCurrentFrame = legacy.GetMethod("ClearCurrentFrame", Instance)!;
 
         var timeline = new Timeline();
@@ -170,7 +171,7 @@ internal static class FramePixelChecks
 
             var failure = new Harmony("ymm.tests.decode-failure");
             failure.Patch(tryDecode, prefix: new HarmonyMethod(typeof(FramePixelChecks), nameof(FailDecode)));
-            failure.Patch(refresh, prefix: new HarmonyMethod(typeof(FramePixelChecks), nameof(FailRefresh)));
+            failure.Patch(legacyUpdate, prefix: new HarmonyMethod(typeof(FramePixelChecks), nameof(FailLegacyUpdate)));
             try
             {
                 TimelineFrameCache.Clear();
@@ -193,9 +194,9 @@ internal static class FramePixelChecks
         return false;
     }
 
-    private static bool FailRefresh(object __instance, TimeSpan time)
+    private static bool FailLegacyUpdate(object __instance, TimeSpan time)
     {
-        clearCurrentFrame.Invoke(__instance, [time]); // what the legacy reader does after a timeout
+        clearCurrentFrame.Invoke(__instance, [time]); // what the legacy reader's Update does after a timeout
         return false;
     }
 

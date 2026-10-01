@@ -105,6 +105,11 @@ internal sealed class KeyDependencyTracker : IDisposable
             reason = cachedReason;
             if (!cachedEligible) return false;
             var dependencies = frame is int at ? cachedFrames!.For(at) : null;
+            if (!(dependencies ?? cachedFrames!.Whole).Cacheable)
+            {
+                reason = "確認できない素材（未インストールのフォントや外部の場所のファイル）を使うアイテムがあるため、通常描画を使用します。";
+                return false;
+            }
             string[] files = dependencies?.Files ?? cachedPaths;
             if (files.Length == 0)
             {
@@ -188,7 +193,8 @@ internal sealed class KeyDependencyTracker : IDisposable
             for (int i = 0; i < frames.Count; i++)
             {
                 var dependencies = cachedFrames.For(frames[i]);
-                keys[i] = dependencies.Files.Length == 0 || (fingerprints is not null && dependencies.Files.All(fingerprints.ContainsKey))
+                keys[i] = dependencies.Cacheable && (dependencies.Files.Length == 0
+                    || (fingerprints is not null && dependencies.Files.All(fingerprints.ContainsKey)))
                     ? KeyFor(dependencies, dependencies.Files) : null;
             }
             model = cachedModel;

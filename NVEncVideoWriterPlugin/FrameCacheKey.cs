@@ -26,7 +26,16 @@ internal static class FrameCacheKey
     {
         key = string.Empty;
         hasExternalDependencies = false;
-        if (!TryDescribe(scene, out string model, out string[] paths, out reason)) return false;
+        string model;
+        string[] paths;
+        FrameDependencyIndex? frames;
+        try { if (!TryDescribe(scene, CaptureSourceReaderTypes(), out model, out paths, out frames, out reason)) return false; }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            reason = "描画キャッシュの状態検査を省略しました: " + ex.GetType().Name;
+            return false;
+        }
+        if (!frames!.Whole.Cacheable) return Bypass("確認できない素材を使うアイテムがあります。", out reason);
         hasExternalDependencies = paths.Length != 0;
         if (hasExternalDependencies)
             return Bypass("外部素材は背景での内容確認が必要です。", out reason);
@@ -76,7 +85,8 @@ internal static class FrameCacheKey
             var resources = new SortedSet<string>(StringComparer.Ordinal);
             var nestedPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             var rootItems = scene.Timeline.Items.ToArray();
-            var rootDependencies = new List<(SortedSet<string> Paths, SortedSet<string> Resources)>(rootItems.Length);
+            var rootDependencies = new List<(SortedSet<string> Paths, SortedSet<string> Resources, bool Uncacheable)>(rootItems.Length);
+            bool nestedUncacheable = false;
             foreach (var timeline in timelines)
             {
                 bool root = ReferenceEquals(timeline, scene.Timeline);
@@ -90,13 +100,26 @@ internal static class FrameCacheKey
                         return Bypass("外部図形プラグインの描画状態を検証できません。", out reason);
                     var itemPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
                     var itemResources = new SortedSet<string>(StringComparer.Ordinal);
-                    foreach (var file in item.GetFiles()) AddPath(file, itemPaths);
-                    if (item is VoiceItem voice && !string.IsNullOrWhiteSpace(voice.FilePath)) AddPath(voice.FilePath, itemPaths);
-                    foreach (var resource in item.GetResources()) AddResource(resource, itemPaths, itemResources);
+                    bool uncacheable = false;
+                    try
+                    {
+                        foreach (var file in item.GetFiles()) AddPath(file, itemPaths);
+                        if (item is VoiceItem voice && !string.IsNullOrWhiteSpace(voice.FilePath)) AddPath(voice.FilePath, itemPaths);
+                        foreach (var resource in item.GetResources()) AddResource(resource, itemPaths, itemResources);
+                    }
+                    catch (NotSupportedException)
+                    {
+                        // An uninstalled font or a remote file cannot be fingerprinted: only frames showing the item bypass.
+                        uncacheable = true;
+                    }
                     paths.UnionWith(itemPaths);
                     resources.UnionWith(itemResources);
-                    if (root) rootDependencies.Add((itemPaths, itemResources));
-                    else nestedPaths.UnionWith(itemPaths);
+                    if (root) rootDependencies.Add((itemPaths, itemResources, uncacheable));
+                    else
+                    {
+                        nestedPaths.UnionWith(itemPaths);
+                        nestedUncacheable |= uncacheable;
+                    }
                 }
             }
             if (rootDependencies.Count != rootItems.Length) return Bypass("タイムラインの状態が検査中に変化しました。", out reason);
@@ -155,7 +178,7 @@ internal static class FrameCacheKey
                     return Bypass("外部描画パラメーターを検証できません: " + type, out reason);
             }
             if (paths.Count > MaximumFiles) return Bypass("外部素材の数がキャッシュ検査の上限を超えています。", out reason);
-            frames = DescribeFrames(parsed, scene.Timeline.ID, rootItems, rootDependencies, characterPaths, characterResources, nestedPaths);
+            frames = DescribeFrames(parsed, scene.Timeline.ID, rootItems, rootDependencies, characterPaths, characterResources, nestedPaths, nestedUncacheable);
             dependencies = paths.ToArray();
             return true;
         }
@@ -169,8 +192,8 @@ internal static class FrameCacheKey
     // Splits the serialized model into the part every frame depends on (everything but timeline items), the
     // other timelines (only read by frames with a scene item), and one hash per root timeline item.
     private static FrameDependencyIndex DescribeFrames(JObject parsed, Guid rootId, IItem[] rootItems,
-        List<(SortedSet<string> Paths, SortedSet<string> Resources)> rootDependencies,
-        SortedSet<string> characterPaths, SortedSet<string> characterResources, SortedSet<string> nestedPaths)
+        List<(SortedSet<string> Paths, SortedSet<string> Resources, bool Uncacheable)> rootDependencies,
+        SortedSet<string> characterPaths, SortedSet<string> characterResources, SortedSet<string> nestedPaths, bool nestedUncacheable)
     {
         var timelines = (JArray)parsed["Timelines"]!;
         var root = timelines.OfType<JObject>().Single(t => Guid.TryParse(t["ID"]?.ToString(), out var id) && id == rootId);
@@ -190,10 +213,11 @@ internal static class FrameCacheKey
             string identity = item.GetType().FullName + "\n" + text + "\n" + string.Join("\n", rootDependencies[i].Resources);
             // Scene items render other timelines; audio spectrum shapes read the timeline's or a scene's audio.
             bool wide = item is SceneItem || text.Contains("AudioSpectrum", StringComparison.Ordinal);
-            entries[i] = new(item.Frame, item.Length, item is TransitionItem, wide, FrameDependencyIndex.Hash(identity), rootDependencies[i].Paths.ToArray());
+            entries[i] = new(item.Frame, item.Length, item is TransitionItem, wide, FrameDependencyIndex.Hash(identity),
+                rootDependencies[i].Paths.ToArray(), rootDependencies[i].Uncacheable);
         }
         return new FrameDependencyIndex(FrameDependencyIndex.Hash(global.ToString(Newtonsoft.Json.Formatting.None)), characterPaths,
-            FrameDependencyIndex.Hash(nested.ToString(Newtonsoft.Json.Formatting.None)), nestedPaths, entries);
+            FrameDependencyIndex.Hash(nested.ToString(Newtonsoft.Json.Formatting.None)), nestedPaths, entries, nestedUncacheable);
     }
 
     internal static Character? GetCharacter(IItem item) => item switch

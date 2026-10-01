@@ -68,7 +68,8 @@ internal static class Program
         timeline.VideoInfo.Width--;
         Check(Key(scene) == empty, "Restored model failed to reuse key");
 
-        var text = new TextItem { Text = "Cache key" };
+        // A font every Windows has: the key fingerprints the font files, and an uninstalled one bypasses.
+        var text = new TextItem { Text = "Cache key", Font = "Arial" };
         timeline.Items = timeline.Items.Add(text);
         string textKey = WaitForKey(tracker);
         timeline.SelectedItems = timeline.SelectedItems.Add(text);
@@ -232,6 +233,14 @@ internal static class Program
             if (File.Exists(imageFile)) File.Delete(imageFile);
             Directory.Delete(folder);
         }
+
+        // A remote file cannot be fingerprinted (like an uninstalled font): only the frames showing it bypass.
+        var remote = new ImageItem { FilePath = "https://example.invalid/ymm4-cache-test.png", Frame = 300, Length = 10, Layer = 4 };
+        timeline.Items = timeline.Items.Add(remote);
+        WaitForFrameKey(tracker, 10);
+        Check(!tracker.TryCapture(305, out _, out string remoteReason) && remoteReason.Length != 0, "A frame with an unverifiable file was cached");
+        Check(WaitForFrameKey(tracker, 10) == at10, "An unverifiable file elsewhere disabled or changed unrelated frames");
+        timeline.Items = timeline.Items.Remove(remote);
 
         var scene = new SceneItem { Frame = 200, Length = 10, Layer = 3 };
         timeline.Items = timeline.Items.Add(scene);

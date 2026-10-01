@@ -16,25 +16,30 @@ internal sealed class FrameDependencyIndex
     internal const string Version = "frame-deps-v1";
     private const int MaximumCachedSegments = 65536;
 
-    internal readonly record struct Entry(int Frame, int Length, bool IsTransition, bool IsWide, string Hash, string[] Files)
+    // Uncacheable: the item uses something that cannot be fingerprinted (an uninstalled font, a remote file);
+    // only the frames that contain it are rendered normally.
+    internal readonly record struct Entry(int Frame, int Length, bool IsTransition, bool IsWide, string Hash, string[] Files,
+        bool Uncacheable = false)
     {
         internal bool Contains(long frame) => Frame <= frame && frame < (long)Frame + Length;
     }
 
-    internal sealed record Dependencies(string Content, string[] Files, bool Wide);
+    internal sealed record Dependencies(string Content, string[] Files, bool Wide, bool Cacheable = true);
 
     private readonly Entry[] entries;
     private readonly string globalHash;
     private readonly string nestedHash;
     private readonly string[] globalFiles;
     private readonly string[] nestedFiles;
+    private readonly bool nestedUncacheable;
     private readonly long[] boundaries;
     private readonly Dictionary<int, Dependencies> segments = [];
     private Dependencies? whole;
 
     internal FrameDependencyIndex(string globalHash, IEnumerable<string> globalFiles, string nestedHash,
-        IEnumerable<string> nestedFiles, IEnumerable<Entry> entries)
+        IEnumerable<string> nestedFiles, IEnumerable<Entry> entries, bool nestedUncacheable = false)
     {
+        this.nestedUncacheable = nestedUncacheable;
         this.globalHash = globalHash;
         this.nestedHash = nestedHash;
         this.globalFiles = Distinct(globalFiles);
@@ -106,7 +111,8 @@ internal sealed class FrameDependencyIndex
         foreach (var hash in hashes) content.Append('|').Append(hash);
         var files = globalFiles.Concat(included.SelectMany(i => entries[i].Files));
         if (wide) files = files.Concat(nestedFiles);
-        return new Dependencies(content.ToString(), Distinct(files), wide);
+        bool cacheable = !included.Any(i => entries[i].Uncacheable) && !(wide && nestedUncacheable);
+        return new Dependencies(content.ToString(), Distinct(files), wide, cacheable);
     }
 
     internal static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));

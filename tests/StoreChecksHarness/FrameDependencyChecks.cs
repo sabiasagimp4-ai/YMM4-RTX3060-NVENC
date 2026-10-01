@@ -60,6 +60,14 @@ internal static class FrameDependencyChecks
         Check(Index(a, b, c, t, d).For(10).Content != new FrameDependencyIndex("G2", [], "N", [], [a]).For(10).Content,
             "A global change must change every frame");
 
+        // An item that cannot be fingerprinted only disables the frames that contain it.
+        var font = new Entry(200, 10, false, false, "F", [], Uncacheable: true);
+        var withFont = Index(a, font, t with { Frame = 210, Length = 5 });
+        Check(withFont.For(10).Cacheable && !withFont.For(205).Cacheable && !withFont.Whole.Cacheable, "Uncacheable items must only disable their frames");
+        Check(!withFont.For(212).Cacheable, "A transition after an uncacheable item must not be cacheable");
+        var nestedFont = new FrameDependencyIndex("G", [], "N", [], [a, d], nestedUncacheable: true);
+        Check(nestedFont.For(10).Cacheable && !nestedFont.For(105).Cacheable, "An uncacheable nested timeline must only disable scene frames");
+
         long frames = 0;
         var big = Index(Enumerable.Range(0, 5000).Select(i => new Entry(i * 10, 15, false, false, "I" + i, [])).ToArray());
         var clock = System.Diagnostics.Stopwatch.StartNew();
