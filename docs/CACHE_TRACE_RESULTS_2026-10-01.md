@@ -10,7 +10,8 @@ CPU wall timeをStopwatchの生ticksで採取。GPU実行時間、Present、音�
 - [ホスト・画素一致・詳細ログ・パッケージ検証成功](https://github.com/sabiasagimp4-ai/YMM4-dlls/actions/runs/36861078427)
 - 対応するソース: `87eabcf2faa273156ec08dec4393f7dcbbe54959`。
 - raw JSONL・スクリーンショット・診断版 `.ymme` は上記Actions artifacts。保存期間14日。
-  この文書はrawの代わりではなく、期限後も残す観測記録。
+  JSONLは [traces/2026-10-01](traces/2026-10-01) にgzipで保存し、Actions期限後も再集計できる。
+  圧縮前後のSHA256・実行run・ソースcommitはmanifest.jsonに記録。スクリーンショットとパッケージはActions artifacts。
 
 ## GUIで確認できたこと
 
@@ -98,3 +99,11 @@ OFF/cold/RAM/trace-ONを固定順に各1回測った結果だけでは、計測�
 このfixtureではbitmap再利用だけより、繰り返すCPU→描画資源コピーを避けるGPU側の保持が
 次の有力な調査対象になった。実装には予算・device lifetime・viewport・依存revision・borrow lifetimeを
 同時に扱う必要がある。今回のデータだけでRTX3060にも同じ順位を適用せず、検証や転送を省略しない。
+
+
+保存済みログの再集計例（Pythonのみで展開可能）:
+
+```sh
+python -c "import gzip,pathlib; p=pathlib.Path('docs/traces/2026-10-01/performance-trace.jsonl.gz'); pathlib.Path('performance-trace.jsonl').write_bytes(gzip.decompress(p.read_bytes()))"
+python tools/analyze-cache-trace.py performance-trace.jsonl --output performance-summary.json
+```
