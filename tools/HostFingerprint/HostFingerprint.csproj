@@ -8,5 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../NVEncVideoWriterPlugin/HostFingerprint.cs" Link="HostFingerprint.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/HostContracts.cs" Link="HostContracts.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/HostBaselines.cs" Link="HostBaselines.cs" Condition="Exists('../../NVEncVideoWriterPlugin/HostBaselines.cs')" />
   </ItemGroup>
 </Project>

@@ -32,6 +32,7 @@ internal sealed partial class HostFingerprint : IDisposable
     private readonly Dictionary<string, TypeDefinitionHandle> types = new(StringComparer.Ordinal);
     private readonly Dictionary<EntityHandle, string> names = [];
     private readonly NameProvider provider;
+    private HashSet<string>? referenced;
 
     internal HostFingerprint(string path) : this(File.OpenRead(path)) { }
 
@@ -70,6 +71,22 @@ internal sealed partial class HostFingerprint : IDisposable
         var text = new StringBuilder();
         DescribeType(handle, text);
         return text.ToString();
+    }
+
+    // What the type's code names: types (base type, interfaces, member signatures, IL operands) and members
+    // ("Type::Member", generic types by definition; its own methods too), including those of its
+    // compiler-generated nested types.
+    // Null when the assembly does not define the type.
+    internal HashSet<string>? References(string typeName)
+    {
+        if (!types.TryGetValue(typeName, out var handle)) return null;
+        referenced = new HashSet<string>(StringComparer.Ordinal);
+        try
+        {
+            DescribeType(handle, new StringBuilder());
+            return referenced;
+        }
+        finally { referenced = null; }
     }
 
     // Per member, for reports of what changed between two builds.
@@ -137,6 +154,7 @@ internal sealed partial class HostFingerprint : IDisposable
         foreach (var methodHandle in definition.GetMethods())
         {
             var method = reader.GetMethodDefinition(methodHandle);
+            referenced?.Add(TypeName(handle) + "::" + Normalize(reader.GetString(method.Name)));
             var flags = method.Attributes & (MethodAttributes.Static | MethodAttributes.Virtual | MethodAttributes.Abstract);
             yield return ($"method {flags} {Normalize(reader.GetString(method.Name))}{Signature(method.DecodeSignature(provider, null))}", Body(method));
         }
@@ -220,19 +238,30 @@ internal sealed partial class HostFingerprint : IDisposable
 
     private void AppendAttributes(CustomAttributeHandleCollection attributes, StringBuilder text)
     {
-        foreach (var line in attributes.Select(reader.GetCustomAttribute).Select(attribute => (Type: AttributeType(attribute), attribute.Value))
+        var kept = attributes.Select(reader.GetCustomAttribute).Select(attribute => (Type: AttributeType(attribute), attribute.Value))
             .Where(a => serializationNamespaces.Any(ns => a.Type.StartsWith(ns + ".", StringComparison.Ordinal))
-                || a.Type == "System.ComponentModel.DefaultValueAttribute")
-            .Select(a => $"attribute {a.Type} {Convert.ToHexString(reader.GetBlobBytes(a.Value))}").Order(StringComparer.Ordinal))
+                || a.Type == "System.ComponentModel.DefaultValueAttribute").ToArray();
+        foreach (var (type, _) in kept) referenced?.Add(type);
+        foreach (var line in kept.Select(a => $"attribute {a.Type} {Convert.ToHexString(reader.GetBlobBytes(a.Value))}").Order(StringComparer.Ordinal))
             text.Append(line).Append('\n');
     }
 
-    private string AttributeType(CustomAttribute attribute) => attribute.Constructor.Kind switch
+    // Attributes that are left out are not references either (editor attributes name UI types).
+    private string AttributeType(CustomAttribute attribute)
     {
-        HandleKind.MethodDefinition => TypeName(reader.GetMethodDefinition((MethodDefinitionHandle)attribute.Constructor).GetDeclaringType()),
-        HandleKind.MemberReference => Name(reader.GetMemberReference((MemberReferenceHandle)attribute.Constructor).Parent),
-        _ => "?",
-    };
+        var recording = referenced;
+        referenced = null;
+        try
+        {
+            return attribute.Constructor.Kind switch
+            {
+                HandleKind.MethodDefinition => TypeName(reader.GetMethodDefinition((MethodDefinitionHandle)attribute.Constructor).GetDeclaringType()),
+                HandleKind.MemberReference => Name(reader.GetMemberReference((MemberReferenceHandle)attribute.Constructor).Parent),
+                _ => "?",
+            };
+        }
+        finally { referenced = recording; }
+    }
 
     private string Member(EntityHandle handle)
     {
@@ -245,12 +274,16 @@ internal sealed partial class HostFingerprint : IDisposable
             case HandleKind.FieldDefinition:
             {
                 var field = reader.GetFieldDefinition((FieldDefinitionHandle)handle);
-                return $"{TypeName(field.GetDeclaringType())}::{Normalize(reader.GetString(field.Name))} : {field.DecodeSignature(provider, null)}";
+                string declaring = TypeName(field.GetDeclaringType()), name = Normalize(reader.GetString(field.Name));
+                referenced?.Add(declaring + "::" + name);
+                return $"{declaring}::{name} : {field.DecodeSignature(provider, null)}";
             }
             case HandleKind.MethodDefinition:
             {
                 var method = reader.GetMethodDefinition((MethodDefinitionHandle)handle);
-                return $"{TypeName(method.GetDeclaringType())}::{Normalize(reader.GetString(method.Name))}{Signature(method.DecodeSignature(provider, null))}";
+                string declaring = TypeName(method.GetDeclaringType()), name = Normalize(reader.GetString(method.Name));
+                referenced?.Add(declaring + "::" + name);
+                return $"{declaring}::{name}{Signature(method.DecodeSignature(provider, null))}";
             }
             case HandleKind.MemberReference:
             {
@@ -262,6 +295,7 @@ internal sealed partial class HostFingerprint : IDisposable
                     _ => Name(member.Parent),
                 };
                 string name = Normalize(reader.GetString(member.Name));
+                referenced?.Add(OpenGeneric(parent) + "::" + name);
                 return member.GetKind() == MemberReferenceKind.Field
                     ? $"{parent}::{name} : {member.DecodeFieldSignature(provider, null)}"
                     : $"{parent}::{name}{Signature(member.DecodeMethodSignature(provider, null))}";
@@ -278,6 +312,14 @@ internal sealed partial class HostFingerprint : IDisposable
         }
     }
 
+    // "List`1<X>" -> "List`1": members are referenced on the generic type definition.
+    private static string OpenGeneric(string type)
+    {
+        int tick = type.IndexOf('`');
+        int open = tick < 0 ? -1 : type.IndexOf('<', tick);
+        return open > 0 && char.IsAsciiDigit(type[open - 1]) ? type[..open] : type;
+    }
+
     private static string Signature(MethodSignature<string> signature) =>
         $"{(signature.GenericParameterCount > 0 ? $"<{signature.GenericParameterCount}>" : string.Empty)}({string.Join(",", signature.ParameterTypes)}) : {signature.ReturnType}{(signature.Header.IsInstance ? string.Empty : " static")}";
 
@@ -291,23 +333,37 @@ internal sealed partial class HostFingerprint : IDisposable
 
     private string TypeName(TypeDefinitionHandle handle)
     {
+        string name = TypeNameCore(handle);
+        referenced?.Add(name);
+        return name;
+    }
+
+    private string TypeName(TypeReferenceHandle handle)
+    {
+        string name = TypeNameCore(handle);
+        referenced?.Add(name);
+        return name;
+    }
+
+    private string TypeNameCore(TypeDefinitionHandle handle)
+    {
         if (names.TryGetValue(handle, out var cached)) return cached;
         var definition = reader.GetTypeDefinition(handle);
         string name = Normalize(reader.GetString(definition.Name));
         var declaring = definition.GetDeclaringType();
-        string result = !declaring.IsNil ? TypeName(declaring) + "+" + name
+        string result = !declaring.IsNil ? TypeNameCore(declaring) + "+" + name
             : definition.Namespace.IsNil ? name : reader.GetString(definition.Namespace) + "." + name;
         names[handle] = result;
         return result;
     }
 
-    private string TypeName(TypeReferenceHandle handle)
+    private string TypeNameCore(TypeReferenceHandle handle)
     {
         if (names.TryGetValue(handle, out var cached)) return cached;
         var reference = reader.GetTypeReference(handle);
         string name = Normalize(reader.GetString(reference.Name));
         string result = reference.ResolutionScope.Kind == HandleKind.TypeReference
-            ? TypeName((TypeReferenceHandle)reference.ResolutionScope) + "+" + name
+            ? TypeNameCore((TypeReferenceHandle)reference.ResolutionScope) + "+" + name
             : reference.Namespace.IsNil ? name : reader.GetString(reference.Namespace) + "." + name;
         names[handle] = result;
         return result;

@@ -51,6 +51,17 @@ jobs:
         run: |
           while read -r v; do tools/ci/fetch-ymm4.sh "$v" "hosts/$v" --dlls; done < selected.txt
 
+      - name: Read build (release 0.1 of this repository, if any)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download 0.1 --repo "$GITHUB_REPOSITORY" --pattern '*.zip' --dir release-zip
+          mkdir -p hosts/release
+          unzip -q -j -o release-zip/*.zip 'YukkuriMovieMaker*.dll' -d hosts/release
+          ls hosts/release | head -30
+          tools/ci/fetch-ymm4.sh 4.56.1.0 hosts/4.56.1.0-updater --dlls || echo "4.56.1.0 is not on the update server"
+
       - name: Fingerprints
         run: |
           dotnet build tools/HostFingerprint -c Release --nologo -v q
@@ -66,6 +77,19 @@ jobs:
             fi
             prev=$v
           done < selected.txt
+          echo "################ contracts: each version against the previous one"
+          prev=
+          while read -r v; do
+            if [ -n "$prev" ]; then echo "== $prev -> $v"; dotnet $tool compare "hosts/$prev" "hosts/$v"; fi
+            prev=$v
+          done < selected.txt
+          if [ -d hosts/release ]; then
+            echo "################ contracts: release build"
+            dotnet $tool contracts hosts/release | grep '^#'
+            while read -r v; do echo "== release -> $v"; dotnet $tool compare hosts/release "hosts/$v"; done < selected.txt
+            [ -d hosts/4.56.1.0-updater ] && dotnet $tool compare hosts/release hosts/4.56.1.0-updater
+            last=$(tail -1 selected.txt); echo "== diff $last -> release"; dotnet $tool report hosts/release > reports/release.tsv; dotnet $tool diff "reports/$last.tsv" reports/release.tsv
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
