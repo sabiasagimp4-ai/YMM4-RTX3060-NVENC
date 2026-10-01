@@ -419,9 +419,16 @@ internal static class TimelineFrameCache
                 }
             }
             bool fromDisk = false;
-            bool replaced = stored is not null && cacheKey is not null
-                && store.Value.TryGet(cacheKey, paused && viewport is not null ? PausedDiskWait : TimeSpan.Zero, out var record, out fromDisk)
-                && TryReplaceFrame(__instance, pending, record);
+            bool replaced = false;
+            if (stored is not null && cacheKey is not null)
+            {
+                ReadOnlyMemory<byte> record;
+                bool found;
+                using (PreviewPerformance.Measure(PreviewStage.CacheRead))
+                    found = store.Value.TryGet(cacheKey, paused && viewport is not null ? PausedDiskWait : TimeSpan.Zero, out record, out fromDisk);
+                if (found)
+                    using (PreviewPerformance.Measure(PreviewStage.CacheRestore)) replaced = TryReplaceFrame(__instance, pending, record);
+            }
             if (viewport is { } view) ReadAhead(state, scene, time, usageKey, view, !paused);
             if (replaced)
             {

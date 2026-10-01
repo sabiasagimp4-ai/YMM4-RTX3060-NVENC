@@ -244,8 +244,20 @@ try {
     function Scenario([string] $name) {
         if (-not $TracePath) { return }
         $box = Trace-Control 'CacheTraceScenario'
-        if (-not $box) { throw 'Trace scenario control was not found' }
-        $box.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($name)
+        if ($box) {
+            $box.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($name)
+        } else {
+            # This host's docking container can hide its content from UIA even when the tool exposes peers.
+            # Coordinates are relative to the tool window placed above; this operates only on the CI copy.
+            if (-not $tool) { throw 'Trace tool window was not found' }
+            $r = New-Object Win+RECT
+            [Win]::GetWindowRect($tool.Handle, [ref]$r) | Out-Null
+            [Win]::SetForegroundWindow($tool.Handle) | Out-Null
+            Click-At ($r.Left + 225) ($r.Top + 75) 'the trace scenario field'
+            [System.Windows.Forms.SendKeys]::SendWait('^a')
+            [System.Windows.Forms.SendKeys]::SendWait($name)
+            Start-Sleep -Milliseconds 200
+        }
         Write-Output "TRACE-SCENARIO $name"
     }
     Scenario 'idle-fill'
@@ -288,19 +300,29 @@ try {
     [System.Windows.Forms.SendKeys]::SendWait('{DELETE}')
     Start-Sleep -Seconds 3
     Scenario 'undo'
+    [Win]::SetForegroundWindow($main.Handle) | Out-Null
     [System.Windows.Forms.SendKeys]::SendWait('^z')
     Start-Sleep -Seconds 3
     Scenario 'redo'
+    [Win]::SetForegroundWindow($main.Handle) | Out-Null
     [System.Windows.Forms.SendKeys]::SendWait('^y')
     Start-Sleep -Seconds 3
     Scenario 'preview-wheel'
+    [Win]::SetForegroundWindow($main.Handle) | Out-Null
     [Win]::SetCursorPos(470, 237) | Out-Null
     [Win]::mouse_event(2048, 0, 0, 120, [UIntPtr]::Zero)
     Start-Sleep -Seconds 3
     if ($TracePath) {
         $toggle = Trace-Control 'CacheTraceToggle'
-        if (-not $toggle -or $toggle.Current.Name -ne (U '\u8A73\u7D30\u30ED\u30B0\u3092\u505C\u6B62')) { throw 'The trace is not recording' }
-        $toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        if ($toggle) {
+            $toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        } else {
+            if (-not $tool -or -not (Test-Path $TracePath)) { throw 'The trace is not recording' }
+            $r = New-Object Win+RECT
+            [Win]::GetWindowRect($tool.Handle, [ref]$r) | Out-Null
+            [Win]::SetForegroundWindow($tool.Handle) | Out-Null
+            Click-At ($r.Left + 70) ($r.Top + 75) 'the trace stop button'
+        }
         $until = (Get-Date).AddSeconds(20)
         $finished = $false
         while ((Get-Date) -lt $until -and -not $finished) {
@@ -311,6 +333,10 @@ try {
             }
         }
         if (-not $finished) { throw 'Trace did not finish before YMM4 exit' }
+        $raw = Get-Content $TracePath -Raw -Encoding UTF8
+        foreach ($name in @('idle-fill', 'paused-seek', 'playback-1', 'playback-2', 'edit-delete', 'undo', 'redo', 'preview-wheel')) {
+            if (-not $raw.Contains('"Component":"' + $name + '"')) { throw "Scenario marker missing: $name" }
+        }
         Write-Output "TRACE-SAVED $TracePath"
     }
     List-Windows $process

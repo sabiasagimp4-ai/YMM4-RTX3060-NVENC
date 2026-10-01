@@ -16,6 +16,7 @@
 生成した使い捨てプロジェクトで、停止中の巡回、paused seek、2回の再生、Delete、Undo、Redo、preview wheelを試行し、
 終了前にツールの停止ボタンから書込完了を確認する。操作名は意図であり、入力が必ずその編集・ズームを生んだ証明ではない。
 ログのフレーム時刻・経路・viewport/描画・coverageと照合し、確認できた挙動だけを結果とする。
+ホストのドッキング枠がUIAを隠す場合は、配置したCI用ツール窓を基準に入力/停止を操作する。実機の窓へ座標操作する仕組みではない。
 既存の実ホストWARP検証も `--trace-output <path>` で採取できる。
 
 ## 記録内容
@@ -23,7 +24,7 @@
 - セッション: UTCとStopwatchの原点、実際の周波数、OS/runtime、process ID、論理CPU数。
 - 各span: 生の開始/終了ticks、span ID、親ID、operation ID、managed thread ID、frame time ticks、Playing/Paused/Exporting、stage/category/component、outcome。
 - Update経路: render/live/RAM/disk/bypass/exception。対象外の理由、decoderのready/not-readyも別イベント。
-- キー生成、lookup、ホストUpdate、Draw、GPUコピー提出、配列確保、Map待ち、memcpy、RAM登録、ディスク投入。
+- キー生成、CacheRead（RAM/ディスク検索）、CacheRestore（GPU画像復元）、lookup全体、ホストUpdate、Draw、GPUコピー提出、配列確保、Map待ち、memcpy、RAM登録、ディスク投入。
 - ディスクworker: 読み書き処理のwall timeとqueue滞在時間。投入元のoperation IDで関連づける。
 - 遅延readback: 次のフレームで完了しても、元のframe time/operation IDに帰属させる。
 - Processor/SourceインターフェースのUpdate/Draw/Read/GetFrame/GetFrameAsyncを実装するクラスをロード済みアセンブリから動的に発見する。

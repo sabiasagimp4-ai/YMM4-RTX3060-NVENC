@@ -5,7 +5,7 @@ namespace NVEncVideoWriterPlugin;
 internal enum PreviewStage
 {
     KeyGeneration, CacheLookup, HostRender, BeginGpuCopy, CpuAllocation,
-    MapWait, CpuMemcpy, RamCommit, DiskEnqueue, TotalUpdate, PreviewDraw, TotalPreview,
+    MapWait, CpuMemcpy, RamCommit, DiskEnqueue, TotalUpdate, PreviewDraw, TotalPreview, CacheRead, CacheRestore,
 }
 
 internal readonly record struct PreviewPerformanceRow(PreviewStage Stage, long SampleCount,
