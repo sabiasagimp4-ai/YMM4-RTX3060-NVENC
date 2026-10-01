@@ -36,13 +36,13 @@ internal static class HostIntegration
             checkedHost = host;
             try
             {
-                if (!VerifyHost(host, out var reason)) throw new NotSupportedException(reason);
+                if (!VerifyHost(host, out var version, out var reason)) throw new NotSupportedException(reason);
                 if (!HostExportScope.TryInstall(host, harmony, out reason)) throw new NotSupportedException(reason);
                 installed = true;
                 cacheAvailable = TimelineFrameCache.TryInstall(host, cacheHarmony, out reason);
                 if (!cacheAvailable) cacheHarmony.UnpatchAll(cacheHarmony.Id);
                 status = cacheAvailable
-                    ? "YMM4 4.55.1.1: 取消保護・自動キャッシュの接続を確認しました。"
+                    ? $"YMM4 {version}: 取消保護・自動キャッシュの接続を確認しました。"
                     : "取消保護は有効です。自動キャッシュは利用できません: " + reason;
                 return true;
             }
@@ -68,21 +68,41 @@ internal static class HostIntegration
             throw new InvalidOperationException("YMM4の出力範囲・取消状態を取得できなかったため、既存ファイルを保護して出力を中止しました。");
     }
 
-    internal static bool VerifyHost(Assembly host, out string reason)
+    private sealed record KnownBinary(string File, Guid Mvid, string Sha256);
+    private sealed record KnownHost(string Version, KnownBinary Host, KnownBinary Plugin, KnownBinary Settings);
+
+    // Exact host builds whose hooked internals were inspected. 4.56.1.0 was read with ILSpy from the official
+    // Lite zip (see CLAUDE_HANDOFF.md); anything else keeps the integration disabled.
+    private static readonly KnownHost[] KnownHosts =
+    [
+        new("4.55.1.1",
+            new("YukkuriMovieMaker.dll", Guid.Parse("5c07056d-022e-4d0f-a83d-ae0fa3b393f5"), "30E0B5E81FAA292F7968F3702446E54B3F4A5D319E33CC2EB38F2EF843606B9C"),
+            new("YukkuriMovieMaker.Plugin.dll", Guid.Parse("78fce2a0-1106-4489-a080-938ae746bf7e"), "4713BBE55855A39D3BB340A7B8AB204711529929C2C12A69F1BEE54A9A7F60FF"),
+            new("YukkuriMovieMaker.Settings.dll", Guid.Parse("5ddcb7f0-06f1-449a-bbc2-ecd8b3257b3c"), "F9339259B6C28C987DA0CBD416D983715A84A149F9D99D2ACA76F37879E0D0DF")),
+        new("4.56.1.0",
+            new("YukkuriMovieMaker.dll", Guid.Parse("23e5b5b5-adcf-43b7-b976-b6b63f8dadea"), "90D5022E2F4B46631254FAF788A1DF8A420071D9A190644FCC29892EC44F439D"),
+            new("YukkuriMovieMaker.Plugin.dll", Guid.Parse("ddaa2ae6-046b-450c-9e9d-0c4e30ba9251"), "B99938260AA96A54DD2665D38A5A26889E70988CF8CC6293CD0EFDC88A81C0DF"),
+            new("YukkuriMovieMaker.Settings.dll", Guid.Parse("88a1cec9-69bc-43bd-82ad-c9f3417cd271"), "8CB040510EF5E49289B47D60CF08E337CD9235D9577E49728D18404384CB22DA")),
+    ];
+
+    private static string KnownVersions => string.Join(" / ", KnownHosts.Select(known => known.Version));
+
+    internal static bool VerifyHost(Assembly host, out string reason) => VerifyHost(host, out _, out reason);
+
+    internal static bool VerifyHost(Assembly host, out string version, out string reason)
     {
+        version = string.Empty;
         try
         {
             if (host.GetName().Name != "YukkuriMovieMaker") throw new NotSupportedException("Unexpected host assembly");
+            var known = KnownHosts.FirstOrDefault(candidate => candidate.Host.Mvid == host.ManifestModule.ModuleVersionId)
+                ?? throw new NotSupportedException($"読み込まれた YukkuriMovieMaker.dll は未検証の版です（検証済み: YMM4 {KnownVersions}）");
             var directory = Path.GetDirectoryName(Path.GetFullPath(host.Location))!;
-            VerifyBinary(host, directory, "YukkuriMovieMaker.dll", "5c07056d-022e-4d0f-a83d-ae0fa3b393f5",
-                "30E0B5E81FAA292F7968F3702446E54B3F4A5D319E33CC2EB38F2EF843606B9C");
+            VerifyBinary(host, directory, known.Host);
             var loadContext = AssemblyLoadContext.GetLoadContext(host)!;
-            var plugin = FindOrLoad(loadContext, directory, "YukkuriMovieMaker.Plugin");
-            var settings = FindOrLoad(loadContext, directory, "YukkuriMovieMaker.Settings");
-            VerifyBinary(plugin, directory, "YukkuriMovieMaker.Plugin.dll", "78fce2a0-1106-4489-a080-938ae746bf7e",
-                "4713BBE55855A39D3BB340A7B8AB204711529929C2C12A69F1BEE54A9A7F60FF");
-            VerifyBinary(settings, directory, "YukkuriMovieMaker.Settings.dll", "5ddcb7f0-06f1-449a-bbc2-ecd8b3257b3c",
-                "F9339259B6C28C987DA0CBD416D983715A84A149F9D99D2ACA76F37879E0D0DF");
+            VerifyBinary(FindOrLoad(loadContext, directory, "YukkuriMovieMaker.Plugin"), directory, known.Plugin);
+            VerifyBinary(FindOrLoad(loadContext, directory, "YukkuriMovieMaker.Settings"), directory, known.Settings);
+            version = known.Version;
             reason = string.Empty;
             return true;
         }
@@ -97,14 +117,14 @@ internal static class HostIntegration
         context.Assemblies.SingleOrDefault(a => a.GetName().Name == name)
         ?? context.LoadFromAssemblyPath(Path.Combine(directory, name + ".dll"));
 
-    private static void VerifyBinary(Assembly assembly, string directory, string file, string mvid, string sha256)
+    private static void VerifyBinary(Assembly assembly, string directory, KnownBinary expected)
     {
-        var expectedPath = Path.GetFullPath(Path.Combine(directory, file));
+        var expectedPath = Path.GetFullPath(Path.Combine(directory, expected.File));
         if (!string.Equals(Path.GetFullPath(assembly.Location), expectedPath, StringComparison.OrdinalIgnoreCase)
-            || assembly.ManifestModule.ModuleVersionId != Guid.Parse(mvid))
-            throw new NotSupportedException($"読み込まれた {file} は未検証の版です（検証済み: YMM4 4.55.1.1）");
+            || assembly.ManifestModule.ModuleVersionId != expected.Mvid)
+            throw new NotSupportedException($"読み込まれた {expected.File} は未検証の版です（検証済み: YMM4 {KnownVersions}）");
         using var stream = new FileStream(expectedPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        if (Convert.ToHexString(SHA256.HashData(stream)) != sha256)
-            throw new NotSupportedException($"{file} のSHA-256が検証済みの版と一致しません（検証済み: YMM4 4.55.1.1）");
+        if (Convert.ToHexString(SHA256.HashData(stream)) != expected.Sha256)
+            throw new NotSupportedException($"{expected.File} のSHA-256が検証済みの版と一致しません（検証済み: YMM4 {KnownVersions}）");
     }
 }

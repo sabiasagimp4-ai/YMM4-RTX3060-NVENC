@@ -193,7 +193,6 @@ internal static class IdleFramePreRenderer
                 var cloneScene = CloneScene(snapshot);
                 using var cloneTracker = new KeyDependencyTracker(cloneScene);
                 using var source = new TimelineSourceAndDevices(cloneScene);
-                int fps = cloneScene.FPS;
 
                 for (int frame = startFrame; frame <= endFrame; frame++)
                 {
@@ -210,7 +209,9 @@ internal static class IdleFramePreRenderer
                     using (cloneCapture)
                     {
                         if (!CanContinue(current, job.Token, anchorFrame) || !liveCapture!.Validate() || !cloneCapture!.Validate()) return;
-                        var time = FrameTime(frame, fps);
+                        // Same conversion as TimelineVideoPlayer, so the primed frame is rendered at the exact time
+                        // the player will request (a one-tick difference can select another video sample).
+                        var time = cloneScene.Timeline.VideoInfo.GetTimeFrom(frame);
                         source.Update(time, TimelineSourceUsage.Playing);
                         if (!CanContinue(current, job.Token, anchorFrame)) return;
                         if (TryPrimeIfCurrent(job.Token, current.LiveScene, cloneScene, source, time, latestViewport, liveCapture, cloneCapture))
@@ -283,9 +284,6 @@ internal static class IdleFramePreRenderer
 
     private static bool IsViewportFresh(TimelineFrameCache.PreviewViewport viewport) =>
         viewport.LastDrawTimestamp != 0 && Stopwatch.GetElapsedTime(viewport.LastDrawTimestamp) <= TimeSpan.FromSeconds(10);
-
-    private static TimeSpan FrameTime(int frame, int fps) =>
-        TimeSpan.FromTicks(checked((long)frame * TimeSpan.TicksPerSecond / fps));
 
     private static Scene CloneScene(ModelSnapshot snapshot)
     {
