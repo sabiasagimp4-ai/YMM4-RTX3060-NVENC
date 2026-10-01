@@ -25,7 +25,30 @@ internal static class Program
         };
         var host = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(hostDir, "YukkuriMovieMaker.dll"));
         var plugin = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(hostDir, "YukkuriMovieMaker.Plugin.dll"));
-        Check(HostIntegration.VerifyHost(host, out var hostReason), "Host binary verification failed: " + hostReason);
+        // --unread: a YMM4 build that is not one of the read builds (the ymm4-watch workflow). The cache checks run
+        // with the features its contracts allow, as the plugin would use them.
+        bool unread = args.Contains("--unread");
+        bool known = HostIntegration.VerifyHost(host, out var hostReason);
+        if (!unread) Check(known, "Host binary verification failed: " + hostReason);
+        if (args.Contains("--integration"))
+        {
+            HostIntegrationChecks.Run(host);
+            return 0;
+        }
+        HostFeatures? features;
+        if (unread)
+        {
+            var evaluation = HostContracts.Evaluate(HostContracts.Describe(hostDir));
+            Console.WriteLine($"Contracts verdict: same code as {evaluation.Baseline ?? "no read build"}; features: {string.Join(", ", evaluation.Features.Order(StringComparer.Ordinal))}");
+            foreach (var (feature, problem) in evaluation.Problems) Console.WriteLine($"  off {feature}: {problem}");
+            features = evaluation.Baseline is null ? null : HostIntegration.FeaturesFrom(evaluation);
+            if (features is not null) HostFeatures.Decide(host, features);
+        }
+        else
+        {
+            HostIntegrationChecks.CheckContracts(host, hostDir);
+            features = HostFeatures.For(host);
+        }
         var sourceType = host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!;
         var update = sourceType.GetMethods(All).Single(m => m.Name == "Update" && m.GetParameters().Length == 2);
         var dispose = sourceType.GetMethod("Dispose", All, [typeof(bool)])!;
@@ -43,7 +66,7 @@ internal static class Program
         try
         {
             ExportScopeChecks.Run(host, harmony);
-            IdleFramePreRendererChecks.Run();
+            if (features is { Preview: true }) IdleFramePreRendererChecks.Run();
             harmony.Patch(update, new HarmonyMethod(typeof(Program), nameof(UpdatePrefix)), new HarmonyMethod(typeof(Program), nameof(UpdatePostfix)));
             harmony.Patch(dispose, new HarmonyMethod(typeof(Program), nameof(DisposePrefix)));
             var uninitialized = RuntimeHelpers.GetUninitializedObject(sourceType);
@@ -63,7 +86,12 @@ internal static class Program
         Check(disposals == beforeUnpatchCall && (bool)sourceType.GetField("disposedValue", All)!.GetValue(afterUnpatch)!,
             "Unpatch did not restore the original Dispose method");
         Console.WriteLine("Patch/unpatch and reflection contracts OK");
-        if (args.Contains("--gpu")) FramePixelChecks.Run(host);
+        int video = Array.IndexOf(args, "--video");
+        if (args.Contains("--gpu"))
+        {
+            if (features is null) Console.WriteLine("Cache checks skipped: the plugin does not use the cache on this build");
+            else FramePixelChecks.Run(host, video >= 0 && video + 1 < args.Length ? Path.GetFullPath(args[video + 1]) : null, features);
+        }
         return 0;
     }
 
@@ -113,4 +141,30 @@ internal static class Program
     private static void UpdatePostfix() => updatePostfixes++;
     private static bool DisposePrefix() { disposals++; return !skip; }
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
+}
+
+// The probes bypass the plugin loader; they register the host, the plugin API and the built-in
+// MediaFoundation reader so that video items decode through the real host readers.
+internal static class ProbeLoader
+{
+    // Stands in for PluginAssemblyLoader's static constructor (skipped by the caller's Harmony prefix), which
+    // would load plugins from the test executable's directory. 4.56.1.0 also reads IncompatiblePluginAssemblies.
+    internal static void Stub(IEnumerable<Assembly> assemblies)
+    {
+        var loader = typeof(YukkuriMovieMaker.Plugin.PluginAssemblyLoader);
+        AccessTools.StaticFieldRefAccess<IEnumerable<Assembly>>(AccessTools.Field(loader, "<Assemblies>k__BackingField"))() = assemblies;
+        foreach (var name in new[] { "<IncompatiblePluginAssemblies>k__BackingField", "loadFailures" })
+            if (AccessTools.Field(loader, name) is { } field) // init-only: FieldInfo.SetValue would throw
+                AccessTools.StaticFieldRefAccess<object>(field)() ??= Activator.CreateInstance(typeof(List<>).MakeGenericType(field.FieldType.GetGenericArguments()))!;
+    }
+
+    internal static IEnumerable<Assembly> Assemblies(Assembly host)
+    {
+        string reader = Path.Combine(Path.GetDirectoryName(host.Location)!, "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.dll");
+        var loaded = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == Path.GetFileNameWithoutExtension(reader));
+        var assemblies = new List<Assembly> { host, typeof(YukkuriMovieMaker.Plugin.CacheProvider).Assembly };
+        if (loaded is not null) assemblies.Add(loaded);
+        else if (File.Exists(reader)) assemblies.Add(AssemblyLoadContext.Default.LoadFromAssemblyPath(reader));
+        return assemblies;
+    }
 }

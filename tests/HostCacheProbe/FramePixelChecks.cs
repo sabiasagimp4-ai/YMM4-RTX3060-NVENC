@@ -13,12 +13,12 @@ using YukkuriMovieMaker.Player.Video;
 
 internal static class FramePixelChecks
 {
-    internal static void Run(Assembly host)
+    internal static void Run(Assembly host, string? videoPath, HostFeatures features)
     {
         var bootstrap = new Harmony("ymm.tests.pixel-builtin-loader");
         var loader = typeof(PluginAssemblyLoader);
         bootstrap.Patch(loader.TypeInitializer!, prefix: new HarmonyMethod(typeof(FramePixelChecks), nameof(SkipLoader)));
-        AccessTools.StaticFieldRefAccess<IEnumerable<Assembly>>(AccessTools.Field(loader, "<Assemblies>k__BackingField"))() = [host, typeof(CacheProvider).Assembly];
+        ProbeLoader.Stub(ProbeLoader.Assemblies(host));
         using var devices = new GraphicsDevices();
         using var context = devices.CreateContext();
         var dc = context.DeviceContext;
@@ -50,7 +50,18 @@ internal static class FramePixelChecks
         var harmony = new Harmony("ymm.tests.frame-cache");
         try
         {
+            // The real plugin loader loads the built-in readers; this probe bypasses it, so load them here
+            // (metadata only, no host code runs) so that readiness coverage matches the real host.
+            foreach (var reader in System.IO.Directory.GetFiles(System.IO.Path.GetDirectoryName(host.Location)!, "YukkuriMovieMaker.Plugin.FileSource.*.dll"))
+                if (!AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name == System.IO.Path.GetFileNameWithoutExtension(reader)))
+                    System.Runtime.Loader.AssemblyLoadContext.Default.LoadFromAssemblyPath(reader);
             Check(TimelineFrameCache.TryInstall(host, harmony, out var reason), reason);
+            Console.WriteLine("Render readiness coverage (verify against host code):");
+            foreach (var line in FrameRenderReadiness.Coverage) Console.WriteLine("  " + line);
+            const string mediaFoundation = "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation";
+            if (features.DecoderVerified(mediaFoundation))
+                Check(FrameRenderReadiness.Coverage.Any(line => line.Contains(": MF2 (", StringComparison.Ordinal)),
+                    "No MF2 video source was recognized; video frames would never be cached");
             var timeline = new Timeline();
             timeline.VideoInfo.Width = 321; timeline.VideoInfo.Height = 181;
             timeline.VideoInfo.BackgroundColor = System.Windows.Media.Color.FromArgb(137, 123, 76, 231);
@@ -87,13 +98,207 @@ internal static class FramePixelChecks
                 oldHits = TimelineFrameCache.Hits;
                 source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
                 Check(TimelineFrameCache.Hits == oldHits, "Background edit reused stale output");
+                Thread.Sleep(300); // the render path waits for edits to settle before re-describing the model
+                source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                Check(TimelineFrameCache.Hits == oldHits, "Edited frame was reused before it was re-rendered");
+                source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                Check(TimelineFrameCache.Hits == oldHits + 1, "Re-rendered frame after an edit was not reused");
+                // Clear invalidates the live frame and the store; reuse resumes after one render.
+                TimelineFrameCache.Clear();
+                oldHits = TimelineFrameCache.Hits;
+                long oldMisses = TimelineFrameCache.Misses;
+                source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                Check(TimelineFrameCache.Hits == oldHits && TimelineFrameCache.Misses == oldMisses + 1, "Clear did not invalidate the live frame");
+                source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                Check(TimelineFrameCache.Hits == oldHits + 1, "Reuse did not resume after Clear");
+                CheckSeparateSwitches(source);
             }
             Check(TimelineFrameCache.GpuBytes == 0, "Source disposal leaked global GPU reservation");
             Console.WriteLine("Actual host automatic source cache: hit/parity/invalidation/GPU cleanup OK");
+            if (features is { Preview: true, SelectionRects: true })
+            {
+                PreviewRectChecks.Run(host, context);
+                Check(TimelineFrameCache.GpuBytes == 0, "Preview rect checks leaked global GPU reservation");
+            }
+            else Console.WriteLine("Preview rect checks skipped: rect reuse is off on this build");
+            if (features.Preview)
+            {
+                PreviewDeliveryChecks.Run(host, context, features.SelectionRects);
+                Check(TimelineFrameCache.GpuBytes == 0, "Preview delivery checks leaked global GPU reservation");
+            }
+            if (features.DecoderVerified(mediaFoundation)) CheckBoundaryTimes(host, context, videoPath);
+            if (features.DecoderVerified(mediaFoundation)) CheckVideoDecodeFailureIsNotStored(host, context, videoPath);
+            else Console.WriteLine("Video decode-failure check skipped: the MediaFoundation reader is not trusted on this build");
         }
-        finally { TimelineFrameCache.Enabled = false; TimelineFrameCache.Clear(); harmony.UnpatchAll(harmony.Id); }
+        finally
+        {
+            TimelineFrameCache.Enabled = false;
+            TimelineFrameCache.Clear();
+            FrameRenderReadiness.Uninstall(harmony);
+            harmony.UnpatchAll(harmony.Id);
+        }
     }
     private static bool SkipLoader() => false;
+
+    // The settings switch the preview cache and the export cache separately (NVENC output is a third switch).
+    private static void CheckSeparateSwitches(ITimelineSource source)
+    {
+        // From an empty cache (the export frame is already stored by the checks before): render, then reuse.
+        long Reused(TimelineSourceUsage usage)
+        {
+            TimelineFrameCache.Clear();
+            long hits = TimelineFrameCache.Hits;
+            source.Update(TimeSpan.Zero, usage);
+            source.Update(TimeSpan.Zero, usage);
+            return TimelineFrameCache.Hits - hits;
+        }
+        try
+        {
+            TimelineFrameCache.SetEnabled(preview: true, export: false);
+            Check(Reused(TimelineSourceUsage.Exporting) == 0, "Export frames were cached with the export cache switched off");
+            Check(Reused(TimelineSourceUsage.Paused) == 1, "The preview cache did not work on its own");
+            TimelineFrameCache.SetEnabled(preview: false, export: true);
+            Check(Reused(TimelineSourceUsage.Paused) == 0, "Preview frames were cached with the preview cache switched off");
+            Check(Reused(TimelineSourceUsage.Exporting) == 1, "The export cache did not work on its own");
+        }
+        finally { TimelineFrameCache.SetEnabled(preview: true, export: true); }
+
+        // Settings files from before the switches were separated carry their one switch over to both caches.
+        var legacy = new FrameCacheToolSettings { Enabled = true };
+        legacy.Initialize();
+        Check(legacy.PreviewCache && legacy.ExportCache && legacy.NvencOutput && legacy.SettingsVersion == 1, "Old settings (cache on) were not carried over");
+        var fresh = new FrameCacheToolSettings();
+        fresh.Initialize();
+        Check(!fresh.PreviewCache && !fresh.ExportCache && fresh.NvencOutput, "New settings: caches off, NVENC output on");
+        var current = new FrameCacheToolSettings { SettingsVersion = 1, Enabled = true, PreviewCache = false, ExportCache = true, NvencOutput = false };
+        current.Initialize();
+        Check(!current.PreviewCache && current.ExportCache && !current.NvencOutput, "Current settings were changed on load");
+        Console.WriteLine("Settings: preview and export caches switch separately; old settings carried over");
+    }
+
+    // Real reader, injected decoder failure: the host renders transparency and returns normally, and the
+    // cache must neither store nor reuse that frame. Recovery must re-enable reuse.
+    private static void CheckVideoDecodeFailureIsNotStored(Assembly host, IGraphicsDevicesAndContext context, string? videoPath)
+    {
+        if (videoPath is null || !System.IO.File.Exists(videoPath))
+        {
+            Console.WriteLine("Video decode-failure check skipped (pass --video <mp4>)");
+            return;
+        }
+        var reader = AppDomain.CurrentDomain.GetAssemblies().Single(a => a.GetName().Name == "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation");
+        const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        var tryDecode = reader.GetType("YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.Source2.MFFrameDecoder", true)!.GetMethod("TryDecodeAt", Instance)!;
+        var legacy = reader.GetType("YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.MFVideoFileSource", true)!;
+        // RefreshCurrentFrameWithReload has exception filters Harmony 2.4.2 cannot rebuild; Update itself is hookable.
+        var legacyUpdate = legacy.GetMethod("Update", Instance, [typeof(TimeSpan)])!;
+        clearCurrentFrame = legacy.GetMethod("ClearCurrentFrame", Instance)!;
+
+        var timeline = new Timeline();
+        timeline.VideoInfo.Width = 320; timeline.VideoInfo.Height = 180; timeline.VideoInfo.FPS = 30;
+        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        timeline.Items = timeline.Items.Add(new VideoItem { FilePath = videoPath, Frame = 0, Length = 30 });
+        var scene = new Scene(timeline, scenes, []);
+        var source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
+            Instance, null, [context, scene, null], null)!;
+        using (source)
+        {
+            TimelineFrameCache.Enabled = true;
+            TimelineFrameCache.Clear();
+            bool Reused(int frame, int attempts)
+            {
+                var time = timeline.VideoInfo.GetTimeFrom(frame);
+                for (int i = 0; i < attempts; i++)
+                {
+                    source.Update(time, TimelineSourceUsage.Exporting);
+                    long hits = TimelineFrameCache.Hits;
+                    source.Update(time, TimelineSourceUsage.Exporting);
+                    if (TimelineFrameCache.Hits > hits) return true;
+                    Thread.Sleep(50); // external files are fingerprinted in the background first
+                }
+                return false;
+            }
+            Check(Reused(5, 100), "Decoded video frame was never reused: " + TimelineFrameCache.Status);
+
+            var failure = new Harmony("ymm.tests.decode-failure");
+            failure.Patch(tryDecode, prefix: new HarmonyMethod(typeof(FramePixelChecks), nameof(FailDecode)));
+            failure.Patch(legacyUpdate, prefix: new HarmonyMethod(typeof(FramePixelChecks), nameof(FailLegacyUpdate)));
+            try
+            {
+                TimelineFrameCache.Clear();
+                long misses = TimelineFrameCache.Misses;
+                Check(!Reused(12, 3), "A frame whose video decode failed was stored or reused");
+                Check(TimelineFrameCache.Misses > misses, "Decode-failure frames never reached the cache: " + TimelineFrameCache.Status);
+                Check(TimelineFrameCache.Status.Contains("デコード完了", StringComparison.Ordinal), "Unexpected status: " + TimelineFrameCache.Status);
+            }
+            finally { failure.UnpatchAll(failure.Id); }
+            Check(Reused(14, 20), "Reuse did not resume after decoding recovered: " + TimelineFrameCache.Status);
+        }
+        Console.WriteLine("Real reader decode failure (MF2 TryDecodeAt / legacy timeout): not stored, reuse resumes after recovery OK");
+    }
+
+    // Exact time keys: a time one tick before a frame boundary is a request of its own. With the cache ON and the
+    // boundary frame already stored, the earlier time must show what the host renders for it with the cache OFF
+    // (a key by frame number used to hand it the boundary frame).
+    private static void CheckBoundaryTimes(Assembly host, IGraphicsDevicesAndContext context, string? videoPath)
+    {
+        if (videoPath is null || !System.IO.File.Exists(videoPath))
+        {
+            Console.WriteLine("Boundary time check skipped (pass --video <mp4>)");
+            return;
+        }
+        var timeline = new Timeline();
+        timeline.VideoInfo.Width = 320; timeline.VideoInfo.Height = 180; timeline.VideoInfo.FPS = 30;
+        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        timeline.Items = timeline.Items.Add(new VideoItem { FilePath = videoPath, Frame = 0, Length = 60 });
+        var scene = new Scene(timeline, scenes, []);
+        var source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [context, scene, null], null)!;
+        using (source)
+        {
+            var dc = context.DeviceContext;
+            byte[] Render(TimeSpan time)
+            {
+                source.Update(time, TimelineSourceUsage.Exporting);
+                return TimelineFrameCache.Capture(dc, source.Output, 320, 180, new(-160, -90))!;
+            }
+            var boundary = timeline.VideoInfo.GetTimeFrom(15);
+            var earlier = boundary - TimeSpan.FromTicks(1);
+            TimelineFrameCache.Enabled = false;
+            var atBoundary = Render(boundary);
+            var beforeBoundary = Render(earlier);
+            TimelineFrameCache.Enabled = true;
+            TimelineFrameCache.Clear();
+            bool stored = false;
+            for (int i = 0; i < 100 && !stored; i++) // the video file is fingerprinted in the background first
+            {
+                source.Update(boundary, TimelineSourceUsage.Exporting);
+                long hits = TimelineFrameCache.Hits;
+                source.Update(boundary, TimelineSourceUsage.Exporting);
+                stored = TimelineFrameCache.Hits > hits;
+                if (!stored) Thread.Sleep(50);
+            }
+            Check(stored, "The boundary frame was never reused: " + TimelineFrameCache.Status);
+            long renders = TimelineFrameCache.Misses;
+            Check(Render(earlier).SequenceEqual(beforeBoundary) && TimelineFrameCache.Misses == renders + 1,
+                "One tick before a frame boundary, the cache did not render what the host renders without it");
+            Check(Render(boundary).SequenceEqual(atBoundary), "The boundary frame differs from the host render");
+            Console.WriteLine($"Boundary times (real video, one tick apart): host samples {(atBoundary.SequenceEqual(beforeBoundary) ? "are equal" : "differ")}; cache ON matches cache OFF at both");
+        }
+    }
+
+    private static MethodInfo clearCurrentFrame = null!;
+
+    private static bool FailDecode(ref bool __result)
+    {
+        __result = false; // the source has already disposed its previous frame, so it draws transparency
+        return false;
+    }
+
+    private static bool FailLegacyUpdate(object __instance, TimeSpan time)
+    {
+        clearCurrentFrame.Invoke(__instance, [time]); // what the legacy reader's Update does after a timeout
+        return false;
+    }
 
     private static void CheckLatePreviewTransformParity(ID2D1DeviceContext dc)
     {
@@ -110,15 +315,18 @@ internal static class FramePixelChecks
         var scale = new Vector2(width / visible.X, height / visible.Y);
         var transform = Matrix3x2.CreateScale(scale, half) * Matrix3x2.CreateTranslation(-viewCenter * scale);
         var viewport = new TimelineFrameCache.PreviewViewport(width, height, transform, half,
-            dc.Dpi.Width, dc.Dpi.Height, Guid.NewGuid(), Guid.NewGuid(), System.Diagnostics.Stopwatch.GetTimestamp(), false);
+            dc.Dpi.Width, dc.Dpi.Height,
+            new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),
+            dc.AntialiasMode, dc.TextAntialiasMode, dc.PrimitiveBlend, dc.UnitMode,
+            Guid.NewGuid(), Guid.NewGuid(), System.Diagnostics.Stopwatch.GetTimestamp(), false);
         var saved = TimelineFrameCache.CapturePreview(dc, original, viewport)!;
         using var savedImage = TimelineFrameCache.UploadPreview(dc, saved, viewport);
         var direct = CapturePreview(dc, original, width, height, transform);
         var cached = CapturePreview(dc, savedImage, width, height, transform);
         Check(direct.SequenceEqual(cached), "Viewport cache changed pixels under TimelineVideoPlayer's late zoom/pan transform");
         var makeKey = typeof(TimelineFrameCache).GetMethod("MakeKey", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var key = (string)makeKey.Invoke(null, ["model", TimeSpan.Zero, TimelineSourceUsage.Playing, dc, viewport])!;
-        var changed = (string)makeKey.Invoke(null, ["model", TimeSpan.Zero, TimelineSourceUsage.Playing, dc,
+        var key = (string)makeKey.Invoke(null, ["model", TimeSpan.Zero, 30, "Preview", dc, viewport])!;
+        var changed = (string)makeKey.Invoke(null, ["model", TimeSpan.Zero, 30, "Preview", dc,
             viewport with { Transform = Matrix3x2.CreateTranslation(1, 0) * transform }])!;
         Check(key != changed, "Preview cache key ignored the view transform");
         Console.WriteLine("Late preview zoom/pan parity and transform-key invalidation OK");

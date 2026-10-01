@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Fake host methods must stay patchable: keep them out of callers. -->
+    <Optimize>false</Optimize>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="2.4.2" />
+    <Compile Include="../../NVEncVideoWriterPlugin/FrameRenderReadiness.cs" Link="FrameRenderReadiness.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/HostFeatures.cs" Link="HostFeatures.cs" />
+    <Compile Include="../../tools/HostShapeReport/ShapeRules.cs" Link="ShapeRules.cs" />
+  </ItemGroup>
+</Project>

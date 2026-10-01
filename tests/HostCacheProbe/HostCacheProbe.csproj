@@ -12,9 +12,21 @@
     <Compile Include="..\..\NVEncVideoWriterPlugin\HostIntegration.cs" Link="HostIntegration.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\HostExportScope.cs" Link="HostExportScope.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\TimelineFrameCache.cs" Link="TimelineFrameCache.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\FrameRenderReadiness.cs" Link="FrameRenderReadiness.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\HostFeatures.cs" Link="HostFeatures.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\HostContracts.cs" Link="HostContracts.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\HostBaselines.cs" Link="HostBaselines.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\HostFingerprint.cs" Link="HostFingerprint.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\FrameTimeKey.cs" Link="FrameTimeKey.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\PreviewRects.cs" Link="PreviewRects.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\CacheStatusBar.cs" Link="CacheStatusBar.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\CacheBarLayout.cs" Link="CacheBarLayout.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameCacheStore.cs" Link="FrameCacheStore.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameCacheKey.cs" Link="FrameCacheKey.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\KnownCode.cs" Link="KnownCode.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\FrameModelSplit.cs" Link="FrameModelSplit.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\KeyDependencyTracker.cs" Link="KeyDependencyTracker.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\FrameDependencyIndex.cs" Link="FrameDependencyIndex.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FileDependencyLease.cs" Link="FileDependencyLease.cs" />
     <Reference Include="YukkuriMovieMaker"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="YukkuriMovieMaker.Plugin"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.Plugin.dll</HintPath><Private>false</Private></Reference>

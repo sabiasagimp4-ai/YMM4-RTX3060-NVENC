@@ -9,7 +9,10 @@
   <ItemGroup>
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameCacheKey.cs" Link="FrameCacheKey.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/KnownCode.cs" Link="KnownCode.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/FrameModelSplit.cs" Link="FrameModelSplit.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/KeyDependencyTracker.cs" Link="KeyDependencyTracker.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/FrameDependencyIndex.cs" Link="FrameDependencyIndex.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FileDependencyLease.cs" Link="FileDependencyLease.cs" />
     <Compile Remove="StoreChecks.cs" />
     <Using Include="System.IO" />
@@ -17,5 +20,9 @@
     <Reference Include="YukkuriMovieMaker.Plugin"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.Plugin.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Newtonsoft.Json"><HintPath>$(YMM4DirPath)Newtonsoft.Json.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Vortice.Mathematics"><HintPath>$(YMM4DirPath)Vortice.Mathematics.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Vortice.Direct2D1"><HintPath>$(YMM4DirPath)Vortice.Direct2D1.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Vortice.DirectX"><HintPath>$(YMM4DirPath)Vortice.DirectX.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SharpGen.Runtime"><HintPath>$(YMM4DirPath)SharpGen.Runtime.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="SharpGen.Runtime.COM"><HintPath>$(YMM4DirPath)SharpGen.Runtime.COM.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 </Project>

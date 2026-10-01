@@ -1,0 +1,36 @@
+namespace NVEncVideoWriterPlugin;
+
+// Applies FrameCacheToolSettings to the running plugin and saves changes, from the tool or YMM4's settings window.
+internal static class PluginSettings
+{
+    private static int subscribed;
+
+    internal static string? SaveError { get; private set; }
+
+    internal static void Apply()
+    {
+        var settings = FrameCacheToolSettings.Default;
+        if (Interlocked.Exchange(ref subscribed, 1) == 0)
+            settings.PropertyChanged += (_, _) =>
+            {
+                ApplyNow(settings);
+                try
+                {
+                    settings.Save();
+                    SaveError = null;
+                }
+                catch (Exception exception) { SaveError = exception.GetBaseException().Message; }
+            };
+        ApplyNow(settings);
+    }
+
+    private static void ApplyNow(FrameCacheToolSettings settings)
+    {
+        bool available = HostIntegration.CacheAvailable;
+        TimelineFrameCache.SetEnabled(available && settings.PreviewCache, available && settings.ExportCache);
+        IdleFramePreRenderer.Enabled = available && settings.PreviewCache;
+        KnownCode.Trusted = settings.TrustedPlugins;
+        // Switched on after start: hook the export now, before the next one begins.
+        if (settings.NvencOutput) HostIntegration.EnsureExportHooks(out _);
+    }
+}

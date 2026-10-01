@@ -7,19 +7,36 @@ namespace NVEncVideoWriterPlugin;
 
 internal sealed class KeyDependencyTracker : IDisposable
 {
-    private const long MaximumFingerprintBytes = 512L * 1024 * 1024;
+    private const long MaximumFingerprintBytes = 4L * 1024 * 1024 * 1024;
+    private const int FingerprintChunk = 128;
+    private static readonly IReadOnlyDictionary<string, FileFingerprint> EmptyFingerprints = new Dictionary<string, FileFingerprint>();
+    private const long SettleMilliseconds = 250;
+    // Describing the whole project again after an edit took 0.5 s for 100 items and 2.1 s for 1000 on the CI runner
+    // (before the streaming split). The preview's render thread does it inline for small projects, and for larger ones
+    // while the last description stayed short; otherwise in the background, rendering normally until it is done.
+    private static readonly long InlineDescribeTicks = System.Diagnostics.Stopwatch.Frequency / 20;
+    private const int InlineDescribeItems = 200;
+    private Task<Description?>? describeTask;
+    private long describeRevision = -1;
+    private long lastDescribeTicks = -1;
     private static readonly SemaphoreSlim FingerprintSlot = new(1, 1);
     private readonly Scene scene;
     private readonly object gate = new();
     private readonly List<Action> unsubscribe = [];
     private long revision;
+    private long lastInvalidated = long.MinValue / 2;
     private long cachedRevision = -1;
     private string cachedKey = string.Empty;
     private string cachedReason = string.Empty;
+    private string cachedPartialReason = string.Empty;
+    private FrameDependencyIndex? cachedFrames;
+    private readonly Dictionary<FrameDependencyIndex.Dependencies, string> frameKeys = new(ReferenceEqualityComparer.Instance);
     private bool cachedEligible;
     private string cachedModel = string.Empty;
     private string[] cachedPaths = [];
     private Type[][] cachedSourceReaders = [[], [], []];
+    // KnownCode.Generation the description was made with: trusting another plugin describes the project again.
+    private long cachedCode = -1;
     private Guid[] cachedParents = [];
     private IReadOnlyDictionary<string, FileFingerprint>? fingerprints;
     private Task<(IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason)>? fingerprintTask;
@@ -29,6 +46,17 @@ internal sealed class KeyDependencyTracker : IDisposable
     private bool disposed;
 
     public KeyDependencyTracker(Scene scene) => this.scene = scene;
+
+    // For a copy of a scene whose files another tracker has verified (the idle pre-renderer's clone, which lives for
+    // one batch and would otherwise never finish hashing): captures still lease every file and compare it with these
+    // fingerprints, so a file changed since then bypasses.
+    internal KeyDependencyTracker(Scene scene, IReadOnlyDictionary<string, FileFingerprint>? verified) : this(scene) => fingerprints = verified;
+
+    // Never changed in place: a new verification replaces the whole dictionary.
+    internal IReadOnlyDictionary<string, FileFingerprint>? VerifiedFingerprints { get { lock (gate) return fingerprints; } }
+
+    // Tests: whether a fingerprint pass is still running.
+    internal bool FingerprintPassRunning { get { lock (gate) return fingerprintTask is { IsCompleted: false }; } }
 
     internal event Action? Invalidated;
     public long Revision => Interlocked.Read(ref revision);
@@ -42,112 +70,339 @@ internal sealed class KeyDependencyTracker : IDisposable
         using (capture) { key = capture!.Key; return capture.Validate(); }
     }
 
-    public bool TryCapture(out KeyCapture? capture, out string reason)
+    public bool TryCapture(out KeyCapture? capture, out string reason) => TryCapture(out capture, out reason, settle: false);
+
+    // settle: the render path passes true so that continuous edits (every one changes the whole-project key)
+    // do not re-describe the model on every frame; it bypasses until edits have paused for a moment.
+    public bool TryCapture(out KeyCapture? capture, out string reason, bool settle) => Capture(null, out capture, out reason, settle, false);
+
+    // The key of one root-timeline frame: only what that frame depends on (FrameDependencyIndex), and only its
+    // files are verified and leased, so a cost no longer grows with every file of the project.
+    // background: the caller must not wait for a long description of the project (the preview's render thread).
+    public bool TryCapture(int frame, out KeyCapture? capture, out string reason, bool settle = false, bool background = false) =>
+        Capture(frame, out capture, out reason, settle, background);
+
+    // True when the current description renders this frame normally whatever its files' state (a tachie, a plugin's
+    // code, a file or font that cannot be verified), or a file of it was overwritten while YMM4 runs (HostContent).
+    // It stays so until an edit (or a restart), so the idle pre-renderer passes it. So does a frame keyed by the live
+    // objects' identities (Dependencies.Session): a clone of the scene draws its randomness otherwise.
+    internal bool RendersNormally(int frame)
+    {
+        lock (gate)
+            return !disposed && cachedRevision >= 0 && cachedRevision == Revision && cachedEligible
+                && cachedFrames is { } frames && frames.For(frame) is var dependencies
+                && (!dependencies.Cacheable || dependencies.Session || dependencies.Files.Any(HostContent.Changed));
+    }
+
+    private sealed record Description(bool Eligible, string Model, string[] Paths, FrameDependencyIndex? Frames, string Reason,
+        Type[][] SourceReaders, long Ticks, long Code);
+
+    private bool Capture(int? frame, out KeyCapture? capture, out string reason, bool settle, bool background = false)
     {
         lock (gate)
         {
             capture = null;
             reason = "描画キャッシュの状態監視は終了しています。";
             if (disposed) return false;
-            if (cachedRevision >= 0 && (!scene.ParentScenes.AsSpan().SequenceEqual(cachedParents)
-                || !FrameCacheKey.SourceReadersMatch(cachedSourceReaders))) Invalidate();
+            // Only when still current: repeating it would keep refreshing the settle window forever.
+            if (cachedRevision >= 0 && cachedRevision == Revision && (!scene.ParentScenes.AsSpan().SequenceEqual(cachedParents)
+                || !FrameCacheKey.SourceReadersMatch(cachedSourceReaders) || cachedCode != KnownCode.Generation)) Invalidate();
             long before = Revision;
             if (cachedRevision != before)
             {
-                Type[][] sourceReaders;
-                try { sourceReaders = FrameCacheKey.CaptureSourceReaderTypes(); }
-                catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
-                { reason = "読み込みプラグインの状態を確認できません。"; return false; }
-                RebuildSubscriptions();
-                bool eligible = FrameCacheKey.TryDescribe(scene, sourceReaders, out string model, out string[] paths, out string createdReason);
-                if (before != Revision || !FrameCacheKey.SourceReadersMatch(sourceReaders))
+                if (settle && cachedRevision >= 0 && Environment.TickCount64 - Volatile.Read(ref lastInvalidated) < SettleMilliseconds)
                 {
-                    if (before == Revision) Invalidate();
+                    reason = "編集中のため、通常描画を使用します。";
+                    return false;
+                }
+                if (describeTask is { IsCompleted: true }) AdoptDescription(before);
+            }
+            if (cachedRevision != before)
+            {
+                const string describing = "編集後のプロジェクトを背景で検査しています。通常描画を使用します。";
+                if (describeTask is not null) { reason = describing; return false; }
+                RebuildSubscriptions();
+                if (background && !DescribeInline())
+                {
+                    describeRevision = before;
+                    describeTask = Task.Run(Describe);
+                    reason = describing;
+                    return false;
+                }
+                if (Describe() is not { } description) { reason = "読み込みプラグインの状態を確認できません。"; return false; }
+                if (!Apply(description, before))
+                {
                     reason = "検査中にプロジェクトまたは読み込みプラグインが変更されたため、通常描画を使用します。";
                     return false;
                 }
-                cachedKey = string.Empty;
-                cachedModel = model;
-                cachedPaths = paths;
-                cachedSourceReaders = sourceReaders;
-                cachedParents = scene.ParentScenes.ToArray();
-                cachedReason = createdReason;
-                cachedEligible = eligible;
-                cachedRevision = before;
             }
             reason = cachedReason;
             if (!cachedEligible) return false;
-            if (cachedPaths.Length == 0)
+            var dependencies = frame is int at ? cachedFrames!.For(at) : null;
+            if (!(dependencies ?? cachedFrames!.Whole).Cacheable)
             {
-                if (cachedKey.Length == 0) cachedKey = FrameCacheKey.FromFingerprints(cachedModel, new Dictionary<string, FileFingerprint>());
-                capture = new KeyCapture(this, cachedKey, cachedModel, before, cachedParents, null);
+                reason = "立ち絵（非同期の口パク）、外部プラグインのコード（エフェクト・図形・アイテム・トランジション）、確認できない素材（DirectWrite にないフォントや外部の場所のファイル）のいずれかを使うアイテムが映るため、通常描画を使用します。";
+                return false;
+            }
+            string[] files = dependencies?.Files ?? cachedPaths;
+            if (files.Length == 0)
+            {
+                capture = new KeyCapture(this, KeyFor(dependencies, files), cachedModel, before, cachedParents, null);
                 return true;
+            }
+            if (fingerprintTask is { IsCompleted: true }) AdoptFingerprints(before);
+            // While a pass runs, a frame whose own files it has already verified is keyed (results arrive per chunk).
+            // Zero hash budget makes this a metadata-only lease. Cold/changed files are hashed once off-thread.
+            if (fingerprints is not null && files.All(fingerprints.ContainsKey)
+                && FileDependencyLease.TryAcquire(files, fingerprints, 0, out var lease, out _))
+            {
+                if (!ValidateRevision(before)) { lease!.Dispose(); reason = "検査中にプロジェクトが変更されました。"; return false; }
+                // The key is built from this tracker's fingerprints. The lease can also accept a file by a newer
+                // fingerprint that another tracker recorded after the file changed; then this one is out of date.
+                var known = fingerprints;
+                if (lease!.Fingerprints.All(pair => known.TryGetValue(pair.Key, out var own) && own == pair.Value))
+                {
+                    if (!HostContent.Matches(lease.Fingerprints))
+                    {
+                        lease.Dispose();
+                        reason = HostContent.Reason;
+                        return false;
+                    }
+                    capture = new KeyCapture(this, KeyFor(dependencies, files), cachedModel, before, cachedParents, lease);
+                    reason = string.Empty;
+                    return true;
+                }
+                lease.Dispose();
             }
             if (fingerprintTask is not null)
             {
-                if (!fingerprintTask.IsCompleted)
-                {
-                    reason = "外部素材の内容を背景で検査しています。通常描画を使用します。";
-                    return false;
-                }
-                if (fingerprintRevision == before)
-                {
-                    if (fingerprintTask.IsCompletedSuccessfully)
-                    {
-                        var result = fingerprintTask.Result;
-                        if (result.Files is not null) { fingerprints = result.Files; cachedKey = string.Empty; cachedReason = string.Empty; }
-                        else { cachedReason = result.Reason; nextFingerprintAttempt = Environment.TickCount64 + 1000; }
-                    }
-                    else
-                    {
-                        cachedReason = "External file fingerprinting failed; retrying shortly.";
-                        nextFingerprintAttempt = Environment.TickCount64 + 1000;
-                    }
-                }
-                fingerprintTask = null;
-                fingerprintCancellation = null;
-            }
-            // Zero hash budget makes this a metadata-only lease. Cold/changed files are hashed once off-thread.
-            if (fingerprints is not null && FileDependencyLease.TryAcquire(cachedPaths, fingerprints, 0, out var lease, out _))
-            {
-                if (!ValidateRevision(before)) { lease!.Dispose(); reason = "検査中にプロジェクトが変更されました。"; return false; }
-                if (cachedKey.Length == 0) cachedKey = FrameCacheKey.FromFingerprints(cachedModel, fingerprints);
-                capture = new KeyCapture(this, cachedKey, cachedModel, before, cachedParents, lease);
-                reason = string.Empty;
-                return true;
+                reason = "外部素材の内容を背景で検査しています。通常描画を使用します。";
+                return false;
             }
             long now = Environment.TickCount64;
-            if (now >= nextFingerprintAttempt && FingerprintSlot.Wait(0))
-            {
-                var cancellation = new CancellationTokenSource();
-                fingerprintCancellation = cancellation;
-                fingerprintRevision = before;
-                string[] paths = cachedPaths;
-                var previous = fingerprints;
-                CancellationToken token = cancellation.Token;
-                fingerprintTask = Task.Run(() =>
-                {
-                    try { return Fingerprint(paths, previous, token); }
-                    finally { FingerprintSlot.Release(); cancellation.Dispose(); }
-                });
-            }
-            else if (now >= nextFingerprintAttempt)
-                nextFingerprintAttempt = now + 250;
-            reason = now < nextFingerprintAttempt && !string.IsNullOrEmpty(cachedReason)
-                ? cachedReason : "External file fingerprinting is being prepared; using the host renderer.";
+            // This frame's own unverified files first, then the rest of the project.
+            var verified = fingerprints;
+            StartFingerprinting(before, now, verified is null ? files : files.Where(file => !verified.ContainsKey(file)).ToArray());
+            reason = cachedPartialReason.Length != 0 ? "外部素材の一部を検証できません: " + cachedPartialReason
+                : now < nextFingerprintAttempt && !string.IsNullOrEmpty(cachedReason)
+                ? cachedReason : "外部素材の内容確認を準備中のため、通常描画を使用します。";
             return false;
         }
     }
 
-    private static (IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason) Fingerprint(string[] paths, IReadOnlyDictionary<string, FileFingerprint>? previous, CancellationToken token)
+    // Off the gate (a background task, or inline): what the project currently is. Null if the readers are unknown.
+    private Description? Describe()
     {
-        if (!FileDependencyLease.TryAcquire(paths, previous, MaximumFingerprintBytes, out var lease, out string reason, token)) return (null, reason);
-        using (lease) return (new Dictionary<string, FileFingerprint>(lease!.Fingerprints, StringComparer.OrdinalIgnoreCase), string.Empty);
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        Type[][] sourceReaders;
+        try { sourceReaders = FrameCacheKey.CaptureSourceReaderTypes(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { return null; }
+        long code = KnownCode.Generation;
+        bool eligible = FrameCacheKey.TryDescribe(scene, sourceReaders, out string model, out string[] paths, out var frames, out string reason);
+        return new(eligible, model, paths, frames, reason, sourceReaders, System.Diagnostics.Stopwatch.GetTimestamp() - started, code);
+    }
+
+    // Under gate: adopts a description of revision `current` unless the project or the readers changed since.
+    private bool Apply(Description description, long current)
+    {
+        lastDescribeTicks = description.Ticks;
+        if (current != Revision || !FrameCacheKey.SourceReadersMatch(description.SourceReaders))
+        {
+            if (current == Revision) Invalidate();
+            return false;
+        }
+        cachedKey = string.Empty;
+        cachedModel = description.Model;
+        cachedPaths = description.Paths;
+        cachedFrames = description.Frames;
+        frameKeys.Clear();
+        cachedSourceReaders = description.SourceReaders;
+        cachedCode = description.Code;
+        cachedParents = scene.ParentScenes.ToArray();
+        cachedReason = description.Reason;
+        cachedEligible = description.Eligible && description.Frames is not null;
+        cachedRevision = current;
+        return true;
+    }
+
+    // Under gate, with a finished describeTask.
+    private void AdoptDescription(long current)
+    {
+        var task = describeTask!;
+        describeTask = null;
+        if (describeRevision == current && task.IsCompletedSuccessfully && task.Result is { } description) Apply(description, current);
+    }
+
+    private bool DescribeInline() =>
+        scene.Scenes.Timelines.Append(scene.Timeline).Distinct().Sum(timeline => timeline.Items.Count) <= InlineDescribeItems
+        || lastDescribeTicks >= 0 && lastDescribeTicks <= InlineDescribeTicks;
+
+    // Tests: whether a background description is running.
+    internal bool Describing { get { lock (gate) return describeTask is { IsCompleted: false }; } }
+
+    // For display only (cache status bars): the keys of these frames from the current description, without
+    // verifying or leasing files. False while an edit is not described yet; null for frames with unhashed files.
+    // Frames another tracker stored (the idle pre-renderer, export) can be ones this tracker never captured, so
+    // their files are verified here in the background too.
+    internal bool TryPeekFrameKeys(IReadOnlyList<int> frames, string?[] keys, out string model)
+    {
+        lock (gate)
+        {
+            model = string.Empty;
+            if (!disposed && cachedRevision != Revision && describeTask is { IsCompleted: true }) AdoptDescription(Revision);
+            if (disposed || cachedRevision != Revision || !cachedEligible || cachedFrames is null) return false;
+            if (fingerprintTask is { IsCompleted: true }) AdoptFingerprints(cachedRevision);
+            bool unverified = false;
+            for (int i = 0; i < frames.Count; i++)
+            {
+                var dependencies = cachedFrames.For(frames[i]);
+                bool verified = dependencies.Files.Length == 0
+                    || (fingerprints is not null && dependencies.Files.All(fingerprints.ContainsKey));
+                unverified |= dependencies.Cacheable && !verified;
+                keys[i] = dependencies.Cacheable && verified ? KeyFor(dependencies, dependencies.Files) : null;
+            }
+            if (unverified && fingerprintTask is null) StartFingerprinting(cachedRevision, Environment.TickCount64);
+            model = cachedModel;
+            return true;
+        }
+    }
+
+    // Under gate, with a finished fingerprintTask: keeps its fingerprints if they describe this revision's files.
+    private void AdoptFingerprints(long current)
+    {
+        if (fingerprintRevision == current)
+        {
+            if (fingerprintTask!.IsCompletedSuccessfully && fingerprintTask.Result.Files is { } fingerprinted)
+            {
+                fingerprints = fingerprinted;
+                cachedKey = string.Empty;
+                frameKeys.Clear();
+                cachedReason = string.Empty;
+                // Files that could not be verified only disable the frames that use them; retry later.
+                if (fingerprintTask.Result.Reason.Length != 0)
+                {
+                    cachedPartialReason = fingerprintTask.Result.Reason;
+                    nextFingerprintAttempt = Environment.TickCount64 + 5000;
+                }
+            }
+            else
+            {
+                cachedReason = fingerprintTask.IsCompletedSuccessfully ? fingerprintTask.Result.Reason
+                    : "外部素材の内容確認に失敗しました。しばらくして再試行します。";
+                nextFingerprintAttempt = Environment.TickCount64 + 1000;
+            }
+        }
+        fingerprintTask = null;
+        fingerprintCancellation = null;
+    }
+
+    // Under gate, with no fingerprintTask: verifies the project's files in the background (one tracker at a time),
+    // `first` before the others. Fingerprints are published as each chunk finishes.
+    private void StartFingerprinting(long current, long now, string[]? first = null)
+    {
+        if (now >= nextFingerprintAttempt && FingerprintSlot.Wait(0))
+        {
+            var cancellation = new CancellationTokenSource();
+            fingerprintCancellation = cancellation;
+            fingerprintRevision = current;
+            cachedPartialReason = string.Empty;
+            string[] paths = cachedPaths;
+            int leading = 0;
+            if (first is { Length: > 0 })
+            {
+                var set = new HashSet<string>(first, StringComparer.OrdinalIgnoreCase);
+                paths = first.Concat(paths.Where(path => !set.Contains(path))).ToArray();
+                leading = first.Length;
+            }
+            var previous = fingerprints;
+            CancellationToken token = cancellation.Token;
+            fingerprintTask = Task.Run(() =>
+            {
+                try { return Fingerprint(paths, previous, token, Publish, leading); }
+                finally { FingerprintSlot.Release(); cancellation.Dispose(); }
+            });
+        }
+        else if (now >= nextFingerprintAttempt)
+            nextFingerprintAttempt = now + 250;
+    }
+
+    // Called under gate with verified fingerprints for `files`.
+    private string KeyFor(FrameDependencyIndex.Dependencies? dependencies, string[] files)
+    {
+        var known = fingerprints ?? EmptyFingerprints;
+        if (dependencies is null)
+        {
+            if (cachedKey.Length == 0)
+                cachedKey = FrameCacheKey.FromFingerprints(cachedModel, files.Length == 0 ? EmptyFingerprints : Subset(known, files));
+            return cachedKey;
+        }
+        if (frameKeys.TryGetValue(dependencies, out var key)) return key;
+        key = FrameCacheKey.FromFingerprints(dependencies.Content, files.Length == 0 ? EmptyFingerprints : Subset(known, files));
+        if (frameKeys.Count < 4096) frameKeys[dependencies] = key;
+        return key;
+    }
+
+    private static Dictionary<string, FileFingerprint> Subset(IReadOnlyDictionary<string, FileFingerprint> all, string[] files) =>
+        files.ToDictionary(path => path, path => all[path], StringComparer.OrdinalIgnoreCase);
+
+    // Chunks keep each lease under FileDependencyLease's per-lease limit; a failing chunk is retried file by file
+    // so that one unverifiable file only disables the frames that use it.
+    private static (IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason) Fingerprint(string[] paths,
+        IReadOnlyDictionary<string, FileFingerprint>? previous, CancellationToken token,
+        Action<IReadOnlyDictionary<string, FileFingerprint>>? publish = null, int leading = 0)
+    {
+        var result = new Dictionary<string, FileFingerprint>(StringComparer.OrdinalIgnoreCase);
+        string reason = string.Empty;
+        // The leading files (a waiting frame's) are chunked on their own, so they are published first.
+        foreach (var chunk in paths[..leading].Chunk(FingerprintChunk).Concat(paths[leading..].Chunk(FingerprintChunk)))
+        {
+            token.ThrowIfCancellationRequested();
+            var added = new Dictionary<string, FileFingerprint>(StringComparer.OrdinalIgnoreCase);
+            if (!TryAdd(chunk, added))
+                foreach (var path in chunk)
+                {
+                    token.ThrowIfCancellationRequested();
+                    TryAdd([path], added);
+                }
+            if (added.Count != 0) publish?.Invoke(added);
+        }
+        return (result.Count == 0 ? null : result, reason);
+
+        bool TryAdd(string[] group, Dictionary<string, FileFingerprint> added)
+        {
+            if (!FileDependencyLease.TryAcquire(group, previous, MaximumFingerprintBytes, out var lease, out string failure, token))
+            {
+                reason = failure;
+                return false;
+            }
+            using (lease) foreach (var pair in lease!.Fingerprints) result[pair.Key] = added[pair.Key] = pair.Value;
+            return true;
+        }
+    }
+
+    // A chunk's fingerprints, while the pass goes on. They describe files, not a project revision: a capture still
+    // leases its files and compares their stamps, and the finished pass replaces the whole dictionary.
+    private void Publish(IReadOnlyDictionary<string, FileFingerprint> added)
+    {
+        // The project's files as verified in the background, usually before YMM4 reads them for a frame: a later
+        // overwrite is seen even if the first frame using the file is keyed after it.
+        HostContent.Matches(added);
+        lock (gate)
+        {
+            if (disposed) return;
+            var merged = new Dictionary<string, FileFingerprint>(StringComparer.OrdinalIgnoreCase);
+            if (fingerprints is not null) foreach (var pair in fingerprints) merged[pair.Key] = pair.Value;
+            foreach (var pair in added) merged[pair.Key] = pair.Value;
+            fingerprints = merged;
+            cachedKey = string.Empty;
+            frameKeys.Clear();
+        }
     }
 
     private void Invalidate()
     {
         Interlocked.Increment(ref revision);
+        Volatile.Write(ref lastInvalidated, Environment.TickCount64);
         // Cancellation is checked between 64 KiB reads; never wait for file I/O from an editor event.
         try { Volatile.Read(ref fingerprintCancellation)?.Cancel(); } catch (ObjectDisposedException) { }
         try { Invalidated?.Invoke(); } catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { }
@@ -159,6 +414,16 @@ internal sealed class KeyDependencyTracker : IDisposable
         Subscribe(scene.Scenes);
         Subscribe(SettingsBase<YukkuriMovieMaker.Settings.YMMSettings>.Default);
         Subscribe(SettingsBase<PluginLoaderSettings>.Default);
+        var fileTypes = SettingsBase<YukkuriMovieMaker.Settings.FileSettings>.Default.FileExtensions;
+        Subscribe(fileTypes);
+        foreach (var extension in fileTypes) Subscribe(extension);
+        // Font names map to faces through these (FrameCacheKey.ResolveFont).
+        var fonts = SettingsBase<YukkuriMovieMaker.Settings.FontSettings>.Default;
+        Subscribe(fonts);
+        Subscribe(fonts.CustomFonts);
+        foreach (var font in fonts.CustomFonts) Subscribe(font);
+        // The asterisk word sets rewrite the text of text items and subtitles (FrameCacheKey.AsteriskWordSets).
+        foreach (var source in FrameCacheKey.AsteriskSources()) Subscribe(source);
         var timelines = scene.Scenes.Timelines.Append(scene.Timeline).Distinct().ToArray();
         foreach (var timeline in timelines)
         {
@@ -178,6 +443,11 @@ internal sealed class KeyDependencyTracker : IDisposable
 
     private void Subscribe(object value)
     {
+        if (value is System.Collections.Specialized.INotifyCollectionChanged collection)
+        {
+            collection.CollectionChanged += CollectionChanged;
+            unsubscribe.Add(() => collection.CollectionChanged -= CollectionChanged);
+        }
         if (value is INotifyPropertyChanged changed)
         {
             changed.PropertyChanged += PropertyChanged;
@@ -205,6 +475,7 @@ internal sealed class KeyDependencyTracker : IDisposable
     {
         if (!IsTimelineUiProperty(sender, args.PropertyName)) Invalidate();
     }
+    private void CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs args) => Invalidate();
     private void UndoCommandCreated(object? sender, UndoRedoEventArgs args) => Invalidate();
     private void HistoryChanged(object? sender, EventArgs args) => Invalidate();
     private void ClearSubscriptions() { foreach (var remove in unsubscribe) remove(); unsubscribe.Clear(); }

@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -17,6 +18,8 @@ internal static class IdleFramePreRenderer
 {
     private const int IdleDelayMilliseconds = 1200;
     private const int MaximumFrames = 30;
+    // How far ahead of the playhead idle time is spent (shown by the cache status bars).
+    private const int HorizonSeconds = 10;
     private static readonly object gate = new();
     private static DispatcherTimer? timer;
     private static Session? session;
@@ -32,6 +35,9 @@ internal static class IdleFramePreRenderer
     }
 
     internal static string Status => Volatile.Read(ref status);
+
+    // The timeline of the attached timeline tool, if any.
+    internal static YukkuriMovieMaker.Project.Timeline? CurrentTimeline => Volatile.Read(ref session)?.Info.Timeline;
 
     internal static void SetTimelineToolInfo(TimelineToolInfo info) => OnUi(() => Attach(info));
 
@@ -111,7 +117,7 @@ internal static class IdleFramePreRenderer
     private static void Tick(object? sender, EventArgs args)
     {
         var current = session;
-        if (!Enabled || !TimelineFrameCache.Enabled || current is null || !HostIntegration.CacheAvailable) return;
+        if (!Enabled || !TimelineFrameCache.PreviewEnabled || current is null || !HostIntegration.CacheAvailable) return;
 
         int frame = current.Info.Timeline.CurrentFrame;
         if (frame != current.ObservedFrame)
@@ -154,11 +160,11 @@ internal static class IdleFramePreRenderer
         int fps = current.LiveScene.FPS;
         int frameCount = Math.Min(MaximumFrames, fps);
         int start = Math.Max(current.ObservedFrame + 1, Volatile.Read(ref current.NextFrame));
-        int horizonEnd = current.ObservedFrame + Math.Max(1, fps);
+        int horizonEnd = current.ObservedFrame + Math.Max(1, fps) * HorizonSeconds;
         int end = Math.Min(current.Info.Timeline.Length - 1, horizonEnd);
         if (fps <= 0 || frameCount <= 0 || start > end)
         {
-            SetStatus("先読み範囲（1秒分）に到達しました。");
+            SetStatus($"先読み範囲（{HorizonSeconds}秒分）に到達しました。");
             return;
         }
         end = Math.Min(end, start + frameCount - 1);
@@ -177,32 +183,50 @@ internal static class IdleFramePreRenderer
     private static void RenderBatch(Session current, Job job, TimelineFrameCache.PreviewViewport viewport,
         int anchorFrame, int startFrame, int endFrame)
     {
-        int rendered = 0;
+        int rendered = 0, skipped = 0, normal = 0;
         try
         {
-            if (!current.Tracker.TryCapture(out var initial, out string reason))
+            // Frames that always render normally (a tachie, a plugin's code) are passed over, here and below:
+            // stopping at one would retry it on every idle tick and never read further ahead.
+            KeyCapture? initial = null;
+            string reason = string.Empty;
+            int first = startFrame;
+            while (first <= endFrame && !current.Tracker.TryCapture(first, out initial, out reason) && current.Tracker.RendersNormally(first))
+                first++;
+            if (initial is null)
             {
-                SetStatus(reason);
+                if (first > endFrame)
+                {
+                    Volatile.Write(ref current.NextFrame, endFrame + 1);
+                    SetStatus($"フレーム {startFrame}～{endFrame} は通常描画のフレームのため、先読みしません。");
+                }
+                else SetStatus(reason);
                 return;
             }
+            normal += first - startFrame;
             using (initial)
             {
                 if (!initial!.Validate() || !CanContinue(current, job.Token, anchorFrame)) return;
                 var snapshot = YukkuriMovieMaker.Json.Json.LoadFromText<ModelSnapshot>(initial.Model)
                     ?? throw new InvalidDataException("描画状態を読み込めませんでした。");
                 var cloneScene = CloneScene(snapshot);
-                using var cloneTracker = new KeyDependencyTracker(cloneScene);
+                using var cloneTracker = new KeyDependencyTracker(cloneScene, current.Tracker.VerifiedFingerprints);
                 using var source = new TimelineSourceAndDevices(cloneScene);
-                int fps = cloneScene.FPS;
 
-                for (int frame = startFrame; frame <= endFrame; frame++)
+                for (int frame = first; frame <= endFrame; frame++)
                 {
                     if (!CanContinue(current, job.Token, anchorFrame)
                         || !TimelineFrameCache.TryGetLatestPreviewViewport(current.Info.Timeline, current.Info.Scenes, out var latestViewport)
-                        || latestViewport != viewport || !IsViewportFresh(latestViewport) || latestViewport.IsPlaying)
+                        || !SameView(latestViewport, viewport) || !IsViewportFresh(latestViewport) || latestViewport.IsPlaying)
                         return;
-                    if (!TryCapturePair(current.Tracker, cloneTracker, out var liveCapture, out var cloneCapture, out reason))
+                    if (!TryCapturePair(current.Tracker, cloneTracker, frame, out var liveCapture, out var cloneCapture, out reason))
                     {
+                        if (current.Tracker.RendersNormally(frame) && cloneTracker.RendersNormally(frame))
+                        {
+                            normal++;
+                            Volatile.Write(ref current.NextFrame, frame + 1);
+                            continue;
+                        }
                         SetStatus(reason);
                         return;
                     }
@@ -210,19 +234,30 @@ internal static class IdleFramePreRenderer
                     using (cloneCapture)
                     {
                         if (!CanContinue(current, job.Token, anchorFrame) || !liveCapture!.Validate() || !cloneCapture!.Validate()) return;
-                        var time = FrameTime(frame, fps);
+                        // Same conversion as TimelineVideoPlayer, so the primed frame is rendered at the exact time
+                        // the player will request (a one-tick difference can select another video sample).
+                        var time = cloneScene.Timeline.VideoInfo.GetTimeFrom(frame);
+                        // Stored frames (in RAM, or on disk where the preview reads them ahead) are not rendered again.
+                        if (TimelineFrameCache.IsPreviewStored(source, time, cloneCapture, latestViewport))
+                        {
+                            skipped++;
+                            Volatile.Write(ref current.NextFrame, frame + 1);
+                            continue;
+                        }
                         source.Update(time, TimelineSourceUsage.Playing);
                         if (!CanContinue(current, job.Token, anchorFrame)) return;
-                        if (TryPrimeIfCurrent(job.Token, current.LiveScene, cloneScene, source, time, viewport, liveCapture, cloneCapture))
+                        if (TryPrimeIfCurrent(job.Token, current.LiveScene, cloneScene, source, time, latestViewport, liveCapture, cloneCapture))
                             rendered++;
                         Volatile.Write(ref current.NextFrame, frame + 1);
                     }
                     Thread.Sleep(8);
                 }
             }
+            string stored = (skipped == 0 ? string.Empty : $"（保存済みの {skipped} フレームは描画せず）")
+                + (normal == 0 ? string.Empty : $"（通常描画の {normal} フレームは対象外）");
             SetStatus(rendered == 0
-                ? "先読み範囲の確認が完了しました。"
-                : $"プレビュー範囲の {rendered} フレームを先読みしました。");
+                ? "先読み範囲の確認が完了しました。" + stored
+                : $"プレビュー範囲の {rendered} フレームを先読みしました。" + stored);
         }
         catch (OperationCanceledException) { }
         catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
@@ -236,12 +271,12 @@ internal static class IdleFramePreRenderer
         }
     }
 
-    private static bool TryCapturePair(KeyDependencyTracker liveTracker, KeyDependencyTracker cloneTracker,
+    private static bool TryCapturePair(KeyDependencyTracker liveTracker, KeyDependencyTracker cloneTracker, int frame,
         out KeyCapture? liveCapture, out KeyCapture? cloneCapture, out string reason)
     {
         liveCapture = cloneCapture = null;
-        if (!liveTracker.TryCapture(out liveCapture, out reason)) return false;
-        if (!cloneTracker.TryCapture(out cloneCapture, out reason))
+        if (!liveTracker.TryCapture(frame, out liveCapture, out reason)) return false;
+        if (!cloneTracker.TryCapture(frame, out cloneCapture, out reason))
         {
             liveCapture!.Dispose();
             liveCapture = null;
@@ -272,16 +307,19 @@ internal static class IdleFramePreRenderer
     }
 
     private static bool CanContinue(Session current, CancellationToken token, int anchorFrame) =>
-        !token.IsCancellationRequested && Enabled && TimelineFrameCache.Enabled
+        !token.IsCancellationRequested && Enabled && TimelineFrameCache.PreviewEnabled
         && Volatile.Read(ref current.IsBusy) == 0
         && ReferenceEquals(Volatile.Read(ref session), current)
         && current.Info.Timeline.CurrentFrame == anchorFrame;
 
-    private static bool IsViewportFresh(TimelineFrameCache.PreviewViewport viewport) =>
-        viewport.LastDrawTimestamp != 0 && Stopwatch.GetElapsedTime(viewport.LastDrawTimestamp) <= TimeSpan.FromSeconds(10);
+    // A redraw of the same view only refreshes the timestamp; it must not abort the batch.
+    private static bool SameView(TimelineFrameCache.PreviewViewport latest, TimelineFrameCache.PreviewViewport expected) =>
+        latest with { LastDrawTimestamp = 0 } == expected with { LastDrawTimestamp = 0 };
 
-    private static TimeSpan FrameTime(int frame, int fps) =>
-        TimeSpan.FromTicks(checked((long)frame * TimeSpan.TicksPerSecond / fps));
+    private static bool IsViewportFresh(TimelineFrameCache.PreviewViewport viewport) =>
+        viewport.LastDrawTimestamp != 0 && Stopwatch.GetElapsedTime(viewport.LastDrawTimestamp) <= TimelineFrameCache.IdleViewportLifetime;
+
+    private static readonly MethodInfo? TimelineLength = typeof(Timeline).GetProperty(nameof(Timeline.Length))?.GetSetMethod(nonPublic: true);
 
     private static Scene CloneScene(ModelSnapshot snapshot)
     {
@@ -300,6 +338,10 @@ internal static class IdleFramePreRenderer
             timeline.VideoInfo.Hz = model.VideoInfo.Hz;
             timeline.VideoInfo.BackgroundColor = model.VideoInfo.BackgroundColor;
             timeline.LayerSettings.CopyFrom(model.LayerSettings);
+            // Setting Items leaves Length at 1: YMM4 refreshes it on load and edits (private setter), and it can stay
+            // longer than the items. It is part of the drawing state, so the clone takes the live value.
+            TimelineLength?.Invoke(timeline, [model.Length]);
+            if (timeline.Length != model.Length) throw new NotSupportedException("タイムラインの長さを複製できません。");
             timelines.Add(timeline.ID, timeline);
             cloneScenes.AddScene(timeline);
         }
@@ -327,9 +369,39 @@ internal static class IdleFramePreRenderer
 
     private static void OnInput(object sender, PreProcessInputEventArgs args)
     {
-        if (args.StagingItem.Input is not null && session is { } current)
-            MarkActivity(current, "User activity; idle pre-render paused.");
+        if (session is { } current && IsUserInput(args.StagingItem.Input))
+            MarkActivity(current, "操作を検知したため、先読みを中断しました。");
     }
+
+    private static CursorPoint lastCursor;
+
+    // Keys, text, buttons, wheel, pen and touch, and mouse moves that move the cursor. WPF also raises mouse moves
+    // without any input whenever the layout under the cursor may have changed, for example when the cache bars
+    // repaint because a frame was stored; counting those let the pre-renderer cancel itself.
+    private static bool IsUserInput(InputEventArgs? input)
+    {
+        switch (input)
+        {
+            case MouseButtonEventArgs or MouseWheelEventArgs:
+                return true;
+            case MouseEventArgs when input.RoutedEvent == Mouse.PreviewMouseMoveEvent:
+                if (!GetCursorPos(out var cursor)) return true;
+                bool moved = cursor.X != lastCursor.X || cursor.Y != lastCursor.Y;
+                lastCursor = cursor;
+                return moved;
+            case MouseEventArgs or KeyboardFocusChangedEventArgs:
+                return false;
+            case KeyboardEventArgs or TextCompositionEventArgs or StylusEventArgs or TouchEventArgs:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private struct CursorPoint { public int X, Y; }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out CursorPoint point);
 
     private static void SubscribeInput()
     {
