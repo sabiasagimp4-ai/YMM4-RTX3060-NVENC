@@ -47,6 +47,7 @@ Windows、.NET 10 SDK、Visual Studio 2022のC++ツール、Windows SDKが必要
 ## 開発・検証資料
 
 - [開発状況・次の課題](docs/AE_CACHE_DEVELOPMENT.md)
+- [AE SDKと現行キャッシュの契約差](docs/AE_CACHE_CONTRACTS.md)
 - [ホスト契約と更新手順](docs/HOST_CONTRACTS.md)
 - [詳細ログの採取と集計](docs/CACHE_DIAGNOSTICS.md)
 - [GPU保持の設計](docs/GPU_FRAME_RETENTION.md)
