@@ -1,0 +1,33 @@
+{
+  "HostVersion": "4.56.1.0",
+  "Environment": "Windows 2022, GitHub-hosted runner, Basic Render Driver/WARP; generated CI projects",
+  "Files": [
+    {
+      "File": "gui-trace.jsonl.gz",
+      "Run": 36861076412,
+      "SourceCommit": "87eabcf2faa273156ec08dec4393f7dcbbe54959",
+      "RawBytes": 4568494,
+      "GzipBytes": 279644,
+      "RawSha256": "2d7030f39ea669c5b0942e15fdc7eecd9863ec35642f934967cf649c12d7375c",
+      "GzipSha256": "2a0b7dab12a066ab77e95b3c0166c6db0a9cff08fcbfdedfa50a2086d757602d"
+    },
+    {
+      "File": "host-trace.jsonl.gz",
+      "Run": 36865230266,
+      "SourceCommit": "45746b1a7ae65311f73c0069216fbf4e9057a725",
+      "RawBytes": 1093596,
+      "GzipBytes": 74682,
+      "RawSha256": "30d37451717d52cccaa8174acb730559ccffb694ab2e19f02cba0f9b15f412bf",
+      "GzipSha256": "22d3df3767dc26633bd925c9eb3a9af8898b474281f626522303839bbc149103"
+    },
+    {
+      "File": "performance-trace.jsonl.gz",
+      "Run": 36865230266,
+      "SourceCommit": "45746b1a7ae65311f73c0069216fbf4e9057a725",
+      "RawBytes": 523809,
+      "GzipBytes": 37764,
+      "RawSha256": "7bfcc4ceb274c3daf87261a9a515b1aeda12492105f54fc46690b83c68c2c344",
+      "GzipSha256": "f3c1eaa26920ed230e7d8cdf474f77cb754bedaf727af7aeb5515ce99f03ad68"
+    }
+  ]
+}

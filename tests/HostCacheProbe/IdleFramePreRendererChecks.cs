@@ -84,7 +84,7 @@ internal static class IdleFramePreRendererChecks
                     Vortice.Direct2D1.AntialiasMode.PerPrimitive, Vortice.Direct2D1.TextAntialiasMode.Default,
                     Vortice.Direct2D1.PrimitiveBlend.SourceOver, Vortice.Direct2D1.UnitMode.Dips,
                     liveScene.ID, liveScene.Timeline.ID, Stopwatch.GetTimestamp(), false]);
-            var prime = cache.GetMethod("TryPrimePreview", BindingFlags.Static | BindingFlags.NonPublic)!;
+            var prime = cache.GetMethod("TryPrimePreviewIfCurrent", BindingFlags.Static | BindingFlags.NonPublic)!;
             var harmony = new Harmony("ymm.tests.idle-pre-renderer.cancel");
             primeCalls = 0;
             harmony.Patch(prime, prefix: new HarmonyMethod(typeof(IdleFramePreRendererChecks), nameof(CountPrimePreview)));

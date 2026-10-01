@@ -6,7 +6,11 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../NVEncVideoWriterPlugin/FrameAdmissionHistory.cs" Link="FrameAdmissionHistory.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameCacheStore.cs" Link="FrameCacheStore.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/PreviewPerformance.cs" Link="PreviewPerformance.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/CacheMemoryPolicy.cs" Link="CacheMemoryPolicy.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/IdleFramePlan.cs" Link="IdleFramePlan.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameTimeKey.cs" Link="FrameTimeKey.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/PreviewRects.cs" Link="PreviewRects.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameDependencyIndex.cs" Link="FrameDependencyIndex.cs" />
@@ -16,6 +20,7 @@
     <Compile Include="../../NVEncVideoWriterPlugin/HostBaselines.cs" Link="HostBaselines.cs" />
     <Compile Include="../CacheChecks/StoreChecks.cs" Link="StoreChecks.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameModelSplit.cs" Link="FrameModelSplit.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/CacheTrace.cs" Link="CacheTrace.cs" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>
 </Project>

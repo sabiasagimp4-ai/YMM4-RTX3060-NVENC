@@ -1,0 +1,48 @@
+{
+  "HostVersion": "4.56.1.0",
+  "Environment": "Windows 2022, Basic Render Driver/WARP, generated CI projects",
+  "Files": [
+    {
+      "File": "gui-lru.jsonl.gz",
+      "Run": 36872282011,
+      "SourceCommit": "0630992c196c75bb190866c171c7a140c41f5aae",
+      "RawBytes": 6102681,
+      "GzipBytes": 375212,
+      "RawSha256": "0f171bd5ca3ee2f6581ec3c21db916be679cdb381998ebf7d725f7a959ef9b59",
+      "GzipSha256": "4bd0f46172a4df943d0d7db4430e4c91ebbfc272a5b01b40376a20f2899e7c4a"
+    },
+    {
+      "File": "gui-admission.jsonl.gz",
+      "Run": 36875046663,
+      "SourceCommit": "a91e1c2c7e6fe29358ef97d196275687d9c013f1",
+      "RawBytes": 6072411,
+      "GzipBytes": 372569,
+      "RawSha256": "ff106b93957325c7707f9758671f80081efeb2cd99e674cbef38e6abe442c067",
+      "GzipSha256": "15fa4d6a52dcd867958a5dfa09558a3732b7f0ac30bfb78c718f7b2b439be296"
+    },
+    {
+      "File": "gpu-hit.jsonl.gz",
+      "Run": 36875040153,
+      "SourceCommit": "a91e1c2c7e6fe29358ef97d196275687d9c013f1",
+      "RawBytes": 365623,
+      "GzipBytes": 24716,
+      "RawSha256": "fabde45a2bcfedbb6626b554d2eb979f4d82f46d7a69aee3ebddaa3ae4023926",
+      "GzipSha256": "fd96f018262be081914e1d54bc0079986a1ea33a7ee389d8826b8c50675c6bb4"
+    },
+    {
+      "File": "ram-hit.jsonl.gz",
+      "Run": 36875040153,
+      "SourceCommit": "a91e1c2c7e6fe29358ef97d196275687d9c013f1",
+      "RawBytes": 550366,
+      "GzipBytes": 39605,
+      "RawSha256": "3b207b172307c37968b521ad0c7fd95eb50a5283d15c65876ed923381859d8b6",
+      "GzipSha256": "738c79755fce3c22cff9554a4f329f53db9de10a28b587503a54a3ae8f45c646"
+    },
+    {
+      "File": "preview-performance.json",
+      "Run": 36875040153,
+      "SourceCommit": "a91e1c2c7e6fe29358ef97d196275687d9c013f1",
+      "RawSha256": "57c8a2cfe4c964a5bce48dc097949eb3d5e1bf66f4ebb8ef481d4e183e5a9a1d"
+    }
+  ]
+}
