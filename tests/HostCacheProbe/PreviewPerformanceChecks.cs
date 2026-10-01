@@ -226,7 +226,14 @@ internal static class PreviewPerformanceChecks
                 Update(0);
                 Check(TimelineFrameCache.GpuHits == priorGpuHits && TimelineFrameCache.GpuRetainedBytes == 0,
                     "Purge retained or reused an old generation");
-                Console.WriteLine("GPU retention: 8-frame pixel parity, budget eviction with active borrower, viewport/edit/purge invalidation OK");
+                TimelineFrameCache.CompletePendingStore(source);
+                Update(1); TimelineFrameCache.CompletePendingStore(source);
+                Update(0); Update(1);
+                Check(TimelineFrameCache.GpuRetainedBytes > 0, "Disposal fixture did not retain GPU frames");
+                source.Dispose(); source = null;
+                Check(TimelineFrameCache.GpuRetainedBytes == 0 && TimelineFrameCache.GpuBytes == 0,
+                    "Source disposal leaked retained or borrowed GPU images");
+                Console.WriteLine("GPU retention: 8-frame pixel parity, active-borrow eviction, viewport/edit/purge invalidation and source disposal OK");
             }
             finally { TimelineFrameCache.GpuRetentionEnabled = false; TimelineFrameCache.GpuRetentionBudget = oldGpuBudget; }
             var report = new { HostVersion = host.GetName().Version!.ToString(), HostMvid = host.ManifestModule.ModuleVersionId,
