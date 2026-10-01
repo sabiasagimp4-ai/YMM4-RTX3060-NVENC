@@ -354,17 +354,35 @@ internal static class FrameCacheKey
             AddPath(uri.LocalPath, paths);
         else if (resource.ResourceType == TimelineResourceType.Font)
         {
-            // Font family names alone do not identify installed font content.
-            var family = new System.Windows.Media.FontFamily(resource.Key["font://".Length..]);
-            foreach (var typeface in family.GetTypefaces())
-            {
-                if (!typeface.TryGetGlyphTypeface(out var glyph) || !glyph.FontUri.IsFile)
-                    throw new NotSupportedException("Unresolved font");
-                AddPath(glyph.FontUri.LocalPath, paths);
-            }
+            // Font family names alone do not identify installed font content: the files are dependencies.
+            foreach (string file in FontFiles(resource.Key["font://".Length..])) AddPath(file, paths);
         }
         else if (resource.ResourceType is TimelineResourceType.Video or TimelineResourceType.Image or TimelineResourceType.Audio or TimelineResourceType.CustomVoice or TimelineResourceType.Tachie)
             AddPath(resource.Key, paths);
+    }
+
+    // WPF resolves a family's typefaces again on every call, for each text and voice item of every description. The
+    // files only change when fonts are installed or removed, so they are kept for a short time; a font file whose
+    // content changes is still caught by its fingerprint.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string[]? Files, long Until)> fontFiles = new(StringComparer.Ordinal);
+    private const long FontFilesMilliseconds = 30_000;
+
+    private static string[] FontFiles(string family)
+    {
+        long now = Environment.TickCount64;
+        if (!fontFiles.TryGetValue(family, out var known) || now >= known.Until)
+        {
+            var files = new List<string>();
+            foreach (var typeface in new System.Windows.Media.FontFamily(family).GetTypefaces())
+            {
+                if (!typeface.TryGetGlyphTypeface(out var glyph) || !glyph.FontUri.IsFile) { files = null; break; }
+                files.Add(glyph.FontUri.LocalPath);
+            }
+            known = (files?.ToArray(), now + FontFilesMilliseconds);
+            if (fontFiles.Count > 4096) fontFiles.Clear();
+            fontFiles[family] = known;
+        }
+        return known.Files ?? throw new NotSupportedException("Unresolved font");
     }
 
     private static void Append(IncrementalHash hash, string value)
