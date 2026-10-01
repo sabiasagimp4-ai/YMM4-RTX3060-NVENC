@@ -143,8 +143,10 @@ internal static class FramePixelChecks
     // The settings switch the preview cache and the export cache separately (NVENC output is a third switch).
     private static void CheckSeparateSwitches(ITimelineSource source)
     {
+        // From an empty cache (the export frame is already stored by the checks before): render, then reuse.
         long Reused(TimelineSourceUsage usage)
         {
+            TimelineFrameCache.Clear();
             long hits = TimelineFrameCache.Hits;
             source.Update(TimeSpan.Zero, usage);
             source.Update(TimeSpan.Zero, usage);
