@@ -5,7 +5,7 @@ name: verify
 # tested here; Direct2D runs on the runner's basic/WARP adapter.
 on:
   push:
-    branches: ['ci/**']
+    branches: ['ci/nvenc-verify']
   workflow_dispatch:
 
 permissions:
