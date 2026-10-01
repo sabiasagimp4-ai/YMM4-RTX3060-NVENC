@@ -4,7 +4,9 @@
 #   Application Files/YukkuriMovieMaker_A_B_C_D/YukkuriMovieMaker.json -> {Files: [{File, Hash, Size}], HashAlgorithm}
 #   Application Files/YukkuriMovieMaker_A_B_C_D/<File> -> each file, checked against Hash (base64) and Size
 # Usage: fetch-ymm4.sh list
-#        fetch-ymm4.sh <version|latest> <destination> [--dlls]   (--dlls: only the top-level YukkuriMovieMaker*.dll)
+#        fetch-ymm4.sh <version|latest> <destination> [--dlls|--top]
+#          --dlls: only the top-level YukkuriMovieMaker*.dll; --top: the files of the application folder itself
+#          (not Resources and other subfolders, which hold voice data and dictionaries)
 # Prints the resolved version on the last line. For CI only; the binaries are never committed.
 set -euo pipefail
 BASE=${YMM4_UPDATE_BASE:-https://manjubox.net/Install/YukkuriMovieMaker_v4_Lite}
@@ -17,6 +19,7 @@ version=${1:?version or latest}
 dest=${2:?destination directory}
 filter='.'
 [ "${3:-}" = --dlls ] && filter='^YukkuriMovieMaker[^\\\\]*\.dll$'
+[ "${3:-}" = --top ] && filter='^[^\\\\]+$'
 [ "$version" = latest ] && version=$(versions | head -1)
 [[ "$version" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || { echo "bad version: $version" >&2; exit 1; }
 folder="$BASE/Application%20Files/YukkuriMovieMaker_${version//./_}"

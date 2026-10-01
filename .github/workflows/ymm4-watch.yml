@@ -86,7 +86,7 @@ jobs:
           enableCrossOsArchive: true
       - name: Download YMM4 (its own update protocol)
         if: steps.host.outputs.cache-hit != 'true'
-        run: tools/ci/fetch-ymm4.sh "$VERSION" host
+        run: tools/ci/fetch-ymm4.sh "$VERSION" host --top
       - name: Contracts verdict (what the plugin decides at startup)
         run: |
           dotnet build tools/HostFingerprint -c Release --nologo -v q
