@@ -6,10 +6,10 @@ param(
     [Parameter(Mandatory)] [string] $HostDir,
     [Parameter(Mandatory)] [string] $Project,
     [Parameter(Mandatory)] [string] $PluginDir,
-    [int] $SettleSeconds = 30
+    [int] $SettleSeconds = 48
 )
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName System.Drawing, System.Windows.Forms, UIAutomationClient, UIAutomationTypes
+Add-Type -AssemblyName System.Drawing, System.Windows.Forms, WindowsBase, UIAutomationClient, UIAutomationTypes
 Add-Type @'
 using System;
 using System.Collections.Generic;
@@ -27,6 +27,14 @@ public static class Win
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+    [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int t, bool repaint);
+    [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint x, uint y, uint d, UIntPtr e);
+    public static void Click(int x, int y)
+    {
+        SetCursorPos(x, y); System.Threading.Thread.Sleep(150);
+        mouse_event(2, 0, 0, 0, UIntPtr.Zero); System.Threading.Thread.Sleep(60); mouse_event(4, 0, 0, 0, UIntPtr.Zero);
+    }
     public struct RECT { public int Left, Top, Right, Bottom; }
     public static List<IntPtr> Windows(uint pid)
     {
@@ -77,6 +85,47 @@ function Texts($element, [string] $label) {
     $texts | Select-Object -First 200 | ForEach-Object { Write-Output "  $_" }
 }
 
+function List-Windows($process) {
+    Windows-Of $process | ForEach-Object { Write-Output ("window: [{0}] '{1}' {2}" -f $_.Class, $_.Title, $_.Rect) }
+}
+
+# Message boxes (e.g. "associate the YMM4 file extensions?"): answer No, or the only button there is.
+function Answer-Dialogs($process) {
+    foreach ($window in @(Windows-Of $process) | Where-Object { $_.Class -eq '#32770' }) {
+        $dialog = $ae::FromHandle($window.Handle)
+        Texts $dialog 'dialog'
+        $buttons = @($dialog.FindAll($scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition ($ae::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button))))
+        $button = $buttons | Where-Object { $_.Current.Name -match '^&?No' } | Select-Object -First 1
+        if (-not $button -and $buttons.Count -eq 1) { $button = $buttons[0] }
+        if ($button) {
+            Write-Output "answering '$($window.Title)' with '$($button.Current.Name)'"
+            $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        } else {
+            Write-Output "answering '$($window.Title)' with IDNO"
+            [Win]::PostMessage($window.Handle, 0x0111, [IntPtr]7, [IntPtr]::Zero) | Out-Null   # WM_COMMAND, IDNO
+        }
+    }
+}
+
+# The first element with this name that is on screen, in any window of the process (menus are windows of their own).
+function Find-Visible($process, [string] $name) {
+    $named = New-Object System.Windows.Automation.PropertyCondition ($ae::NameProperty, $name)
+    foreach ($window in @(Windows-Of $process) | Sort-Object Area) {
+        foreach ($element in $ae::FromHandle($window.Handle).FindAll($scope::Descendants, $named)) {
+            if (-not $element.Current.IsOffscreen -and -not $element.Current.BoundingRectangle.IsEmpty) { return $element }
+        }
+    }
+    return $null
+}
+
+function Click-At([int] $x, [int] $y, [string] $what) {
+    $element = $null
+    try { $element = $ae::FromPoint((New-Object System.Windows.Point $x, $y)) } catch { }
+    $under = if ($element) { "$($element.Current.ControlType.ProgrammaticName) '$($element.Current.Name)' $($element.Current.ClassName)" } else { '?' }
+    Write-Output "click $what at $x,$y (under the cursor: $under)"
+    [Win]::Click($x, $y)
+}
+
 # Install the plugin and turn the cache on (FrameCacheToolSettings).
 $pluginTarget = Join-Path $HostDir 'user\plugin\YMM4Rtx3060Nvenc'
 New-Item -ItemType Directory -Path $pluginTarget -Force | Out-Null
@@ -88,6 +137,10 @@ $version = (Get-Item (Join-Path $HostDir 'YukkuriMovieMaker.dll')).VersionInfo.F
 $settings = Join-Path $HostDir "user\setting\$version"
 New-Item -ItemType Directory -Path $settings -Force | Out-Null
 [IO.File]::WriteAllText((Join-Path $settings 'NVEncVideoWriterPlugin.FrameCacheToolSettings.json'), '{"Enabled":true}')
+# YMM4's own settings for a first start: this version was already seen (no "about" window) and the file extension
+# question was answered (no message box). Everything else keeps YMM4's defaults.
+[IO.File]::WriteAllText((Join-Path $settings 'YukkuriMovieMaker.Settings.YMMSettings.json'),
+    '{"Version":"' + $version + '","IsYMMPAssociationChecked":true,"IsYMMTAssociationChecked":true,"IsYMMEAssociationChecked":true}')
 try { Set-DisplayResolution -Width 1600 -Height 900 -Force -ErrorAction Stop } catch { Write-Output "resolution unchanged: $($_.Exception.Message)" }
 Write-Output "screen: $([System.Windows.Forms.Screen]::PrimaryScreen.Bounds)"
 
@@ -100,7 +153,7 @@ try {
     while ((Get-Date) -lt $deadline -and -not $process.HasExited) {
         Start-Sleep -Seconds 2
         $windows = @(Windows-Of $process)
-        $windows | ForEach-Object { Write-Output ("window: [{0}] '{1}' {2}" -f $_.Class, $_.Title, $_.Rect) }
+        List-Windows $process
         # The main window is titled "YukkuriMovieMaker v<version> ..."; wait until the project has loaded.
         $loading = $windows | Where-Object { $_.Title -match '^Loading' }
         $candidate = $windows | Where-Object { -not $loading -and $_.Class -like 'HwndWrapper*' -and $_.Title -match '^YukkuriMovieMaker v' } |
@@ -110,20 +163,7 @@ try {
             Write-Output "closing '$($window.Title)'"
             [Win]::PostMessage($window.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
         }
-        # Message boxes (e.g. "associate the YMM4 file extensions?"): answer No, or the only button there is.
-        foreach ($window in $windows | Where-Object { $_.Class -eq '#32770' }) {
-            $dialog = $ae::FromHandle($window.Handle)
-            Texts $dialog 'dialog'
-            $buttons = @($dialog.FindAll($scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition ($ae::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button))))
-            $button = $buttons | Where-Object { $_.Current.Name -match '^&?No' } | Select-Object -First 1
-            if (-not $button -and $buttons.Count -eq 1) { $button = $buttons[0] }
-            if ($button) {
-                Write-Output "answering '$($window.Title)' with '$($button.Current.Name)'"
-                $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-            } else {
-                [Win]::PostMessage($window.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
-            }
-        }
+        Answer-Dialogs $process
         if ($candidate -and @($windows | Where-Object { $_.Class -eq '#32770' }).Count -ne 0) { continue }
         if ($candidate) {
             foreach ($window in $windows | Where-Object { $_.Handle -ne $candidate.Handle -and $_.Area -gt 10000 -and $_.Class -like 'HwndWrapper*' }) {
@@ -139,10 +179,15 @@ try {
     if (-not $main) { Shot 'no-main-window'; throw 'The main window with the project did not appear' }
     [Win]::ShowWindow($main.Handle, 3) | Out-Null   # maximize
     [Win]::SetForegroundWindow($main.Handle) | Out-Null
-    Start-Sleep -Seconds 5
+    # A message box can still come after the main window.
+    for ($i = 0; $i -lt 4; $i++) { Start-Sleep -Seconds 2; Answer-Dialogs $process }
+    [Win]::SetForegroundWindow($main.Handle) | Out-Null
+    Start-Sleep -Seconds 1
+    List-Windows $process
     Shot 'opened'
 
-    # Open the plugin's tool from the tools menu.
+    # Open the plugin's tool from the tools menu. The menu entry's name is on a text inside the menu item.
+    $before = @(Windows-Of $process | ForEach-Object { $_.Handle })
     $root = $ae::FromHandle($main.Handle)
     $menuItems = $root.FindAll($scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition ($ae::ControlTypeProperty, [System.Windows.Automation.ControlType]::MenuItem)))
     $menuItems | ForEach-Object { Write-Output "menu: '$($_.Current.Name)'" }
@@ -150,24 +195,56 @@ try {
     if ($tools) {
         $tools.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
         Start-Sleep -Seconds 2
-        $named = New-Object System.Windows.Automation.PropertyCondition ($ae::NameProperty, $cacheTool)
-        $entry = $tools.FindFirst($scope::Descendants, $named)
-        if (-not $entry) { $entry = $root.FindFirst($scope::Descendants, $named) }
+        $entry = Find-Visible $process $cacheTool
         if ($entry) {
-            Write-Output "tool menu entry: $($entry.Current.ControlType.ProgrammaticName)"
+            $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+            $item = $entry
+            while ($item -and $item.Current.ControlType -ne [System.Windows.Automation.ControlType]::MenuItem) { $item = $walker.GetParent($item) }
             $pattern = $null
-            if ($entry.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) { $pattern.Invoke() }
-            elseif ($entry.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$pattern)) { $pattern.Toggle() }
+            if ($item -and $item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) {
+                Write-Output "invoking the tool's menu item ($($item.Current.ClassName))"
+                $pattern.Invoke()
+            } else {
+                $r = $entry.Current.BoundingRectangle
+                Click-At ([int]($r.X + $r.Width / 2)) ([int]($r.Y + $r.Height / 2)) "the tool's menu entry"
+            }
         } else { Write-Output 'tool menu entry not found' }
     } else { Write-Output 'tools menu not found' }
     Start-Sleep -Seconds 3
+    # Close the menu if it is still open (a small window without a title).
+    if (@(Windows-Of $process | Where-Object { $_.Title -eq '' -and $_.Area -lt 200000 -and $_.Class -like 'HwndWrapper*' }).Count -ne 0) {
+        Write-Output 'menu still open: Escape'
+        [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+        Start-Sleep -Seconds 1
+    }
+    # The tool opens as a window of its own: put it over the item property pane (right), off the preview and timeline.
+    $tool = Windows-Of $process | Where-Object { $before -notcontains $_.Handle -and $_.Class -like 'HwndWrapper*' -and $_.Area -gt 10000 } |
+        Sort-Object Area -Descending | Select-Object -First 1
+    if ($tool) {
+        Write-Output "tool window: '$($tool.Title)' $($tool.Rect)"
+        [Win]::MoveWindow($tool.Handle, 1196, 40, 404, 790, $true) | Out-Null
+    } else { Write-Output 'no new tool window' }
+    Start-Sleep -Seconds 3
+    List-Windows $process
     Shot 'tool-opened'
-    Get-Process -Id $process.Id | Out-Null
-    (Windows-Of $process) | ForEach-Object { Write-Output ("window: [{0}] '{1}' {2}" -f $_.Class, $_.Title, $_.Rect) }
 
-    # Idle: the pre-renderer fills the cache ahead of the playhead; the bars should turn green.
-    Start-Sleep -Seconds $SettleSeconds
+    # The idle pre-renderer renders ahead of the playhead while the preview has drawn recently (10 s). Selecting items
+    # on the timeline (Layer 00 and Layer 01, default layout at 1600x900) redraws it, the way editing does, and shows
+    # the selection rectangle that the plugin keeps on cached frames.
+    $points = @(@(180, 546), @(330, 578))
+    $end = (Get-Date).AddSeconds($SettleSeconds)
+    $n = 0
+    while ((Get-Date) -lt $end -and -not $process.HasExited) {
+        Answer-Dialogs $process
+        $point = $points[$n % 2]
+        Click-At $point[0] $point[1] "item $($n % 2)"
+        $n++
+        Start-Sleep -Seconds 8
+        if ($n -eq 3) { Shot 'prerendering' }
+    }
+    Start-Sleep -Seconds 3
     Shot 'settled'
+    List-Windows $process
     foreach ($window in Windows-Of $process) { Texts ($ae::FromHandle($window.Handle)) $window.Title }
 }
 finally {
