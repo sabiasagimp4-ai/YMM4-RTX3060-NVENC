@@ -45,6 +45,7 @@ internal static class Program
         CheckBundledTachie();
         CheckFramePreparesOwnFiles();
         CheckIdentitySeeds();
+        CheckCommunity();
         Type[][] readerTypes = FrameCacheKey.CaptureSourceReaderTypes();
         Check(FrameCacheKey.SourceReadersMatch(readerTypes), "Unchanged source reader stamp mismatched");
         Check(!FrameCacheKey.SourceReadersMatch([readerTypes[0].Append(typeof(Program)).ToArray(), readerTypes[1], readerTypes[2]]), "Source reader list change was not detected");
@@ -505,6 +506,15 @@ internal static class Program
         WaitForFrameKey(tracker, 10);
         Check(!tracker.TryCapture(305, out _, out _), "A frame showing a plugin's effect was cached");
         Check(WaitForFrameKey(tracker, 10) == at10, "A plugin's effect elsewhere disabled or changed unrelated frames");
+        // A plugin the user trusts in the settings is keyed like YMM4's own code; its MVID is part of every key.
+        KnownCode.Trusted = [typeof(Program).Assembly.GetName().Name!];
+        try
+        {
+            Check(WaitForFrameKey(tracker, 305) is { Length: > 0 }, "A trusted plugin's effect was not keyed");
+            Check(WaitForFrameKey(tracker, 10) != at10, "Trusting a plugin did not change the keys (its MVID must be part of them)");
+        }
+        finally { KnownCode.Trusted = []; }
+        Check(WaitForFrameKey(tracker, 10) == at10 && !tracker.TryCapture(305, out _, out _), "A plugin no longer trusted stayed keyed");
         timeline.Items = timeline.Items.Remove(foreignEffect);
         var foreignItem = new ForeignShapeItem { Frame = 300, Length = 10, Layer = 4 };
         timeline.Items = timeline.Items.Add(foreignItem);
@@ -664,6 +674,43 @@ internal static class Program
         WaitForFrameKey(tracker, 70);
         Check(!tracker.RendersNormally(70), "A frame without randomness any more stayed keyed by its objects");
         Console.WriteLine("Identity-seeded randomness: random moves and effects keyed by their objects (a copy differs), random text order not cached");
+    }
+
+    // The bundled Community plugin's namespaces read for 4.56.1.0 are keyed without trusting it; the others render
+    // normally (MotionBlur draws from the frames drawn before); CameraShake seeds with its own identity.
+    private static void CheckCommunity()
+    {
+        string hostDirectory = Path.GetDirectoryName(typeof(Scene).Assembly.Location)!;
+        string file = Path.Combine(hostDirectory, KnownCode.CommunityAssembly + ".dll");
+        if (!File.Exists(file)) { Console.WriteLine("Community check skipped: no Community plugin in the YMM4 folder"); return; }
+        var community = Assembly.LoadFrom(file);
+        if (!KnownCode.Capture().Identity.StartsWith("community:ac765de8", StringComparison.Ordinal))
+        {
+            Console.WriteLine("Community check skipped: not the audited 4.56.1.0 build (its effects render normally)");
+            return;
+        }
+        YukkuriMovieMaker.Plugin.Effects.IVideoEffect Effect(string name) => (YukkuriMovieMaker.Plugin.Effects.IVideoEffect)Activator.CreateInstance(
+            community.GetType("YukkuriMovieMaker.Plugin.Community.Effect.Video." + name, true)!, nonPublic: true)!;
+        ShapeItem With(int frame, YukkuriMovieMaker.Plugin.Effects.IVideoEffect effect)
+        {
+            var shape = new ShapeItem { Frame = frame, Length = 30, Layer = frame / 30 };
+            shape.VideoEffects = shape.VideoEffects.Add(effect);
+            return shape;
+        }
+        var lensType = community.GetType("YukkuriMovieMaker.Plugin.Community.Shape.LensFlare.LensFlareShapePlugin", true)!;
+        var lens = (YukkuriMovieMaker.Plugin.Shape.IShapePlugin)Activator.CreateInstance(lensType, nonPublic: true)!;
+        var timeline = new Timeline();
+        var scenes = new Scenes(false);
+        scenes.AddScene(timeline);
+        timeline.Items = timeline.Items.Add(With(0, Effect("Bloom.BloomEffect"))).Add(With(60, Effect("MotionBlur.MotionBlurEffect")))
+            .Add(With(120, Effect("CameraShake.CameraShakeEffect")))
+            .Add(new ShapeItem { Frame = 180, Length = 30, Layer = 6, ShapeType2 = lensType, ShapeParameter = lens.CreateShapeParameter(null) });
+        using var tracker = new KeyDependencyTracker(new Scene(timeline, scenes, []));
+        Check(WaitForFrameKey(tracker, 10) is { Length: > 0 } && !tracker.RendersNormally(10), "A Community effect that was read was not keyed");
+        Check(!tracker.TryCapture(70, out _, out _), "Community MotionBlur (draws from the frames drawn before) was keyed");
+        Check(WaitForFrameKey(tracker, 130) is { Length: > 0 } && tracker.RendersNormally(130), "Community CameraShake was not keyed by its identity");
+        Check(WaitForFrameKey(tracker, 190) is { Length: > 0 }, "A Community shape that was read was not keyed");
+        Console.WriteLine("Community (4.56.1.0): read effects and shapes keyed, MotionBlur rendered normally, CameraShake keyed by its identity");
     }
 
     private static bool SkipLoader() => false;

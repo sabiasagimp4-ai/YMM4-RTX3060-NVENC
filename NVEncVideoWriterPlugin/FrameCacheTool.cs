@@ -60,6 +60,14 @@ public sealed class FrameCacheToolSettings : SettingsBase<FrameCacheToolSettings
         set => Set(ref settingsVersion, value);
     }
 
+    // Plugin assemblies (names) whose effects, shapes and items the cache may key like YMM4's own (KnownCode).
+    private string[] trustedPlugins = [];
+    public string[] TrustedPlugins
+    {
+        get => trustedPlugins;
+        set => Set(ref trustedPlugins, value ?? []);
+    }
+
     public override SettingsCategory Category => SettingsCategory.Other;
     public override string Name => "RTX 3060 NVENC・描画キャッシュ";
     public override bool HasSettingView => true;
@@ -85,6 +93,7 @@ public sealed class PluginSettingsPanel : StackPanel
     private readonly CheckBox export = new() { Content = "動画出力で描画キャッシュを使う（YMM4 標準・NVENC どちらの出力形式でも）", Margin = new Thickness(0, 4, 0, 0) };
     private readonly CheckBox nvenc = new() { Content = "RTX 3060 NVENC 出力を使う", Margin = new Thickness(0, 4, 0, 0) };
     private readonly TextBlock note = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0), Foreground = SystemColors.GrayTextBrush };
+    private readonly StackPanel plugins = new() { Margin = new Thickness(12, 2, 0, 0) };
 
     public PluginSettingsPanel()
     {
@@ -95,17 +104,59 @@ public sealed class PluginSettingsPanel : StackPanel
         Children.Add(export);
         Children.Add(nvenc);
         Children.Add(note);
+        Children.Add(new TextBlock
+        {
+            Text = "外部プラグインを使うフレームもキャッシュする（チェックしたプラグインだけ）",
+            Margin = new Thickness(0, 10, 0, 0),
+            FontWeight = FontWeights.SemiBold,
+        });
+        Children.Add(new TextBlock
+        {
+            Text = "プラグインがアイテムの設定と時刻だけで描くことを前提にします（After Effects のプラグインと同じ前提）。時刻・乱数・報告しないファイル・前のフレーム・他のアイテムを使うプラグインでは、古い絵や違う絵が出ることがあります。そのときはチェックを外し、ツール「描画キャッシュ」の「保存したキャッシュを消去」を押してください。プラグインを更新するとそのフレームは作り直します。YMM4 同梱の Community プラグインは、中身を確認したものだけ自動で対象です。",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 2, 0, 0),
+            Foreground = SystemColors.GrayTextBrush,
+        });
+        Children.Add(plugins);
         var settings = FrameCacheToolSettings.Default;
         Bind(preview, nameof(FrameCacheToolSettings.PreviewCache));
         Bind(export, nameof(FrameCacheToolSettings.ExportCache));
         Bind(nvenc, nameof(FrameCacheToolSettings.NvencOutput));
         // YMM4's settings window creates a panel each time it opens: listen only while shown.
         System.ComponentModel.PropertyChangedEventHandler changed = (_, _) => Dispatcher.BeginInvoke(Refresh);
-        Loaded += (_, _) => { settings.PropertyChanged += changed; Refresh(); };
+        Loaded += (_, _) => { settings.PropertyChanged += changed; Refresh(); ListPlugins(); };
         Unloaded += (_, _) => settings.PropertyChanged -= changed;
 
         void Bind(CheckBox box, string property) => box.SetBinding(ToggleButton.IsCheckedProperty,
             new System.Windows.Data.Binding(property) { Source = settings, Mode = System.Windows.Data.BindingMode.TwoWay });
+    }
+
+    // One check box per plugin assembly a user added, and per trusted name no longer loaded (so it can be removed).
+    private void ListPlugins()
+    {
+        var settings = FrameCacheToolSettings.Default;
+        plugins.Children.Clear();
+        var found = KnownCode.ExternalPlugins().ToList();
+        foreach (string name in settings.TrustedPlugins)
+            if (!found.Any(plugin => string.Equals(plugin.Assembly, name, StringComparison.OrdinalIgnoreCase)))
+                found.Add((name, "読み込まれていません"));
+        if (found.Count == 0)
+        {
+            plugins.Children.Add(new TextBlock { Text = "外部プラグインは読み込まれていません。", Foreground = SystemColors.GrayTextBrush });
+            return;
+        }
+        foreach (var (assembly, provides) in found)
+        {
+            var box = new CheckBox
+            {
+                Content = $"{assembly}（{provides}）",
+                IsChecked = settings.TrustedPlugins.Contains(assembly, StringComparer.OrdinalIgnoreCase),
+                Margin = new Thickness(0, 2, 0, 0),
+            };
+            box.Checked += (_, _) => settings.TrustedPlugins = [.. settings.TrustedPlugins.Append(assembly).Distinct(StringComparer.OrdinalIgnoreCase)];
+            box.Unchecked += (_, _) => settings.TrustedPlugins = [.. settings.TrustedPlugins.Where(name => !string.Equals(name, assembly, StringComparison.OrdinalIgnoreCase))];
+            plugins.Children.Add(box);
+        }
     }
 
     private void Refresh()

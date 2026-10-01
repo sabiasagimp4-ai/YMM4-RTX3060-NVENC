@@ -98,7 +98,9 @@ internal static class FrameCacheKey
             if (sourceReaders.Length != 3) return Bypass("読み込みプラグインの状態を確認できません。", out reason);
             // Files are read by the file source readers (fonts by DirectWrite). With a reader whose code was not
             // read, the items that read files are rendered normally.
-            bool customReaders = sourceReaders.SelectMany(readers => readers).Any(type => !IsBuiltInSourceReader(type));
+            // YMM4's code, the audited Community namespaces and the plugins the user trusts (KnownCode).
+            var code = KnownCode.Capture();
+            bool customReaders = sourceReaders.SelectMany(readers => readers).Any(type => !IsBuiltInSourceReader(type) && !code.Knows(type));
 
             var asterisk = AsteriskWordSets();
 
@@ -123,7 +125,7 @@ internal static class FrameCacheKey
                     var (sharedResources, tachieResources) = SplitCharacter<IResourceItem>(character);
                     foreach (var resource in sharedResources.SelectMany(part => part.GetResources()))
                     {
-                        if (Note(ClassifyResource(resource.Key), ref audioForeign)) foreignCharacters.Add(character);
+                        if (Note(ClassifyResource(resource.Key, code), ref audioForeign)) foreignCharacters.Add(character);
                         AddResource(resource, ownPaths, characterResources, ownFonts);
                     }
                     foreach (var resource in tachieResources.SelectMany(part => part.GetResources())) AddResource(resource, Unused(), characterResources, null);
@@ -153,8 +155,9 @@ internal static class FrameCacheKey
                     // plugin's effect, brush or transition: only the frames showing such an item are rendered normally
                     // (CompositeItemPicker draws an item only at its own frames; transitions and scene items are
                     // followed by FrameDependencyIndex).
-                    bool uncacheable = tachie || item.GetType().Assembly != typeof(Scene).Assembly
-                        || item is ShapeItem shape && !IsBuiltIn(shape.ShapeType2)
+                    bool uncacheable = tachie || !code.Knows(item.GetType())
+                        || item is ShapeItem shape && !code.Knows(shape.ShapeType2)
+                        || item is TransitionItem transition && transition.TransitionType is { } transitionType && !code.Knows(transitionType)
                         || GetCharacter(item) is { } character && foreignCharacters.Contains(character);
                     bool session = false;
                     try
@@ -166,7 +169,7 @@ internal static class FrameCacheKey
                         }
                         foreach (var resource in item.GetResources())
                         {
-                            uncacheable |= Note(ClassifyResource(resource.Key), ref audioForeign);
+                            uncacheable |= Note(ClassifyResource(resource.Key, code), ref audioForeign);
                             AddResource(resource, tachie ? Unused() : itemPaths, itemResources, itemFonts);
                         }
                         // Randomness YMM4 seeds with object identities (see IdentitySeeds).
@@ -225,6 +228,8 @@ internal static class FrameCacheKey
                 VoiceUpsampling = settings.GetVoiceUpsamplingMode(),
                 // Background image, texture and image brush files load as video or image by these (GetFileType).
                 FileTypes = FileTypes(),
+                // Which code beyond YMM4's own may draw (audited Community build, trusted plugins with their MVIDs).
+                Code = code.Identity,
                 loaders.VideoFileSourcePlugins,
                 loaders.ImageFileSourcePlugins,
                 loaders.AudioFileSourcePlugins,
@@ -241,7 +246,7 @@ internal static class FrameCacheKey
             // Runtime types in polymorphic parameters and effects are checked while the model is split (strings stay
             // strings, so distinct texts never serialize to the same token): a plugin's type disables the item,
             // timeline or character holding it; elsewhere (project-wide settings) the whole project.
-            if (!FrameModelSplit.TrySplit(model, scene.Timeline.ID, characterResources, ClassifyType, out var split, out string? rejected))
+            if (!FrameModelSplit.TrySplit(model, scene.Timeline.ID, characterResources, (type, path) => ClassifyType(type, path, code), out var split, out string? rejected))
                 return Bypass("プロジェクト全体の描画設定に外部プラグインの型があります: " + rejected, out reason);
             if (split.ForeignItems.Length != rootItems.Length) throw new InvalidDataException("Serialized root items do not match the timeline");
             for (int i = 0; i < rootItems.Length; i++)
@@ -286,12 +291,12 @@ internal static class FrameCacheKey
     // parameters only reach TachieSource (tachie frames are never cached), and voice parameters only make the voice's
     // audio, a fingerprinted file (no video renderer reads them: TimelineSource, JimakuSource, 4.56.1.0). Audio
     // effects only reach frames that read audio.
-    private static FrameModelSplit.TypeUse ClassifyType(string type, IReadOnlyList<string> path)
+    private static FrameModelSplit.TypeUse ClassifyType(string type, IReadOnlyList<string> path, KnownCode code)
     {
         string assembly = type.Split(',').Skip(1).FirstOrDefault()?.Trim() ?? string.Empty;
         // YMM4's noise audio effect draws from an unseeded Random (ColoredNoiseAudioStream, BrownNoiseStream).
         if (type.StartsWith("YukkuriMovieMaker.Project.Effects.Audio.NoiseEffect,", StringComparison.Ordinal)) return FrameModelSplit.TypeUse.AudioOnly;
-        if (assembly is "YukkuriMovieMaker" or "YukkuriMovieMaker.Plugin") return FrameModelSplit.TypeUse.Known;
+        if (code.Knows(type.Split(',')[0].Trim(), assembly)) return FrameModelSplit.TypeUse.Known;
         if (path.Any(property => property == "VoiceParameter"
             || property.StartsWith("Tachie", StringComparison.Ordinal) && property.EndsWith("Parameter", StringComparison.Ordinal)))
             return FrameModelSplit.TypeUse.Known;
@@ -300,12 +305,15 @@ internal static class FrameCacheKey
 
     // Resources naming a plugin's code: ve:// (video effect), ae:// (audio effect), plugin:// (shape, transition,
     // brush, voice, tachie). Voice and tachie plugins draw nothing a cached frame shows (see ClassifyType).
-    private static FrameModelSplit.TypeUse ClassifyResource(string resource)
+    private static FrameModelSplit.TypeUse ClassifyResource(string resource, KnownCode code)
     {
         int scheme = resource.IndexOf("://", StringComparison.Ordinal);
         if (scheme < 0 || resource[..scheme] is not ("ve" or "ae" or "plugin")) return FrameModelSplit.TypeUse.Known;
         string typeName = resource[(scheme + 3)..];
         if (IsBuiltIn(typeof(Scene).Assembly.GetType(typeName) ?? typeof(CacheProvider).Assembly.GetType(typeName))) return FrameModelSplit.TypeUse.Known;
+        var pluginType = PluginLoader.UserVideoEffects.Concat(PluginLoader.UserAudioEffects).FirstOrDefault(type => type.FullName == typeName)
+            ?? PluginLoader.UserPlugins.FirstOrDefault(plugin => plugin.GetType().FullName == typeName)?.GetType();
+        if (code.Knows(pluginType)) return FrameModelSplit.TypeUse.Known;
         if (resource.StartsWith("ae://", StringComparison.Ordinal)) return FrameModelSplit.TypeUse.AudioOnly;
         if (resource.StartsWith("plugin://", StringComparison.Ordinal)
             && PluginLoader.UserPlugins.FirstOrDefault(plugin => plugin.GetType().FullName == typeName)

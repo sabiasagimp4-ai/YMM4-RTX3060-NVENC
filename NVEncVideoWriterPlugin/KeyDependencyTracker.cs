@@ -35,6 +35,8 @@ internal sealed class KeyDependencyTracker : IDisposable
     private string cachedModel = string.Empty;
     private string[] cachedPaths = [];
     private Type[][] cachedSourceReaders = [[], [], []];
+    // KnownCode.Generation the description was made with: trusting another plugin describes the project again.
+    private long cachedCode = -1;
     private Guid[] cachedParents = [];
     private IReadOnlyDictionary<string, FileFingerprint>? fingerprints;
     private Task<(IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason)>? fingerprintTask;
@@ -93,7 +95,7 @@ internal sealed class KeyDependencyTracker : IDisposable
     }
 
     private sealed record Description(bool Eligible, string Model, string[] Paths, FrameDependencyIndex? Frames, string Reason,
-        Type[][] SourceReaders, long Ticks);
+        Type[][] SourceReaders, long Ticks, long Code);
 
     private bool Capture(int? frame, out KeyCapture? capture, out string reason, bool settle, bool background = false)
     {
@@ -104,7 +106,7 @@ internal sealed class KeyDependencyTracker : IDisposable
             if (disposed) return false;
             // Only when still current: repeating it would keep refreshing the settle window forever.
             if (cachedRevision >= 0 && cachedRevision == Revision && (!scene.ParentScenes.AsSpan().SequenceEqual(cachedParents)
-                || !FrameCacheKey.SourceReadersMatch(cachedSourceReaders))) Invalidate();
+                || !FrameCacheKey.SourceReadersMatch(cachedSourceReaders) || cachedCode != KnownCode.Generation)) Invalidate();
             long before = Revision;
             if (cachedRevision != before)
             {
@@ -195,8 +197,9 @@ internal sealed class KeyDependencyTracker : IDisposable
         Type[][] sourceReaders;
         try { sourceReaders = FrameCacheKey.CaptureSourceReaderTypes(); }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { return null; }
+        long code = KnownCode.Generation;
         bool eligible = FrameCacheKey.TryDescribe(scene, sourceReaders, out string model, out string[] paths, out var frames, out string reason);
-        return new(eligible, model, paths, frames, reason, sourceReaders, System.Diagnostics.Stopwatch.GetTimestamp() - started);
+        return new(eligible, model, paths, frames, reason, sourceReaders, System.Diagnostics.Stopwatch.GetTimestamp() - started, code);
     }
 
     // Under gate: adopts a description of revision `current` unless the project or the readers changed since.
@@ -214,6 +217,7 @@ internal sealed class KeyDependencyTracker : IDisposable
         cachedFrames = description.Frames;
         frameKeys.Clear();
         cachedSourceReaders = description.SourceReaders;
+        cachedCode = description.Code;
         cachedParents = scene.ParentScenes.ToArray();
         cachedReason = description.Reason;
         cachedEligible = description.Eligible && description.Frames is not null;

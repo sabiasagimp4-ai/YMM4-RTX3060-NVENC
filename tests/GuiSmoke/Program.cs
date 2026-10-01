@@ -58,6 +58,11 @@ internal static class Program
             timeline.Items = timeline.Items.Add(number);
         }
         else Console.WriteLine("No Community number shape in this YMM4; the project has no plugin item");
+        // A Community effect whose code was read (KnownCode): the second shape's frames stay cached.
+        if (File.Exists(communityFile)
+            && Assembly.LoadFrom(communityFile).GetType("YukkuriMovieMaker.Plugin.Community.Effect.Video.Bloom.BloomEffect") is { } bloomType
+            && Activator.CreateInstance(bloomType, nonPublic: true) is YukkuriMovieMaker.Plugin.Effects.IVideoEffect bloom)
+            second.VideoEffects = second.VideoEffects.Add(bloom);
         var scenes = new Scenes(false);
         scenes.AddScene(timeline);
         var project = new YukkuriMovieMaker.Project.Project(0, scenes, output, string.Empty, new Dictionary<string, SerializableToolState>());

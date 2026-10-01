@@ -29,6 +29,7 @@ internal static class PluginSettings
         bool available = HostIntegration.CacheAvailable;
         TimelineFrameCache.SetEnabled(available && settings.PreviewCache, available && settings.ExportCache);
         IdleFramePreRenderer.Enabled = available && settings.PreviewCache;
+        KnownCode.Trusted = settings.TrustedPlugins;
         // Switched on after start: hook the export now, before the next one begins.
         if (settings.NvencOutput) HostIntegration.EnsureExportHooks(out _);
     }
