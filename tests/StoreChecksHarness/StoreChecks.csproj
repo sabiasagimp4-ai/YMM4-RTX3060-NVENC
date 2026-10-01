@@ -15,5 +15,7 @@
     <Compile Include="../../NVEncVideoWriterPlugin/HostContracts.cs" Link="HostContracts.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/HostBaselines.cs" Link="HostBaselines.cs" />
     <Compile Include="../CacheChecks/StoreChecks.cs" Link="StoreChecks.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/FrameModelSplit.cs" Link="FrameModelSplit.cs" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>
 </Project>

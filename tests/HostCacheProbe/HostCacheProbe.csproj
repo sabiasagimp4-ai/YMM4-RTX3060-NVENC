@@ -23,6 +23,7 @@
     <Compile Include="..\..\NVEncVideoWriterPlugin\CacheBarLayout.cs" Link="CacheBarLayout.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameCacheStore.cs" Link="FrameCacheStore.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameCacheKey.cs" Link="FrameCacheKey.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\FrameModelSplit.cs" Link="FrameModelSplit.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\KeyDependencyTracker.cs" Link="KeyDependencyTracker.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameDependencyIndex.cs" Link="FrameDependencyIndex.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FileDependencyLease.cs" Link="FileDependencyLease.cs" />

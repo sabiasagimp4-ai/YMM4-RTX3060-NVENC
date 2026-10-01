@@ -237,29 +237,21 @@ internal static class FrameCacheKey
         List<(SortedSet<string> Paths, SortedSet<string> Resources, bool Uncacheable)> rootDependencies,
         SortedSet<string> characterPaths, SortedSet<string> characterResources, SortedSet<string> nestedPaths, bool nestedUncacheable)
     {
-        var timelines = (JArray)parsed["Timelines"]!;
-        var root = timelines.OfType<JObject>().Single(t => Guid.TryParse(t["ID"]?.ToString(), out var id) && id == rootId);
-        var rootTokens = (JArray)root["Items"]!;
-        if (rootTokens.Count != rootItems.Length) throw new InvalidDataException("Serialized root items do not match the timeline");
-        var nested = new JArray(timelines.Where(t => !ReferenceEquals(t, root)).Select(t => t.DeepClone()));
-        var global = (JObject)parsed.DeepClone();
-        var rootSettings = (JObject)root.DeepClone();
-        rootSettings.Remove("Items");
-        global["Timelines"] = new JArray(rootSettings);
-        global["Resources"] = new JArray(characterResources);
+        var (global, nested, texts) = FrameModelSplit.Split(parsed, rootId, characterResources);
+        if (texts.Length != rootItems.Length) throw new InvalidDataException("Serialized root items do not match the timeline");
         var entries = new FrameDependencyIndex.Entry[rootItems.Length];
         for (int i = 0; i < rootItems.Length; i++)
         {
             var item = rootItems[i];
-            string text = rootTokens[i].ToString(Newtonsoft.Json.Formatting.None);
+            string text = texts[i];
             string identity = item.GetType().FullName + "\n" + text + "\n" + string.Join("\n", rootDependencies[i].Resources);
             // Scene items render other timelines; audio spectrum shapes read the timeline's or a scene's audio.
             bool wide = item is SceneItem || text.Contains("AudioSpectrum", StringComparison.Ordinal);
             entries[i] = new(item.Frame, item.Length, item is TransitionItem, wide, FrameDependencyIndex.Hash(identity),
                 rootDependencies[i].Paths.ToArray(), rootDependencies[i].Uncacheable);
         }
-        return new FrameDependencyIndex(FrameDependencyIndex.Hash(global.ToString(Newtonsoft.Json.Formatting.None)), characterPaths,
-            FrameDependencyIndex.Hash(nested.ToString(Newtonsoft.Json.Formatting.None)), nestedPaths, entries, nestedUncacheable);
+        return new FrameDependencyIndex(FrameDependencyIndex.Hash(global), characterPaths,
+            FrameDependencyIndex.Hash(nested), nestedPaths, entries, nestedUncacheable);
     }
 
     internal static Character? GetCharacter(IItem item) => item switch
