@@ -68,6 +68,15 @@ internal static class FrameDependencyChecks
         var nestedFont = new FrameDependencyIndex("G", [], "N", [], [a, d], nestedUncacheable: true);
         Check(nestedFont.For(10).Cacheable && !nestedFont.For(105).Cacheable, "An uncacheable nested timeline must only disable scene frames");
 
+        // An item keyed by object identities (random seeds) makes only its frames session frames, and a transition
+        // after it; one in another timeline, only scene frames.
+        var shaking = new Entry(300, 10, false, false, "R", [], Session: true);
+        var withShaking = Index(a, shaking, t with { Frame = 310, Length = 5 });
+        Check(!withShaking.For(10).Session && withShaking.For(305).Session && withShaking.For(312).Session && withShaking.For(305).Cacheable,
+            "Session items must only mark their frames (and transitions after them), and stay cacheable");
+        var nestedShaking = new FrameDependencyIndex("G", [], "N", [], [a, d], nestedSession: true);
+        Check(!nestedShaking.For(10).Session && nestedShaking.For(105).Session, "A session nested timeline must only mark scene frames");
+
         long frames = 0;
         var big = Index(Enumerable.Range(0, 5000).Select(i => new Entry(i * 10, 15, false, false, "I" + i, [])).ToArray());
         var clock = System.Diagnostics.Stopwatch.StartNew();

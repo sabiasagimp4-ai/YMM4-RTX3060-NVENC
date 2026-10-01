@@ -18,13 +18,15 @@ internal sealed class FrameDependencyIndex
 
     // Uncacheable: the item uses something that cannot be fingerprinted (an uninstalled font, a remote file) or
     // renders from asynchronous state (a tachie's lip sync); only the frames that contain it are rendered normally.
+    // Session: its hash holds identity hashes of the objects YMM4 seeds randomness with, so its frames are keyed only
+    // for these objects (this process, not a clone of the scene).
     internal readonly record struct Entry(int Frame, int Length, bool IsTransition, bool IsWide, string Hash, string[] Files,
-        bool Uncacheable = false)
+        bool Uncacheable = false, bool Session = false)
     {
         internal bool Contains(long frame) => Frame <= frame && frame < (long)Frame + Length;
     }
 
-    internal sealed record Dependencies(string Content, string[] Files, bool Wide, bool Cacheable = true);
+    internal sealed record Dependencies(string Content, string[] Files, bool Wide, bool Cacheable = true, bool Session = false);
 
     private readonly Entry[] entries;
     private readonly string globalHash;
@@ -32,14 +34,16 @@ internal sealed class FrameDependencyIndex
     private readonly string[] globalFiles;
     private readonly string[] nestedFiles;
     private readonly bool nestedUncacheable;
+    private readonly bool nestedSession;
     private readonly long[] boundaries;
     private readonly Dictionary<int, Dependencies> segments = [];
     private Dependencies? whole;
 
     internal FrameDependencyIndex(string globalHash, IEnumerable<string> globalFiles, string nestedHash,
-        IEnumerable<string> nestedFiles, IEnumerable<Entry> entries, bool nestedUncacheable = false)
+        IEnumerable<string> nestedFiles, IEnumerable<Entry> entries, bool nestedUncacheable = false, bool nestedSession = false)
     {
         this.nestedUncacheable = nestedUncacheable;
+        this.nestedSession = nestedSession;
         this.globalHash = globalHash;
         this.nestedHash = nestedHash;
         this.globalFiles = Distinct(globalFiles);
@@ -112,7 +116,8 @@ internal sealed class FrameDependencyIndex
         var files = globalFiles.Concat(included.SelectMany(i => entries[i].Files));
         if (wide) files = files.Concat(nestedFiles);
         bool cacheable = !included.Any(i => entries[i].Uncacheable) && !(wide && nestedUncacheable);
-        return new Dependencies(content.ToString(), Distinct(files), wide, cacheable);
+        bool session = included.Any(i => entries[i].Session) || wide && nestedSession;
+        return new Dependencies(content.ToString(), Distinct(files), wide, cacheable, session);
     }
 
     internal static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));

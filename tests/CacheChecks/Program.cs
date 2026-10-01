@@ -44,6 +44,7 @@ internal static class Program
         CheckBundledReaders();
         CheckBundledTachie();
         CheckFramePreparesOwnFiles();
+        CheckIdentitySeeds();
         Type[][] readerTypes = FrameCacheKey.CaptureSourceReaderTypes();
         Check(FrameCacheKey.SourceReadersMatch(readerTypes), "Unchanged source reader stamp mismatched");
         Check(!FrameCacheKey.SourceReadersMatch([readerTypes[0].Append(typeof(Program)).ToArray(), readerTypes[1], readerTypes[2]]), "Source reader list change was not detected");
@@ -627,6 +628,44 @@ internal static class Program
         timeline.Items = timeline.Items.Remove(scene).Remove(early).Remove(late);
         Console.WriteLine("Per-frame keys: unrelated frames survive edits, boundaries, settings, per-frame files, scene items OK");
     }
+    // YMM4 seeds random moves and some effects with object identities, so a copy of the project (another session, the
+    // idle pre-renderer's clone) draws them otherwise: their frames are keyed by the objects, other frames are not.
+    // Text revealed in random order (seeded by YMM4's text source) renders normally.
+    private static void CheckIdentitySeeds()
+    {
+        var timeline = new Timeline();
+        var scenes = new Scenes(false);
+        scenes.AddScene(timeline);
+        var still = new ShapeItem { Frame = 0, Length = 30, Layer = 0 };
+        var shaking = new ShapeItem { Frame = 60, Length = 30, Layer = 1 };
+        shaking.X.AnimationType = YukkuriMovieMaker.Commons.AnimationType.ランダム移動;
+        var shaken = new ShapeItem { Frame = 120, Length = 30, Layer = 2 };
+        var randomMove = (YukkuriMovieMaker.Plugin.Effects.IVideoEffect)Activator.CreateInstance(
+            typeof(Scene).Assembly.GetType("YukkuriMovieMaker.Project.Effects.RandomMoveEffect", true)!, nonPublic: true)!;
+        shaken.VideoEffects = shaken.VideoEffects.Add(randomMove);
+        var randomText = new TextItem { Frame = 180, Length = 30, Layer = 3, Text = "abc", Font = "Arial", DisplayInterval = 100,
+            DisplayDirection = TypewriterAnimationDirection.Random };
+        timeline.Items = timeline.Items.Add(still).Add(shaking).Add(shaken).Add(randomText);
+        var scene = new Scene(timeline, scenes, []);
+        using var tracker = new KeyDependencyTracker(scene);
+        string stillKey = WaitForFrameKey(tracker, 10), shakingKey = WaitForFrameKey(tracker, 70), shakenKey = WaitForFrameKey(tracker, 130);
+        Check(!tracker.RendersNormally(10) && tracker.RendersNormally(70) && tracker.RendersNormally(130),
+            "Frames keyed by object identities were not told apart (the idle pre-renderer must pass them)");
+        Check(!tracker.TryCapture(190, out _, out _), "Text revealed in random order was cached");
+        Check(WaitForFrameKey(tracker, 70) == shakingKey && WaitForFrameKey(tracker, 130) == shakenKey, "The same objects changed their keys");
+        var copyTimeline = YukkuriMovieMaker.Json.Json.LoadFromText<Timeline>(YukkuriMovieMaker.Json.Json.GetJsonText(timeline))!;
+        var copyScenes = new Scenes(false);
+        copyScenes.AddScene(copyTimeline);
+        using var copy = new KeyDependencyTracker(new Scene(copyTimeline, copyScenes, []));
+        Check(WaitForFrameKey(copy, 10) == stillKey, "A copy of the project changed a frame without randomness");
+        Check(WaitForFrameKey(copy, 70) != shakingKey, "A random move kept its key in a copy of the project");
+        Check(WaitForFrameKey(copy, 130) != shakenKey, "A random effect kept its key in a copy of the project");
+        shaking.X.AnimationType = YukkuriMovieMaker.Commons.AnimationType.なし;
+        WaitForFrameKey(tracker, 70);
+        Check(!tracker.RendersNormally(70), "A frame without randomness any more stayed keyed by its objects");
+        Console.WriteLine("Identity-seeded randomness: random moves and effects keyed by their objects (a copy differs), random text order not cached");
+    }
+
     private static bool SkipLoader() => false;
 
     // Stand-ins for a plugin's code: types outside the host assemblies.

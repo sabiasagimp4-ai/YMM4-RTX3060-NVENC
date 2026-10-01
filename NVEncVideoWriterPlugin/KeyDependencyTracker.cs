@@ -82,13 +82,14 @@ internal sealed class KeyDependencyTracker : IDisposable
 
     // True when the current description renders this frame normally whatever its files' state (a tachie, a plugin's
     // code, a file or font that cannot be verified), or a file of it was overwritten while YMM4 runs (HostContent).
-    // It stays so until an edit (or a restart), so the idle pre-renderer passes it.
+    // It stays so until an edit (or a restart), so the idle pre-renderer passes it. So does a frame keyed by the live
+    // objects' identities (Dependencies.Session): a clone of the scene draws its randomness otherwise.
     internal bool RendersNormally(int frame)
     {
         lock (gate)
             return !disposed && cachedRevision >= 0 && cachedRevision == Revision && cachedEligible
                 && cachedFrames is { } frames && frames.For(frame) is var dependencies
-                && (!dependencies.Cacheable || dependencies.Files.Any(HostContent.Changed));
+                && (!dependencies.Cacheable || dependencies.Session || dependencies.Files.Any(HostContent.Changed));
     }
 
     private sealed record Description(bool Eligible, string Model, string[] Paths, FrameDependencyIndex? Frames, string Reason,

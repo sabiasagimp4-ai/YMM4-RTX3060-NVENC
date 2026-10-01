@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Collections.Immutable;
 using System.IO;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -92,8 +93,8 @@ internal static class FrameCacheKey
             var nestedPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             var nestedResources = new SortedSet<string>(StringComparer.Ordinal);
             var rootItems = scene.Timeline.Items.ToArray();
-            var rootDependencies = new List<(SortedSet<string> Paths, SortedSet<string> Resources, bool Uncacheable)>(rootItems.Length);
-            bool nestedUncacheable = false, audioForeign = false;
+            var rootDependencies = new List<(SortedSet<string> Paths, SortedSet<string> Resources, bool Uncacheable, bool Session)>(rootItems.Length);
+            bool nestedUncacheable = false, nestedSession = false, audioForeign = false;
             if (sourceReaders.Length != 3) return Bypass("読み込みプラグインの状態を確認できません。", out reason);
             // Files are read by the file source readers (fonts by DirectWrite). With a reader whose code was not
             // read, the items that read files are rendered normally.
@@ -155,6 +156,7 @@ internal static class FrameCacheKey
                     bool uncacheable = tachie || item.GetType().Assembly != typeof(Scene).Assembly
                         || item is ShapeItem shape && !IsBuiltIn(shape.ShapeType2)
                         || GetCharacter(item) is { } character && foreignCharacters.Contains(character);
+                    bool session = false;
                     try
                     {
                         if (!tachie)
@@ -166,6 +168,14 @@ internal static class FrameCacheKey
                         {
                             uncacheable |= Note(ClassifyResource(resource.Key), ref audioForeign);
                             AddResource(resource, tachie ? Unused() : itemPaths, itemResources, itemFonts);
+                        }
+                        // Randomness YMM4 seeds with object identities (see IdentitySeeds).
+                        var seeds = IdentitySeeds(item, out bool randomOrder);
+                        uncacheable |= randomOrder;
+                        if (seeds.Count != 0)
+                        {
+                            itemResources.Add("identity://" + string.Join(",", seeds));
+                            session = true;
                         }
                         if (item is TextItem or VoiceItem)
                         {
@@ -185,12 +195,13 @@ internal static class FrameCacheKey
                     if (customReaders && itemPaths.Any(path => !itemFonts.Contains(path))) uncacheable = true;
                     paths.UnionWith(itemPaths);
                     resources.UnionWith(itemResources);
-                    if (root) rootDependencies.Add((itemPaths, itemResources, uncacheable));
+                    if (root) rootDependencies.Add((itemPaths, itemResources, uncacheable, session));
                     else
                     {
                         nestedPaths.UnionWith(itemPaths);
                         nestedResources.UnionWith(itemResources);
                         nestedUncacheable |= uncacheable;
+                        nestedSession |= session;
                     }
                 }
             }
@@ -238,7 +249,18 @@ internal static class FrameCacheKey
                 bool foreignCharacter = GetCharacter(rootItems[i]) is { } character
                     && split.ForeignCharacters.Any(index => ReferenceEquals(characters[index], character));
                 if (split.ForeignItems[i] || foreignCharacter)
-                    rootDependencies[i] = (rootDependencies[i].Paths, rootDependencies[i].Resources, true);
+                    rootDependencies[i] = (rootDependencies[i].Paths, rootDependencies[i].Resources, true, rootDependencies[i].Session);
+                // A random move the identity walk did not reach (GetAnimatables does not list it): not keyed.
+                if (!rootDependencies[i].Session && split.RootItems[i].Contains(RandomMoveJson, StringComparison.Ordinal))
+                    rootDependencies[i] = (rootDependencies[i].Paths, rootDependencies[i].Resources, true, false);
+            }
+            nestedUncacheable |= !nestedSession && split.Nested.Contains(RandomMoveJson, StringComparison.Ordinal);
+            // A character's random move the crawl did not reach: its voice items are not keyed.
+            if (split.Global.Contains(RandomMoveJson, StringComparison.Ordinal) && !characters.Any(c => Seeds(c).Count != 0))
+            {
+                for (int i = 0; i < rootItems.Length; i++)
+                    if (rootItems[i] is VoiceItem) rootDependencies[i] = (rootDependencies[i].Paths, rootDependencies[i].Resources, true, rootDependencies[i].Session);
+                nestedUncacheable |= timelines.Where(t => !ReferenceEquals(t, scene.Timeline)).SelectMany(t => t.Items).Any(item => item is VoiceItem);
             }
             nestedUncacheable |= split.NestedForeign || timelines.Where(t => !ReferenceEquals(t, scene.Timeline)).SelectMany(t => t.Items)
                 .Any(item => GetCharacter(item) is { } character && split.ForeignCharacters.Any(index => ReferenceEquals(characters[index], character)));
@@ -249,7 +271,7 @@ internal static class FrameCacheKey
             // Wide frames (scene items, audio spectrum) read other timelines and the audio: a plugin's audio effect
             // anywhere reaches them.
             frames = DescribeFrames(split, rootItems, rootDependencies, characterPaths, nestedPaths, nestedResources,
-                nestedUncacheable || audioForeign || split.AudioForeign);
+                nestedUncacheable || audioForeign || split.AudioForeign, nestedSession);
             dependencies = paths.ToArray();
             return true;
         }
@@ -267,6 +289,8 @@ internal static class FrameCacheKey
     private static FrameModelSplit.TypeUse ClassifyType(string type, IReadOnlyList<string> path)
     {
         string assembly = type.Split(',').Skip(1).FirstOrDefault()?.Trim() ?? string.Empty;
+        // YMM4's noise audio effect draws from an unseeded Random (ColoredNoiseAudioStream, BrownNoiseStream).
+        if (type.StartsWith("YukkuriMovieMaker.Project.Effects.Audio.NoiseEffect,", StringComparison.Ordinal)) return FrameModelSplit.TypeUse.AudioOnly;
         if (assembly is "YukkuriMovieMaker" or "YukkuriMovieMaker.Plugin") return FrameModelSplit.TypeUse.Known;
         if (path.Any(property => property == "VoiceParameter"
             || property.StartsWith("Tachie", StringComparison.Ordinal) && property.EndsWith("Parameter", StringComparison.Ordinal)))
@@ -305,6 +329,105 @@ internal static class FrameCacheKey
 
     private static SortedSet<string> Unused() => new(StringComparer.OrdinalIgnoreCase);
 
+    // YMM4 seeds some randomness with an object's identity hash (GetHashCode is not overridden, 4.56.1.0): random-move
+    // animations (Animation.GetValue), the Random*Effect family (RandomEffectBase) and the RandomDuplicator, Crash,
+    // InOutCrash, RandomLine, InOutRandomLine and Noise (unique seed) effects, and the Community effects listed below.
+    // They draw otherwise in another process, after the project is loaded again, and in the idle pre-renderer's clone:
+    // the item's key holds those objects' identity hashes (its frames are keyed for these objects only). Text revealed
+    // or hidden in random order is seeded by YMM4's text source, created again when the item comes back into the frame
+    // (TextSource, JimakuSource): those items render normally (randomOrder).
+    internal static List<int> IdentitySeeds(IItem item, out bool randomOrder)
+    {
+        randomOrder = item switch
+        {
+            TextItem text => text.DisplayDirection == TypewriterAnimationDirection.Random || text.HideDirection == TypewriterAnimationDirection.Random,
+            VoiceItem voice when voice.JimakuVisibility == JimakuVisibility.Custom =>
+                voice.DisplayDirection == TypewriterAnimationDirection.Random || voice.HideDirection == TypewriterAnimationDirection.Random,
+            VoiceItem voice => voice.Character is { } owner
+                && (owner.DisplayDirection == TypewriterAnimationDirection.Random || owner.HideDirection == TypewriterAnimationDirection.Random),
+            _ => false,
+        };
+        return GetCharacter(item) is { } character ? Seeds(item, character) : Seeds(item);
+    }
+
+    private static List<int> Seeds(params object[] roots)
+    {
+        var seeds = new SortedSet<int>();
+        var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var pending = new Stack<object>(roots);
+        while (pending.Count != 0)
+        {
+            object value = pending.Pop();
+            if (!visited.Add(value)) continue;
+            if (value is Animation animation)
+            {
+                if (animation.AnimationType == AnimationType.ランダム移動) seeds.Add(RuntimeHelpers.GetHashCode(animation));
+                continue;
+            }
+            var type = value.GetType();
+            if (IsIdentitySeeded(type))
+            {
+                seeds.Add(RuntimeHelpers.GetHashCode(value));
+                // NoiseEffect with a unique seed uses its parameter object's hash.
+                if (type.GetProperty("NoiseParameter")?.GetValue(value) is { } noise) seeds.Add(RuntimeHelpers.GetHashCode(noise));
+            }
+            foreach (var child in value is Character owner ? CharacterParts(owner) : Animatables(value))
+                if (child is not null) pending.Push(child);
+        }
+        return [.. seeds];
+    }
+
+    // Character has no GetAnimatables: its animations and effect lists (subtitles, audio, tachie).
+    private static IEnumerable<object?> CharacterParts(Character character)
+    {
+        foreach (var property in typeof(Character).GetProperties(BindingFlags.Instance | BindingFlags.Public))
+        {
+            if (property.GetIndexParameters().Length != 0 || !property.CanRead) continue;
+            object? value;
+            try { value = property.GetValue(character); }
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { continue; }
+            if (value is Animation or YukkuriMovieMaker.Commons.IAnimatable) yield return value;
+            else if (value is System.Collections.IEnumerable list and not string)
+                foreach (var part in list) if (part is YukkuriMovieMaker.Commons.IAnimatable) yield return part;
+        }
+    }
+
+    // How a random move serializes (StringEnumConverter): the safety net for one the walk did not reach.
+    private const string RandomMoveJson = "\"ランダム移動\"";
+
+    private static readonly string[] IdentitySeededEffects =
+    [
+        "YukkuriMovieMaker.Project.Effects.RandomDuplicatorEffect",
+        "YukkuriMovieMaker.Project.Effects.CrashEffect",
+        "YukkuriMovieMaker.Project.Effects.InOutCrashEffect",
+        "YukkuriMovieMaker.Project.Effects.RandomLineEffect",
+        "YukkuriMovieMaker.Project.Effects.InOutRandomLineEffect",
+        "YukkuriMovieMaker.Project.Effects.NoiseEffect",
+        "YukkuriMovieMaker.Plugin.Community.Effect.Video.CameraShake.CameraShakeEffect",
+        "YukkuriMovieMaker.Plugin.Community.Effect.Video.RectangleGlitchNoise.RectangleGlitchNoiseEffect",
+        "YukkuriMovieMaker.Plugin.Community.Effect.Video.StripeGlitchNoise.StripeGlitchNoiseEffect",
+        "YukkuriMovieMaker.Plugin.Community.Effect.Video.WaveClipping.WaveClippingEffect",
+    ];
+
+    private static bool IsIdentitySeeded(Type type)
+    {
+        if (IdentitySeededEffects.Contains(type.FullName)) return true;
+        for (var current = type.BaseType; current is not null; current = current.BaseType)
+            if (current.FullName == "YukkuriMovieMaker.Project.Effects.RandomEffectBase") return true;
+        return false;
+    }
+
+    // The animatable parts YMM4 itself enumerates (the protected GetAnimatables of items, effects and parameters).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, MethodInfo?> animatables = new();
+
+    private static IEnumerable<object?> Animatables(object value)
+    {
+        var method = animatables.GetOrAdd(value.GetType(), static type =>
+            type.GetMethod("GetAnimatables", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, Type.EmptyTypes) is { } found
+                && typeof(System.Collections.IEnumerable).IsAssignableFrom(found.ReturnType) ? found : null);
+        return method?.Invoke(value, null) is System.Collections.IEnumerable children ? children.Cast<object?>() : [];
+    }
+
     internal static bool IsMidi(string path) =>
         Path.GetExtension(path).Equals(".mid", StringComparison.OrdinalIgnoreCase) || Path.GetExtension(path).Equals(".midi", StringComparison.OrdinalIgnoreCase);
 
@@ -314,8 +437,9 @@ internal static class FrameCacheKey
     // Splits the serialized model into the part every frame depends on (everything but timeline items), the
     // other timelines (only read by frames with a scene item), and one hash per root timeline item.
     private static FrameDependencyIndex DescribeFrames(FrameModelSplit.Parts split, IItem[] rootItems,
-        List<(SortedSet<string> Paths, SortedSet<string> Resources, bool Uncacheable)> rootDependencies,
-        SortedSet<string> characterPaths, SortedSet<string> nestedPaths, SortedSet<string> nestedResources, bool nestedUncacheable)
+        List<(SortedSet<string> Paths, SortedSet<string> Resources, bool Uncacheable, bool Session)> rootDependencies,
+        SortedSet<string> characterPaths, SortedSet<string> nestedPaths, SortedSet<string> nestedResources, bool nestedUncacheable,
+        bool nestedSession)
     {
         var (global, nested, texts) = (split.Global, split.Nested, split.RootItems);
         if (texts.Length != rootItems.Length) throw new InvalidDataException("Serialized root items do not match the timeline");
@@ -328,10 +452,10 @@ internal static class FrameCacheKey
             // Scene items render other timelines; audio spectrum shapes read the timeline's or a scene's audio.
             bool wide = item is SceneItem || text.Contains("AudioSpectrum", StringComparison.Ordinal);
             entries[i] = new(item.Frame, item.Length, item is TransitionItem, wide, FrameDependencyIndex.Hash(identity),
-                rootDependencies[i].Paths.ToArray(), rootDependencies[i].Uncacheable);
+                rootDependencies[i].Paths.ToArray(), rootDependencies[i].Uncacheable, rootDependencies[i].Session);
         }
         return new FrameDependencyIndex(FrameDependencyIndex.Hash(global), characterPaths,
-            FrameDependencyIndex.Hash(nested + "\n" + string.Join("\n", nestedResources)), nestedPaths, entries, nestedUncacheable);
+            FrameDependencyIndex.Hash(nested + "\n" + string.Join("\n", nestedResources)), nestedPaths, entries, nestedUncacheable, nestedSession);
     }
 
     internal static Character? GetCharacter(IItem item) => item switch
