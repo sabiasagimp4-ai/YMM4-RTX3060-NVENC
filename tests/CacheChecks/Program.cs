@@ -572,6 +572,34 @@ internal static class Program
         Check(WaitForFrameKey(tracker, 305) == taggedFrame, "Removing the asterisk word set did not restore the text frames");
         timeline.Items = timeline.Items.Remove(tagged);
 
+        // The MIDI reader YMM4 ships synthesizes with its own settings and SoundFonts: with a MIDI file in the
+        // project, frames that read audio (an audio spectrum shape) render normally, the others stay cached.
+        var spectrumType = typeof(Scene).Assembly.GetType("YukkuriMovieMaker.Shape.AudioSpectrumShapePlugin", true)!;
+        var spectrumPlugin = (YukkuriMovieMaker.Plugin.Shape.IShapePlugin)Activator.CreateInstance(spectrumType, nonPublic: true)!;
+        var spectrum = new ShapeItem { Frame = 300, Length = 10, Layer = 4, ShapeType2 = spectrumType, ShapeParameter = spectrumPlugin.CreateShapeParameter(null) };
+        timeline.Items = timeline.Items.Add(spectrum);
+        WaitForFrameKey(tracker, 305);
+        string midiFolder = Path.Combine(Path.GetTempPath(), "ymm-midi-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(midiFolder);
+        string midiFile = Path.Combine(midiFolder, "song.mid");
+        try
+        {
+            File.WriteAllBytes(midiFile, "MThd"u8.ToArray());
+            var midi = new AudioItem { FilePath = midiFile, Frame = 400, Length = 10, Layer = 5 };
+            timeline.Items = timeline.Items.Add(midi);
+            WaitForFrameKey(tracker, 10);
+            Check(!tracker.TryCapture(305, out _, out _) && tracker.RendersNormally(305), "An audio spectrum frame was cached with a MIDI file in the project");
+            Check(WaitForFrameKey(tracker, 10) == at10, "A MIDI file disabled or changed frames that do not read audio");
+            timeline.Items = timeline.Items.Remove(midi);
+            Check(WaitForFrameKey(tracker, 305) is { Length: > 0 }, "The audio spectrum frame did not become cacheable again without the MIDI file");
+        }
+        finally
+        {
+            timeline.Items = timeline.Items.Remove(spectrum);
+            if (File.Exists(midiFile)) File.Delete(midiFile);
+            Directory.Delete(midiFolder);
+        }
+
         var scene = new SceneItem { Frame = 200, Length = 10, Layer = 3 };
         timeline.Items = timeline.Items.Add(scene);
         string sceneFrame = WaitForFrameKey(tracker, 205);

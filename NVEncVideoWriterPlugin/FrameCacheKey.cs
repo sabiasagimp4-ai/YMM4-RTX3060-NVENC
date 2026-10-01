@@ -243,6 +243,9 @@ internal static class FrameCacheKey
             nestedUncacheable |= split.NestedForeign || timelines.Where(t => !ReferenceEquals(t, scene.Timeline)).SelectMany(t => t.Items)
                 .Any(item => GetCharacter(item) is { } character && split.ForeignCharacters.Any(index => ReferenceEquals(characters[index], character)));
             if (paths.Count > MaximumFiles) return Bypass("外部素材の数がキャッシュ検査の上限を超えています。", out reason);
+            // The MIDI reader YMM4 ships (Community) synthesizes with its own settings and SoundFont files, which the
+            // key does not hold: frames that read audio render normally.
+            audioForeign |= paths.Any(IsMidi);
             // Wide frames (scene items, audio spectrum) read other timelines and the audio: a plugin's audio effect
             // anywhere reaches them.
             frames = DescribeFrames(split, rootItems, rootDependencies, characterPaths, nestedPaths, nestedResources,
@@ -301,6 +304,9 @@ internal static class FrameCacheKey
             .Concat(new object?[] { character.TachieCharacterParameter, character.TachieDefaultItemParameter, character.TachieDefaultFaceParameter }.OfType<T>()));
 
     private static SortedSet<string> Unused() => new(StringComparer.OrdinalIgnoreCase);
+
+    internal static bool IsMidi(string path) =>
+        Path.GetExtension(path).Equals(".mid", StringComparison.OrdinalIgnoreCase) || Path.GetExtension(path).Equals(".midi", StringComparison.OrdinalIgnoreCase);
 
     internal static string[] FileTypes() =>
         SettingsBase<FileSettings>.Default.FileExtensions.Select(extension => $"{extension.Extention}={extension.FileType}").ToArray();
