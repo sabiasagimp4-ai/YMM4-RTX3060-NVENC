@@ -81,12 +81,14 @@ internal sealed class KeyDependencyTracker : IDisposable
         Capture(frame, out capture, out reason, settle, background);
 
     // True when the current description renders this frame normally whatever its files' state (a tachie, a plugin's
-    // code, a file or font that cannot be verified). It stays so until an edit, so the idle pre-renderer passes it.
+    // code, a file or font that cannot be verified), or a file of it was overwritten while YMM4 runs (HostContent).
+    // It stays so until an edit (or a restart), so the idle pre-renderer passes it.
     internal bool RendersNormally(int frame)
     {
         lock (gate)
             return !disposed && cachedRevision >= 0 && cachedRevision == Revision && cachedEligible
-                && cachedFrames is { } frames && !frames.For(frame).Cacheable;
+                && cachedFrames is { } frames && frames.For(frame) is var dependencies
+                && (!dependencies.Cacheable || dependencies.Files.Any(HostContent.Changed));
     }
 
     private sealed record Description(bool Eligible, string Model, string[] Paths, FrameDependencyIndex? Frames, string Reason,
@@ -157,6 +159,12 @@ internal sealed class KeyDependencyTracker : IDisposable
                 var known = fingerprints;
                 if (lease!.Fingerprints.All(pair => known.TryGetValue(pair.Key, out var own) && own == pair.Value))
                 {
+                    if (!HostContent.Matches(lease.Fingerprints))
+                    {
+                        lease.Dispose();
+                        reason = HostContent.Reason;
+                        return false;
+                    }
                     capture = new KeyCapture(this, KeyFor(dependencies, files), cachedModel, before, cachedParents, lease);
                     reason = string.Empty;
                     return true;
@@ -371,6 +379,9 @@ internal sealed class KeyDependencyTracker : IDisposable
     // leases its files and compares their stamps, and the finished pass replaces the whole dictionary.
     private void Publish(IReadOnlyDictionary<string, FileFingerprint> added)
     {
+        // The project's files as verified in the background, usually before YMM4 reads them for a frame: a later
+        // overwrite is seen even if the first frame using the file is keyed after it.
+        HostContent.Matches(added);
         lock (gate)
         {
             if (disposed) return;

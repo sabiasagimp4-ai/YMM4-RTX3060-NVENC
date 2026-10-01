@@ -151,10 +151,15 @@ internal static class Program
             File.SetLastWriteTimeUtc(imageFile, modified);
             using (var stale = new KeyDependencyTracker(scene, verified))
                 Check(!stale.TryGetKey(out _, out _), "A tracker seeded before a same-metadata replacement accepted the replaced file");
-            // Another tracker (export, the other preview) verifies the new content first, so the shared index knows it.
+            // Overwritten while YMM4 runs: its sources may show the old or the new content, so it renders normally.
+            Check(!tracker.TryGetKey(out _, out _), "Changed external assets did not bypass while rehashing");
+            Check(WaitForBypass(() => (tracker.TryGetKey(out _, out string why), why)).Contains("上書き", StringComparison.Ordinal),
+                "A file overwritten while YMM4 runs was keyed");
+            // After a restart its content is what YMM4 shows. Another tracker (export, the other preview) verifies the
+            // new content first, so the shared index knows it.
+            HostContent.Forget(imageFile);
             using (var other = new KeyDependencyTracker(scene))
                 Check(WaitForKey(other) != fileKey, "A new tracker kept the key of the replaced content");
-            Check(!tracker.TryGetKey(out _, out _), "Changed external assets did not bypass while rehashing");
             Check(WaitForKey(tracker) != fileKey, "Same-size same-timestamp content replacement failed to invalidate");
             File.Delete(imageFile);
             Check(!tracker.TryGetKey(out _, out string missingReason) && missingReason.Length != 0, "Missing file did not bypass safely");
@@ -370,6 +375,22 @@ internal static class Program
         throw new TimeoutException($"Frame {frame} key did not become ready: {reason}");
     }
 
+    // Waits until a capture that keeps failing gives a settled reason (the background verification has finished).
+    private static string WaitForBypass(Func<(bool Keyed, string Reason)> capture)
+    {
+        long deadline = Environment.TickCount64 + 15_000;
+        string last = string.Empty;
+        do
+        {
+            var (keyed, reason) = capture();
+            if (keyed) throw new InvalidOperationException("Expected the frame to render normally");
+            if (reason.Contains("上書き", StringComparison.Ordinal)) return reason;
+            last = reason;
+            Thread.Sleep(5);
+        } while (Environment.TickCount64 < deadline);
+        return last;
+    }
+
     // Per-frame keys: an edit changes only the frames of the edited item, and a frame only needs its own files.
     private static void CheckFrameKeys(Timeline timeline, Timeline nested, KeyDependencyTracker tracker)
     {
@@ -436,6 +457,17 @@ internal static class Program
             Check(tracker.TryCapture(10, out var unaffected, out string reason), "A frame without the missing file bypassed: " + reason);
             unaffected!.Dispose();
             File.WriteAllBytes(imageFile, [5, 6, 7, 9]);
+            // Overwritten while YMM4 runs: only the frames using it render normally, and the idle pre-renderer passes
+            // them; the original content again does not undo it (a source may have read the new one meanwhile).
+            Check(WaitForBypass(() => (tracker.TryCapture(105, out _, out string why), why)).Contains("上書き", StringComparison.Ordinal)
+                && tracker.RendersNormally(105), "A frame whose file was overwritten while YMM4 runs was keyed");
+            Check(WaitForFrameKey(tracker, 10) == at10, "An overwritten file elsewhere disabled or changed unrelated frames");
+            File.WriteAllBytes(imageFile, [5, 6, 7, 8]);
+            Check(WaitForBypass(() => (tracker.TryCapture(105, out _, out string why), why)).Contains("上書き", StringComparison.Ordinal),
+                "A file restored to its first content was keyed again while YMM4 runs");
+            File.WriteAllBytes(imageFile, [5, 6, 7, 9]);
+            WaitForBypass(() => (tracker.TryCapture(105, out _, out string why), why)); // the new content is verified
+            HostContent.Forget(imageFile); // as after a restart
             Check(WaitForFrameKey(tracker, 105) != withFile, "Replaced file content did not change the frame key");
             timeline.Items = timeline.Items.Remove(image);
         }

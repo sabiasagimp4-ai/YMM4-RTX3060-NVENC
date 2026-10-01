@@ -188,3 +188,39 @@ internal sealed class FileDependencyLease : IDisposable
     private static extern bool GetVolumeInformationByHandleW(SafeFileHandle handle, StringBuilder? volumeName, int volumeNameSize,
         out uint serial, out uint maximumComponentLength, out uint flags, StringBuilder fileSystemName, int fileSystemNameSize);
 }
+
+// YMM4 reads a material when an item's source is created and keeps it while the item stays in the frames it draws:
+// ImageSource and VideoSource read the file again only when the path changes, the HLSL file effect likewise, and the
+// source is created again when the item comes back into the frame (TimelineSource.UpdateResources, 4.56.1.0). After
+// a file is overwritten in place, YMM4 shows its old or its new content depending on that, so neither fingerprint
+// keys what it draws. A file seen with other content than first seen in this process renders its frames normally
+// until YMM4 restarts (also if the content returns: a source may have read the other one meanwhile). Not seen: a
+// file overwritten before this process first verified it while YMM4 had already read it (the cache was off).
+internal static class HostContent
+{
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> first = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> changed = new(StringComparer.OrdinalIgnoreCase);
+
+    internal const string Reason = "素材ファイルが YMM4 の起動後に上書きされました。YMM4 は読み込み済みの内容と新しい内容のどちらも表示し得るため、このファイルを使うフレームは YMM4 を再起動するまで通常描画します。";
+
+    // False when a file has had other content than first seen in this process; its frames then render normally.
+    internal static bool Matches(IReadOnlyDictionary<string, FileFingerprint> files)
+    {
+        bool all = true;
+        foreach (var pair in files)
+        {
+            if (first.GetOrAdd(pair.Key, pair.Value.ContentHash) != pair.Value.ContentHash) changed.TryAdd(pair.Key, 0);
+            all &= !changed.ContainsKey(pair.Key);
+        }
+        return all;
+    }
+
+    internal static bool Changed(string path) => changed.ContainsKey(path);
+
+    // Tests: as after a restart of YMM4, the file's current content is what it shows.
+    internal static void Forget(string path)
+    {
+        first.TryRemove(path, out _);
+        changed.TryRemove(path, out _);
+    }
+}
