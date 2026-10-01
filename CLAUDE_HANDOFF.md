@@ -4,6 +4,20 @@
 
 ## 最初に読むこと
 
+### 2026-10-01 追記（2）— 一時停止中・プレビュー上マウス時のキャッシュと選択枠
+
+ユーザー要望:「キャッシュ中でも選択枠とかが出るようにできませんか」。`PreviewRects.cs`（新規）と `TimelineFrameCache.cs` で対応しました。
+
+- **キー**: Playing と Paused の描画差は `ShowOnlyPreviewEffect` だけです（立ち絵の口パクは元々対象外）。モデル JSON にその名前が無ければ両方とも usage キー `Preview` を使い、あれば分けます（緩い文字列一致で fail-closed）。キー版は `pixels-v5`。
+- **選択枠（`TimelineItemRects`）**: host が NeedRects 付きで通常描画したフレームの rects を、controller を配列化して `PreviewRects`（source ごと、LRU 512）に保存します。キャッシュ世代か project revision（`KeyCapture.Revision`）が変わると全破棄します。
+  - live 再利用（同じフレームの再 Update、hover 変化など）で rects が同じキー・revision のものなら、そのまま残します（Keep）。
+  - キャッシュ表示時は記憶した rects を復元します（Restore）。
+  - rects が無い場合: 一時停止中かつマウスがプレビュー外なら、キャッシュから即時表示して「欠落」を記録します（Defer）。`TimelineVideoPlayer.Edit()` の prefix が、その位置で 100 ms 静止したら（マウスがプレビュー上なら直ちに）`isTimelineChanged = true` を1回だけ立て、host が通常描画して rects を作ります。それ以外（再生中、マウスがプレビュー上）は通常描画です。
+  - rects の再利用は、確認済みの host（4.56.1.0 の MVID、`List<(IVideoItem, RawRectF, Vector2[], DrawDescription, IEnumerable<VideoController>)>` 型一致）だけで有効です。`Edit`/`isTimelineChanged`/`isMouseOverPreviewArea` が無い版では Defer しません。
+  - メッシュ変形（`MeshDeformation`）の操作点は、編集にならない（revision が変わらない）点選択状態を snapshot するため、これを含むプロジェクトでは rects を再利用しません。ほかの組込み controller（CenterPoint、DrawPosition、Crop、Mask、Radial*、Crash、MotionTracking、Line shape）は model と frame だけに依存することを 4.56.1.0 のコードで確認しました。
+- 一時停止中に通常描画したフレームの画素は保存しません（従来どおり保存は idle 先読みと出力のみ）。一時停止中のシークが速くなるのは idle 先読み済みの範囲です。
+- テスト: `tests/StoreChecksHarness/PreviewRectsChecks.cs`（Linux で成功）、`tests/HostCacheProbe/PreviewRectChecks.cs`（実 host の TimelineSource と player の stand-in で Keep/Restore/編集後の破棄/ShowOnlyPreviewEffect の分離/Defer→1回の refresh/マウス上と再生中の通常描画を確認。Windows で実行）。
+
 ### 2026-09-30 追記（Claude Code クラウドセッション、branch `claude/frame-render-readiness`、draft PR #1）
 
 環境: Linux クラウドコンテナ（GPU・YMM4 本体なし）。.NET SDK 10.0.112 / Harmony 2.4.2 / ilspycmd 11.1 を導入済みです。YMM4 DLL はこの環境に届いていません（manjubox.net は遮断されています）。
@@ -67,7 +81,7 @@
 - (e) `TimelineSource.Update` は Parallel.ForEach / AsParallel / Task.Run を使い、EC は flow します。ただし**先読み（`PrefetchResources`）は約1秒先のアイテムを Task.Run で作って Update するため、フレーム終了後にデコードすることがあります**。採用するフレームが自分の scope で再度 Update するので、完了済み scope 上のデコードは無視するよう変更しました。
 - (f) `CreateFileAsync` は `start = max(0, min(min(from,to), len-1))`、`end = min(len, max(from,to))` で、1フレームにつき `WriteVideo` を1回呼びます。`HostExportScope.ExpectedFrames` と一致します。writer は最初の await より前に作られます。
 - (g) `TimelineVideoPlayer` は `Update` を `Draw()`（BeginDraw）の**前**に呼びます。Postfix でのキャプチャは描画と衝突しません。
-  - 再生中は `NeedTimelineItemRects = isMouseOverPreviewArea`、一時停止中は常に true で usage は `Paused` です。このため、**マウスがプレビュー上にある再生中と一時停止中のシークは、キャッシュ対象外**です。
+  - 再生中は `NeedTimelineItemRects = isMouseOverPreviewArea`、一時停止中は常に true で usage は `Paused` です。このため当時は**マウスがプレビュー上にある再生中と一時停止中のシークがキャッシュ対象外**でした（上の「追記（2）」で対応）。
 - (h) wrapper の Update は小さいですが、内側のデコーダーの Update は大きく、内側でも同じ状態検査をするので安全側です。
 - (i) host 自身が `TimelineSource.Update` の最後に毎回 `CacheProvider.Clear()` を呼びます。`Hit()` の Clear はこれと同じなので問題ありません。
 - (j) `YukkuriMovieMaker.ItemEditor.TimelineSourceAndDevices` は player と同じく `new GraphicsDevices()` を使います。内部 field `source` も想定どおりです。
