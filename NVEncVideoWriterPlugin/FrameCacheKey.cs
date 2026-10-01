@@ -141,7 +141,7 @@ internal static class FrameCacheKey
             var loaders = SettingsBase<PluginLoaderSettings>.Default;
             var snapshot = new
             {
-                Format = 1,
+                Format = 2,
                 Host = typeof(Scene).Assembly.ManifestModule.ModuleVersionId,
                 PluginApi = typeof(CacheProvider).Assembly.ManifestModule.ModuleVersionId,
                 Root = scene.ID,
@@ -152,6 +152,8 @@ internal static class FrameCacheKey
                 Zoom = settings.GetZoomMode(),
                 SourceReader = settings.GetMFSourceReaderMode2(),
                 VoiceUpsampling = settings.GetVoiceUpsamplingMode(),
+                // Background image, texture and image brush files load as video or image by these (GetFileType).
+                FileTypes = FileTypes(),
                 loaders.VideoFileSourcePlugins,
                 loaders.ImageFileSourcePlugins,
                 loaders.AudioFileSourcePlugins,
@@ -188,6 +190,9 @@ internal static class FrameCacheKey
             return false;
         }
     }
+
+    internal static string[] FileTypes() =>
+        SettingsBase<FileSettings>.Default.FileExtensions.Select(extension => $"{extension.Extention}={extension.FileType}").ToArray();
 
     // Splits the serialized model into the part every frame depends on (everything but timeline items), the
     // other timelines (only read by frames with a scene item), and one hash per root timeline item.

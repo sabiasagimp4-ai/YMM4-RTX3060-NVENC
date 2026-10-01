@@ -266,6 +266,9 @@ internal sealed class KeyDependencyTracker : IDisposable
         Subscribe(scene.Scenes);
         Subscribe(SettingsBase<YukkuriMovieMaker.Settings.YMMSettings>.Default);
         Subscribe(SettingsBase<PluginLoaderSettings>.Default);
+        var fileTypes = SettingsBase<YukkuriMovieMaker.Settings.FileSettings>.Default.FileExtensions;
+        Subscribe(fileTypes);
+        foreach (var extension in fileTypes) Subscribe(extension);
         var timelines = scene.Scenes.Timelines.Append(scene.Timeline).Distinct().ToArray();
         foreach (var timeline in timelines)
         {
@@ -285,6 +288,11 @@ internal sealed class KeyDependencyTracker : IDisposable
 
     private void Subscribe(object value)
     {
+        if (value is System.Collections.Specialized.INotifyCollectionChanged collection)
+        {
+            collection.CollectionChanged += CollectionChanged;
+            unsubscribe.Add(() => collection.CollectionChanged -= CollectionChanged);
+        }
         if (value is INotifyPropertyChanged changed)
         {
             changed.PropertyChanged += PropertyChanged;
@@ -312,6 +320,7 @@ internal sealed class KeyDependencyTracker : IDisposable
     {
         if (!IsTimelineUiProperty(sender, args.PropertyName)) Invalidate();
     }
+    private void CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs args) => Invalidate();
     private void UndoCommandCreated(object? sender, UndoRedoEventArgs args) => Invalidate();
     private void HistoryChanged(object? sender, EventArgs args) => Invalidate();
     private void ClearSubscriptions() { foreach (var remove in unsubscribe) remove(); unsubscribe.Clear(); }

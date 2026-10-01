@@ -209,6 +209,19 @@ internal static class Program
         Check(WaitForFrameKey(tracker, 45) != at45, "A timeline setting did not invalidate every frame");
         timeline.VideoInfo.Width--;
         Check(WaitForFrameKey(tracker, 45) == at45, "Restoring a timeline setting did not restore frame keys");
+        // Background images, textures and image brushes load a file as video or image by the extension settings.
+        var extensions = YukkuriMovieMaker.Plugin.SettingsBase<YukkuriMovieMaker.Settings.FileSettings>.Default.FileExtensions;
+        Check(extensions.Count != 0, "No file extension settings to check");
+        var extension = extensions[0];
+        var fileType = extension.FileType;
+        extension.FileType = fileType ^ YukkuriMovieMaker.Settings.FileType.動画;
+        Check(WaitForFrameKey(tracker, 10) != at10, "A file type setting did not invalidate frames");
+        extension.FileType = fileType;
+        Check(WaitForFrameKey(tracker, 10) == at10, "Restoring a file type setting did not restore frame keys");
+        extensions.Add(new YukkuriMovieMaker.Settings.FileExtension { Extention = ".nvenccheck", FileType = YukkuriMovieMaker.Settings.FileType.画像 });
+        Check(WaitForFrameKey(tracker, 10) != at10, "An added file extension did not invalidate frames");
+        extensions.RemoveAt(extensions.Count - 1);
+        Check(WaitForFrameKey(tracker, 10) == at10, "Removing the added file extension did not restore frame keys");
 
         string folder = Path.Combine(Path.GetTempPath(), "ymm-frame-key-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
