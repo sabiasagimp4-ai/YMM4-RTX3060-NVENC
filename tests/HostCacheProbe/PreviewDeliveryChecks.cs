@@ -114,6 +114,8 @@ internal static class PreviewDeliveryChecks
             GC.KeepAlive(timeline);
         }
         Check(TimelineFrameCache.GpuBytes == 0, "preview delivery checks leaked GPU reservations");
+        Console.WriteLine($"Update time p50/p95 by path (WARP, this test's frames): render {TimelineFrameCache.RenderTimes}, RAM {TimelineFrameCache.RamTimes}, "
+            + $"disk {TimelineFrameCache.DiskTimes}, same frame {TimelineFrameCache.LiveTimes}; preview store {TimelineFrameCache.PreviewStoreMilliseconds:F2} ms/frame on the render thread");
         Console.WriteLine("Preview storage and disk delivery: stored on normal playback, read back from disk on the second pass and after restart, pixels equal to host renders, edit/undo reuse OK");
     }
 

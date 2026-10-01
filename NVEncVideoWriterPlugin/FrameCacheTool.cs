@@ -128,6 +128,7 @@ public sealed class FrameCacheToolView : UserControl
             + $" / 新規描画 {TimelineFrameCache.Misses:N0} / 対象外 {TimelineFrameCache.Bypasses:N0}\n"
             + $"プレビュー保存 {TimelineFrameCache.PreviewStored:N0}（描画スレッド {TimelineFrameCache.PreviewStoreMilliseconds:N1} ms/枚）/ 先読み読込 {TimelineFrameCache.ReadAheads:N0}"
             + (store is null ? "\n" : $" / ディスク読込 {store.DiskReads:N0}（{store.DiskReadMilliseconds:N1} ms/枚）/ 書込 {store.DiskWrites:N0}（混雑で見送り {store.DroppedWrites:N0}）\n")
+            + $"描画の所要時間 p50/p95: 新規描画 {TimelineFrameCache.RenderTimes} / RAM {TimelineFrameCache.RamTimes} / ディスク {TimelineFrameCache.DiskTimes} / 同じ画像 {TimelineFrameCache.LiveTimes}\n"
             + $"GPU {TimelineFrameCache.GpuBytes / 1048576.0:N1} MiB / RAM 上限 256 MiB / ディスク上限 4 GiB";
     }
 }

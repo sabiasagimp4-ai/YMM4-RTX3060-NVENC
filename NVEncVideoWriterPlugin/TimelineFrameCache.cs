@@ -72,6 +72,34 @@ internal static class TimelineFrameCache
     }
     // Disk reads queued ahead of the playhead.
     internal static long ReadAheads => Interlocked.Read(ref readAheads);
+    // Update time by path, from the cache's prefix to the end of the host's update (storing excluded).
+    internal static readonly PathTimes RenderTimes = new(), RamTimes = new(), DiskTimes = new(), LiveTimes = new();
+
+    // The last 1024 durations, for percentiles.
+    internal sealed class PathTimes
+    {
+        private readonly long[] samples = new long[1024];
+        private int count, next;
+        internal void Add(long ticks)
+        {
+            lock (samples)
+            {
+                samples[next] = ticks;
+                next = (next + 1) % samples.Length;
+                count = Math.Min(count + 1, samples.Length);
+            }
+        }
+        internal (int Count, double P50, double P95) Summary()
+        {
+            long[] sorted;
+            lock (samples) sorted = samples[..count];
+            if (sorted.Length == 0) return (0, 0, 0);
+            Array.Sort(sorted);
+            double Milliseconds(int percent) => sorted[(sorted.Length - 1) * percent / 100] * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            return (sorted.Length, Milliseconds(50), Milliseconds(95));
+        }
+        public override string ToString() { var (n, p50, p95) = Summary(); return n == 0 ? "-" : $"{p50:F1}/{p95:F1} ms (n={n})"; }
+    }
     internal static FrameCacheStore? StoreIfCreated => store.IsValueCreated ? store.Value : null;
 
     // Tests only: a store with other budgets or in another folder (the caller disposes it).
@@ -265,6 +293,8 @@ internal static class TimelineFrameCache
         internal readonly bool WantRects = wantRects;
         internal readonly bool RectsReusable = rectsReusable;
         internal bool CacheHit;
+        internal long Started;
+        internal PathTimes? Path;
         private int handedOver;
         // A pending preview store keeps the capture past this update; Harmony's finalizer still calls Dispose.
         internal void HandOver() => Volatile.Write(ref handedOver, 1);
@@ -284,6 +314,7 @@ internal static class TimelineFrameCache
         __state = null;
         if (sources.TryGetValue(__instance, out var existing)) CompleteDeferred(existing);
         if (!Enabled) return true;
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
         KeyCapture? capture = null;
         Pending? pending = null;
         try
@@ -315,7 +346,7 @@ internal static class TimelineFrameCache
             long revision = capture.Revision;
             var previousOutput = (ID2D1CommandList?)outputField.GetValue(__instance);
             pending = new Pending(state, scene, devices, previousOutput, capture, liveKey, cacheKey,
-                currentGeneration, time, usageKey, viewport, wantRects, traits.RectsReusable, usageName == "Playing");
+                currentGeneration, time, usageKey, viewport, wantRects, traits.RectsReusable, usageName == "Playing") { Started = started };
             capture = null;
             // With rects requested, a reused frame restores the rects of an earlier render of the same key and
             // project revision, keeps the live ones, or (paused, pointer away from the preview) is shown without
@@ -348,6 +379,7 @@ internal static class TimelineFrameCache
                     {
                         Hit(__instance, pending, live, recalled);
                         Interlocked.Increment(ref liveReuses);
+                        pending.Path = LiveTimes;
                         __state = pending;
                         return false;
                     }
@@ -362,10 +394,12 @@ internal static class TimelineFrameCache
             {
                 Hit(__instance, pending, stored!.Value, recalled);
                 Interlocked.Increment(ref fromDisk ? ref diskHits : ref ramHits);
+                pending.Path = fromDisk ? DiskTimes : RamTimes;
                 __state = pending;
                 return false;
             }
             Interlocked.Increment(ref misses);
+            pending.Path = RenderTimes;
             __state = pending;
             return true;
         }
@@ -377,6 +411,7 @@ internal static class TimelineFrameCache
     {
         if (__state is null) return;
         bool deferred = false;
+        __state.Path?.Add(System.Diagnostics.Stopwatch.GetTimestamp() - __state.Started);
         try
         {
             if (__state.CacheHit) return;
