@@ -143,6 +143,14 @@ internal static class HostIntegration
 
     private static string HostVersion(Assembly host) => host.GetName().Version?.ToString() ?? "?";
 
+    internal static HostFeatures FeaturesFrom(HostContracts.Evaluation evaluation) => new(evaluation.Baseline ?? "?",
+        evaluation.Has(HostContracts.Preview),
+        evaluation.Has(HostContracts.SelectionRects),
+        evaluation.Has(HostContracts.WrappedSources),
+        evaluation.Has(HostContracts.RulerBars),
+        evaluation.Features.Where(f => f.StartsWith(HostContracts.DecoderPrefix, StringComparison.Ordinal))
+            .Select(f => f[HostContracts.DecoderPrefix.Length..]).ToHashSet(StringComparer.Ordinal));
+
     // HostContracts against the read builds. The verdict is kept per set of host binaries (and plugin build), so
     // only the first start after a YMM4 update spends the few seconds of reading them.
     internal static bool TryMatchReadBuild(Assembly host, out HostFeatures features, out string detail)
@@ -166,13 +174,7 @@ internal static class HostIntegration
                     + (evaluation.Problems.TryGetValue(HostContracts.Core, out var core) ? $"（{core}）。" : "。");
                 return false;
             }
-            features = new HostFeatures(evaluation.Baseline,
-                evaluation.Has(HostContracts.Preview),
-                evaluation.Has(HostContracts.SelectionRects),
-                evaluation.Has(HostContracts.WrappedSources),
-                evaluation.Has(HostContracts.RulerBars),
-                evaluation.Features.Where(f => f.StartsWith(HostContracts.DecoderPrefix, StringComparison.Ordinal))
-                    .Select(f => f[HostContracts.DecoderPrefix.Length..]).ToHashSet(StringComparer.Ordinal));
+            features = FeaturesFrom(evaluation);
             detail = evaluation.Problems.Count == 0 ? string.Empty
                 : "使わない機能: " + string.Join(" / ", evaluation.Problems.Select(p => $"{p.Key}（{p.Value}）"));
             return true;

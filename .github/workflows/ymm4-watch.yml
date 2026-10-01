@@ -1,0 +1,205 @@
+name: ymm4-watch
+
+# Once a day: has a YMM4 Lite version been published that this plugin has not been checked against? If so:
+#  1. check it the way the plugin itself does at startup (HostContracts: is the host code the cache relies on the
+#     same as in a build whose code was read?),
+#  2. build the plugin against it and run the key and host checks on Windows (no NVIDIA GPU there: NVENC itself is
+#     not run; Direct2D uses the runner's basic adapter),
+#  3. open an issue with the result (one per version), so a YMM4 update never silently breaks the plugin.
+# YMM4 is downloaded from its own update server, exactly as its updater does (tools/ci/fetch-ymm4.sh), and kept only
+# in the Actions cache; it is never committed. Scheduled runs happen on the default branch only.
+on:
+  schedule:
+    - cron: '17 21 * * *' # 06:17 JST
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'YMM4 version to check (empty: the newest published)'
+        default: ''
+      force:
+        description: 'Check even if an issue for that version exists'
+        type: boolean
+        default: false
+  push:
+    branches: ['ci/ymm4-watch'] # trial runs; they print the report instead of opening an issue
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: ymm4-watch
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.find.outputs.version }}
+      check: ${{ steps.find.outputs.check }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED: ${{ inputs.version }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          version=$REQUESTED
+          [ -z "$version" ] && [ -f CI_WATCH_VERSION ] && version=$(tr -d '[:space:]' < CI_WATCH_VERSION)
+          [ -z "$version" ] && version=$(tools/ci/fetch-ymm4.sh list | head -1)
+          [[ "$version" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || { echo "No version: '$version'"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          check=true
+          if [ "$GITHUB_REF_NAME" = "${{ github.event.repository.default_branch }}" ] && [ "$FORCE" != "true" ]; then
+            if grep -q "new(\"$version\"" NVEncVideoWriterPlugin/HostIntegration.cs; then
+              echo "YMM4 $version is one of the builds whose code was read."; check=false
+            elif [ "$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "\"YMM4 $version の確認結果\" in:title" --json number --jq length)" != "0" ]; then
+              echo "YMM4 $version was already reported."; check=false
+            fi
+          fi
+          echo "check=$check" >> "$GITHUB_OUTPUT"
+          echo "YMM4 $version: check=$check"
+
+  contracts:
+    needs: detect
+    if: needs.detect.outputs.check == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.detect.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - id: host
+        uses: actions/cache@v4
+        with:
+          path: host
+          key: ymm4-full-${{ needs.detect.outputs.version }}
+          enableCrossOsArchive: true
+      - name: Download YMM4 (its own update protocol)
+        if: steps.host.outputs.cache-hit != 'true'
+        run: tools/ci/fetch-ymm4.sh "$VERSION" host
+      - name: Contracts verdict (what the plugin decides at startup)
+        run: |
+          dotnet build tools/HostFingerprint -c Release --nologo -v q
+          dotnet tools/HostFingerprint/bin/Release/net10.0/HostFingerprintTool.dll contracts host | tee contracts.txt
+          grep '^#' contracts.txt > verdict.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verdict
+          path: |
+            verdict.txt
+            contracts.txt
+
+  windows:
+    needs: [detect, contracts]
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      YMM4_DIR: '${{ github.workspace }}\host\'
+      PROBE_VIDEO: '${{ github.workspace }}\probe-video.mp4'
+    outputs:
+      build: ${{ steps.build.outcome }}
+      keys: ${{ steps.keys.outcome }}
+      probe: ${{ steps.probe.outcome }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/cache/restore@v4
+        with:
+          path: host
+          key: ymm4-full-${{ needs.detect.outputs.version }}
+          enableCrossOsArchive: true
+          fail-on-cache-miss: true
+      - name: Media Foundation and test video
+        continue-on-error: true
+        run: |
+          $feature = Get-WindowsFeature Server-Media-Foundation
+          if ($feature -and -not $feature.Installed) { Install-WindowsFeature Server-Media-Foundation | Out-Null }
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress | Select-Object -Last 1 }
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
+          ffmpeg -v error -f lavfi -i testsrc=size=320x180:rate=30 -t 2 -c:v libx264 -pix_fmt yuv420p -y $env:PROBE_VIDEO
+      - name: Build the plugin against this YMM4
+        id: build
+        run: |
+          dotnet build NVEncVideoWriterPlugin\NVEncVideoWriterPlugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Plugin build failed' }
+      - name: Cache key checks (real host)
+        id: keys
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        run: |
+          dotnet run --project tests\CacheChecks\CacheChecks.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR
+          if ($LASTEXITCODE -ne 0) { throw 'CacheChecks failed' }
+      - name: Export hook and cache checks as an unread build (real host, WARP)
+        id: probe
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        run: |
+          $video = @()
+          if (Test-Path $env:PROBE_VIDEO) { $video = @('--video', $env:PROBE_VIDEO) }
+          dotnet run --project tests\HostCacheProbe\HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR --unread --gpu @video
+          if ($LASTEXITCODE -ne 0) { throw 'HostCacheProbe --unread failed' }
+
+  report:
+    needs: [detect, contracts, windows]
+    if: always() && needs.detect.outputs.check == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: verdict
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect.outputs.version }}
+          BUILD: ${{ needs.windows.outputs.build }}
+          KEYS: ${{ needs.windows.outputs.keys }}
+          PROBE: ${{ needs.windows.outputs.probe }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          word() { case "$1" in success) echo "成功";; failure) echo "**失敗**";; skipped|'') echo "未実行";; *) echo "$1";; esac; }
+          verdict=$(sed -n 's/^# verdict: //p' verdict.txt 2>/dev/null)
+          case "$verdict" in
+            "baseline (none)"*) cache="**使いません**（キャッシュが前提とする本体のコードが、検証済みの版と異なります）";;
+            baseline*) cache="使います（${verdict%%;*} と同じコード）";;
+            *) cache="判定できませんでした";;
+          esac
+          {
+            echo "YMM4 Lite **$VERSION** が公開されていたので、このプラグインとの組み合わせを自動で確認しました。"
+            echo
+            echo "| 項目 | 結果 |"
+            echo "|---|---|"
+            echo "| この版に対するプラグインのビルド | $(word "$BUILD") |"
+            echo "| 自動キャッシュ（プラグインが起動時に行う照合） | $cache |"
+            echo "| キャッシュのキー検査（CacheChecks） | $(word "$KEYS") |"
+            echo "| 実ホストでの検査（出力フック、使う場合はキャッシュの画素一致・無効化。HostCacheProbe --unread） | $(word "$PROBE") |"
+            echo
+            echo "照合の内訳:"
+            echo
+            echo '```'
+            grep -E '^# (verdict|  off)' verdict.txt 2>/dev/null || echo "(照合結果なし)"
+            echo '```'
+            echo
+            echo "NVENC 自体の出力は GPU の無い CI では確認していません。キャッシュを使わない判定や失敗があれば、この issue を Claude に渡して対応を頼んでください。"
+            echo
+            echo "実行記録: $RUN_URL"
+          } > report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          if [ "$GITHUB_REF_NAME" = "${{ github.event.repository.default_branch }}" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "YMM4 $VERSION の確認結果" --body-file report.md
+          else
+            echo "Trial run on $GITHUB_REF_NAME: no issue opened."; cat report.md
+          fi

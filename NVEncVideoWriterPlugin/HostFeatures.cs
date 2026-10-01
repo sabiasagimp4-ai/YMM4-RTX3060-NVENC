@@ -13,7 +13,9 @@ internal sealed record HostFeatures(string Basis, bool Preview, bool SelectionRe
     private static HostFeatures? decided;
     private static Assembly? decidedHost;
 
-    internal bool DecoderVerified(Type type) => VerifiedDecoders?.Contains(type.Assembly.GetName().Name ?? string.Empty) ?? true;
+    internal bool DecoderVerified(Type type) => DecoderVerified(type.Assembly.GetName().Name ?? string.Empty);
+
+    internal bool DecoderVerified(string assemblyName) => VerifiedDecoders?.Contains(assemblyName) ?? true;
 
     // Before the cache is installed on a build that was not read: what its contracts allow.
     internal static void Decide(Assembly host, HostFeatures features)

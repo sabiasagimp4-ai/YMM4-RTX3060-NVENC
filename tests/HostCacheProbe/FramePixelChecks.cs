@@ -13,7 +13,7 @@ using YukkuriMovieMaker.Player.Video;
 
 internal static class FramePixelChecks
 {
-    internal static void Run(Assembly host, string? videoPath)
+    internal static void Run(Assembly host, string? videoPath, HostFeatures features)
     {
         var bootstrap = new Harmony("ymm.tests.pixel-builtin-loader");
         var loader = typeof(PluginAssemblyLoader);
@@ -58,8 +58,10 @@ internal static class FramePixelChecks
             Check(TimelineFrameCache.TryInstall(host, harmony, out var reason), reason);
             Console.WriteLine("Render readiness coverage (verify against host code):");
             foreach (var line in FrameRenderReadiness.Coverage) Console.WriteLine("  " + line);
-            Check(FrameRenderReadiness.Coverage.Any(line => line.Contains(": MF2 (", StringComparison.Ordinal)),
-                "No MF2 video source was recognized; video frames would never be cached");
+            const string mediaFoundation = "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation";
+            if (features.DecoderVerified(mediaFoundation))
+                Check(FrameRenderReadiness.Coverage.Any(line => line.Contains(": MF2 (", StringComparison.Ordinal)),
+                    "No MF2 video source was recognized; video frames would never be cached");
             var timeline = new Timeline();
             timeline.VideoInfo.Width = 321; timeline.VideoInfo.Height = 181;
             timeline.VideoInfo.BackgroundColor = System.Windows.Media.Color.FromArgb(137, 123, 76, 231);
@@ -112,9 +114,14 @@ internal static class FramePixelChecks
             }
             Check(TimelineFrameCache.GpuBytes == 0, "Source disposal leaked global GPU reservation");
             Console.WriteLine("Actual host automatic source cache: hit/parity/invalidation/GPU cleanup OK");
-            PreviewRectChecks.Run(host, context);
-            Check(TimelineFrameCache.GpuBytes == 0, "Preview rect checks leaked global GPU reservation");
-            CheckVideoDecodeFailureIsNotStored(host, context, videoPath);
+            if (features is { Preview: true, SelectionRects: true })
+            {
+                PreviewRectChecks.Run(host, context);
+                Check(TimelineFrameCache.GpuBytes == 0, "Preview rect checks leaked global GPU reservation");
+            }
+            else Console.WriteLine("Preview rect checks skipped: rect reuse is off on this build");
+            if (features.DecoderVerified(mediaFoundation)) CheckVideoDecodeFailureIsNotStored(host, context, videoPath);
+            else Console.WriteLine("Video decode-failure check skipped: the MediaFoundation reader is not trusted on this build");
         }
         finally
         {

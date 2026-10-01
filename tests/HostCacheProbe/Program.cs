@@ -25,13 +25,30 @@ internal static class Program
         };
         var host = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(hostDir, "YukkuriMovieMaker.dll"));
         var plugin = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(hostDir, "YukkuriMovieMaker.Plugin.dll"));
-        Check(HostIntegration.VerifyHost(host, out var hostReason), "Host binary verification failed: " + hostReason);
+        // --unread: a YMM4 build that is not one of the read builds (the ymm4-watch workflow). The cache checks run
+        // with the features its contracts allow, as the plugin would use them.
+        bool unread = args.Contains("--unread");
+        bool known = HostIntegration.VerifyHost(host, out var hostReason);
+        if (!unread) Check(known, "Host binary verification failed: " + hostReason);
         if (args.Contains("--integration"))
         {
             HostIntegrationChecks.Run(host);
             return 0;
         }
-        HostIntegrationChecks.CheckContracts(host, hostDir);
+        HostFeatures? features;
+        if (unread)
+        {
+            var evaluation = HostContracts.Evaluate(HostContracts.Describe(hostDir));
+            Console.WriteLine($"Contracts verdict: same code as {evaluation.Baseline ?? "no read build"}; features: {string.Join(", ", evaluation.Features.Order(StringComparer.Ordinal))}");
+            foreach (var (feature, problem) in evaluation.Problems) Console.WriteLine($"  off {feature}: {problem}");
+            features = evaluation.Baseline is null ? null : HostIntegration.FeaturesFrom(evaluation);
+            if (features is not null) HostFeatures.Decide(host, features);
+        }
+        else
+        {
+            HostIntegrationChecks.CheckContracts(host, hostDir);
+            features = HostFeatures.For(host);
+        }
         var sourceType = host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!;
         var update = sourceType.GetMethods(All).Single(m => m.Name == "Update" && m.GetParameters().Length == 2);
         var dispose = sourceType.GetMethod("Dispose", All, [typeof(bool)])!;
@@ -49,7 +66,7 @@ internal static class Program
         try
         {
             ExportScopeChecks.Run(host, harmony);
-            IdleFramePreRendererChecks.Run();
+            if (features is { Preview: true }) IdleFramePreRendererChecks.Run();
             harmony.Patch(update, new HarmonyMethod(typeof(Program), nameof(UpdatePrefix)), new HarmonyMethod(typeof(Program), nameof(UpdatePostfix)));
             harmony.Patch(dispose, new HarmonyMethod(typeof(Program), nameof(DisposePrefix)));
             var uninitialized = RuntimeHelpers.GetUninitializedObject(sourceType);
@@ -70,7 +87,11 @@ internal static class Program
             "Unpatch did not restore the original Dispose method");
         Console.WriteLine("Patch/unpatch and reflection contracts OK");
         int video = Array.IndexOf(args, "--video");
-        if (args.Contains("--gpu")) FramePixelChecks.Run(host, video >= 0 && video + 1 < args.Length ? Path.GetFullPath(args[video + 1]) : null);
+        if (args.Contains("--gpu"))
+        {
+            if (features is null) Console.WriteLine("Cache checks skipped: the plugin does not use the cache on this build");
+            else FramePixelChecks.Run(host, video >= 0 && video + 1 < args.Length ? Path.GetFullPath(args[video + 1]) : null, features);
+        }
         return 0;
     }
 
