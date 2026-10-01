@@ -221,6 +221,20 @@ public sealed class PluginSettingsPanel : StackPanel
 
 public sealed class FrameCacheToolView : UserControl
 {
+    protected override System.Windows.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
+        new CacheToolAutomationPeer(this);
+
+    private sealed class CacheToolAutomationPeer(FrameCacheToolView view) : System.Windows.Automation.Peers.FrameworkElementAutomationPeer(view)
+    {
+        protected override List<System.Windows.Automation.Peers.AutomationPeer>? GetChildrenCore()
+        {
+            var children = base.GetChildrenCore() ?? [];
+            foreach (var element in new UIElement[] { view.trace, view.scenario })
+                if (System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(element) is { } peer && !children.Contains(peer))
+                    children.Add(peer);
+            return children;
+        }
+    }
     private readonly TextBlock status = new() { TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock counts = new() { Margin = new Thickness(0, 8, 0, 12), TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock error = new() { TextWrapping = TextWrapping.Wrap };

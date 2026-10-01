@@ -355,18 +355,19 @@ internal sealed class FrameCacheStore : IDisposable
             foreach (var operation in _operations.GetConsumingEnumerable())
             {
                 active = operation;
+                var trace = CacheTrace.Measure("disk-" + operation.Kind.ToString().ToLowerInvariant(), "io-wall",
+                    frameTimeTicks: operation.TraceTime, usage: operation.TraceUsage, operation: operation.TraceOperation);
                 try
                 {
-                    using var trace = CacheTrace.Measure("disk-" + operation.Kind.ToString().ToLowerInvariant(), "io-wall", operation: operation.TraceOperation);
                     if (operation.QueuedAt != 0)
-                        CacheTrace.Timing("disk-queue-wait", operation.QueuedAt, Stopwatch.GetTimestamp(), "queue-wait");
+                        CacheTrace.Timing("disk-queue-wait", operation.QueuedAt, Stopwatch.GetTimestamp(), "queue-wait", nested: false);
                     switch (operation.Kind)
                     {
                         case OperationKind.Read:
-                            ProcessRead(operation);
+                            ProcessRead(operation, trace);
                             break;
                         case OperationKind.Write:
-                            ProcessWrite(operation);
+                            ProcessWrite(operation, trace);
                             break;
                         case OperationKind.Clear:
                             ProcessClear(operation);
@@ -376,6 +377,7 @@ internal sealed class FrameCacheStore : IDisposable
                 }
                 catch (Exception error)
                 {
+                    if (trace is not null) { trace.Outcome = "exception"; trace.Detail = error.GetType().Name; }
                     if (!IsFileFailure(error)) Volatile.Write(ref _diskBlocked, true);
                     if (operation.Kind == OperationKind.Clear)
                         operation.Completion!.TrySetException(new IOException("The frame cache could not persist its purge; disk caching is disabled.", error));
@@ -383,6 +385,7 @@ internal sealed class FrameCacheStore : IDisposable
                 finally
                 {
                     CompletePending(operation);
+                    trace?.Dispose();
                     active = null;
                 }
             }
@@ -449,8 +452,9 @@ internal sealed class FrameCacheStore : IDisposable
         }
     }
 
-    private void ProcessRead(DiskOperation operation)
+    private void ProcessRead(DiskOperation operation, CacheTrace.Span? trace)
     {
+        if (trace is not null) trace.Outcome = "skipped";
         byte[]? pixels = null;
         long started = Stopwatch.GetTimestamp();
         if (!Volatile.Read(ref _diskBlocked) && operation.Generation == _diskGeneration && operation.Generation == Volatile.Read(ref _generation)
@@ -466,12 +470,15 @@ internal sealed class FrameCacheStore : IDisposable
                 // I/O is checked again by AddRam; the read's temporary array is bounded by MaxFrameBytes.
                 lock (_gate)
                     if (_disposed || operation.Generation != _generation || length > _ramBudget) return;
-                pixels = new byte[length];
-                file.ReadExactly(pixels);
-                if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(pixels), header[16..])) throw new InvalidDataException();
+                using (CacheTrace.Measure("disk-allocation")) pixels = new byte[length];
+                using (CacheTrace.Measure("disk-read-bytes", "io-wall")) file.ReadExactly(pixels);
+                using (CacheTrace.Measure("disk-checksum"))
+                    if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(pixels), header[16..])) throw new InvalidDataException();
+                if (trace is not null) trace.Outcome = "verified";
             }
             catch (Exception error) when (IsFileFailure(error))
             {
+                if (trace is not null) { trace.Outcome = "read-failed"; trace.Detail = error.GetType().Name; }
                 pixels = null;
                 RemoveDisk(operation.Key);
             }
@@ -490,8 +497,9 @@ internal sealed class FrameCacheStore : IDisposable
         }
     }
 
-    private void ProcessWrite(DiskOperation operation)
+    private void ProcessWrite(DiskOperation operation, CacheTrace.Span? trace)
     {
+        if (trace is not null) trace.Outcome = "skipped";
         byte[] snapshot = operation.Pixels!;
         if (Volatile.Read(ref _diskBlocked) || operation.Generation != _diskGeneration || operation.Generation != Volatile.Read(ref _generation)
             || snapshot.LongLength > _diskBudget - HeaderBytes) return;
@@ -507,11 +515,10 @@ internal sealed class FrameCacheStore : IDisposable
             Span<byte> header = stackalloc byte[HeaderBytes];
             Magic.CopyTo(header);
             BinaryPrimitives.WriteInt64LittleEndian(header[8..], snapshot.LongLength);
-            SHA256.HashData(snapshot, header[16..]);
+            using (CacheTrace.Measure("disk-checksum")) SHA256.HashData(snapshot, header[16..]);
             using (var file = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                file.Write(header);
-                file.Write(snapshot);
+                using (CacheTrace.Measure("disk-write-bytes", "io-wall")) { file.Write(header); file.Write(snapshot); }
             }
             File.Move(temp, RecordPath(operation.Key), true);
             lock (_gate)
@@ -521,8 +528,10 @@ internal sealed class FrameCacheStore : IDisposable
             }
             Interlocked.Increment(ref _version);
             Interlocked.Add(ref _diskBytes, bytes);
+            if (trace is not null) trace.Outcome = "written";
         }
-        catch (Exception error) when (IsFileFailure(error)) { }
+        catch (Exception error) when (IsFileFailure(error))
+        { if (trace is not null) { trace.Outcome = "write-failed"; trace.Detail = error.GetType().Name; } }
         finally { DeleteOrAccount(temp); }
     }
 
@@ -756,6 +765,8 @@ internal sealed class FrameCacheStore : IDisposable
     private sealed record DiskOperation(OperationKind Kind, long Generation, string Key, byte[]? Pixels, TaskCompletionSource? Completion)
     {
         internal long TraceOperation { get; } = CacheTrace.OperationId;
+        internal long? TraceTime { get; } = CacheTrace.FrameTimeTicks;
+        internal string? TraceUsage { get; } = CacheTrace.Usage;
         internal long QueuedAt { get; } = CacheTrace.Enabled ? Stopwatch.GetTimestamp() : 0;
     }
 }

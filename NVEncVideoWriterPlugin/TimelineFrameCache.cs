@@ -845,8 +845,14 @@ internal static class TimelineFrameCache
             {
                 measurement.Consumed = true;
                 __state = __state with { Update = measurement };
+                if (measurement.Trace is { } previous) __state.Trace?.Relate(previous);
             }
             if (source is null || !TryGetPreviewViewportForPlayer(__instance, source, out var viewport)) return;
+            using (var viewTrace = CacheTrace.Measure("viewport", "state"))
+                if (viewTrace is not null) viewTrace.Detail = $"{viewport.Width}x{viewport.Height};playing={viewport.IsPlaying};"
+                    + $"dpi={Bits(viewport.DpiX)},{Bits(viewport.DpiY)};"
+                    + $"transform={Bits(viewport.Transform.M11)},{Bits(viewport.Transform.M12)},{Bits(viewport.Transform.M21)},"
+                    + $"{Bits(viewport.Transform.M22)},{Bits(viewport.Transform.M31)},{Bits(viewport.Transform.M32)}";
             var scene = (Scene)sceneField.GetValue(source)!;
             var association = sourcePlayers.GetValue(source, _ => new PlayerAssociation());
             var latest = latestViewports.GetValue(scene.Timeline, _ => new LatestViewport(scene.ID, scene.Timeline.ID));

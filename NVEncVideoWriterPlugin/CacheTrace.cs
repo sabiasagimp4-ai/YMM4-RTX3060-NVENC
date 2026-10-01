@@ -15,6 +15,8 @@ internal static class CacheTrace
     internal static string? OutputPath => Volatile.Read(ref active)?.Path;
     internal static long Dropped => Volatile.Read(ref active)?.Dropped ?? 0;
     internal static long OperationId => current?.OperationId ?? 0;
+    internal static long? FrameTimeTicks => current?.FrameTimeTicks;
+    internal static string? Usage => current?.Usage;
 
     internal static Session Start(string path, string scenario, int capacity = 8192)
     {
@@ -44,12 +46,12 @@ internal static class CacheTrace
         return new Span(session, stage, category, component, frameTimeTicks, usage, operation);
     }
 
-    internal static void Timing(string stage, long start, long end, string category = "cpu-wall")
+    internal static void Timing(string stage, long start, long end, string category = "cpu-wall", bool nested = true)
     {
         var session = Volatile.Read(ref active);
         if (session is null) return;
         var parent = current;
-        session.Write(new Record("span", Interlocked.Increment(ref nextId), parent?.Id ?? 0,
+        session.Write(new Record("span", Interlocked.Increment(ref nextId), nested ? parent?.Id ?? 0 : 0,
             parent?.OperationId ?? 0, stage, category, null, parent?.FrameTimeTicks, parent?.Usage,
             Environment.CurrentManagedThreadId, start, Math.Max(start, end), "ok", null));
     }
@@ -73,9 +75,9 @@ internal static class CacheTrace
         private readonly int thread = Environment.CurrentManagedThreadId;
         private int ended;
         internal long Id { get; } = Interlocked.Increment(ref nextId);
-        internal long OperationId { get; }
-        internal long? FrameTimeTicks { get; }
-        internal string? Usage { get; }
+        internal long OperationId { get; private set; }
+        internal long? FrameTimeTicks { get; private set; }
+        internal string? Usage { get; private set; }
         internal string Outcome { get; set; } = "ok";
         internal string? Detail { get; set; }
         internal Span(Session session, string stage, string category, string? component,
@@ -86,6 +88,10 @@ internal static class CacheTrace
             OperationId = operation != 0 ? operation : frameTimeTicks is not null ? Id : previous?.OperationId ?? Id;
             FrameTimeTicks = frameTimeTicks ?? previous?.FrameTimeTicks; Usage = usage ?? previous?.Usage;
             current = this;
+        }
+        internal void Relate(Span earlier)
+        {
+            OperationId = earlier.OperationId; FrameTimeTicks = earlier.FrameTimeTicks; Usage = earlier.Usage;
         }
         public void Dispose()
         {
