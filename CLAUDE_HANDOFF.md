@@ -1,8 +1,39 @@
 # Claude 引継ぎ — YMM4 RTX3060 NVENC / AE風キャッシュ
 
-更新日: 2026-10-01。これは **未完成の作業保存（WIP checkpoint）** です。製品完成・配布可能・AE完全再現を意味しません。
+更新日: 2026-10-01（追記3まで）。これは **未完成の作業保存（WIP checkpoint）** です。製品完成・配布可能・AE完全再現を意味しません。
 
 ## 最初に読むこと
+
+### 2026-10-01 追記（3）— Windows CI、フレーム単位キー、キャッシュバー
+
+**Windows CI（ユーザー承認済み）**: private repo `sabiasagimp4-ai/YMM4-dlls` の branch `ci/nvenc-verify` に、このリポジトリの commit 済み HEAD のコピーと workflow（`tools/ci/verify.yml`）を置き、push で GitHub Actions の `windows-2022` を動かします。YMM4 本体はその repo の Release `0.1` の zip（4.56.1.0）を実行時にダウンロードし、どちらの repo にも commit しません。更新は `DST=<YMM4-dlls の clone> tools/ci/sync-to-dlls.sh` → `git -C $DST push origin ci/nvenc-verify`。NVIDIA GPU は無いので NVENC 出力（ManagedSmoke / NativeSmoke）は対象外、Direct2D は runner の基本アダプター（WARP 相当）で動きます。Server-Media-Foundation は再起動なしで入りました。
+
+CI で分かったこと・直したこと:
+- **実機 4.56.1.0 でキャッシュ全体が接続できない不具合**: Harmony 2.4.2 は例外フィルター（`catch ... when` の中で `continue`）を含むメソッドを作り直せず（`Incorrect code generation for exception block`）、`DirectShowVideoFileSource.Update` へのフックが失敗して `FrameRenderReadiness` ごと無効になっていました。4.56.1.0 では描画に使う動画ソースは必ず `VideoFileSourceFactory.Create` で `CachedVideoFileSource` に包まれ、その wrapper のフックが「検証済みでない中身」を拒否するので、フックできないソースは unverified に降格して続行するようにしました（wrapper 自身がフックできない場合は従来どおり全体を無効化）。`MFVideoFileSource.RefreshCurrentFrameWithReload` も同じ理由でフック不可ですが、Update はフックできます。
+- 4.56.1.0 の `PluginLoader` は `PluginAssemblyLoader.IncompatiblePluginAssemblies` を読むため、テストの loader スタブで空リストを入れるようにしました（init-only なので `AccessTools.StaticFieldRefAccess` で書く）。
+- runner には日本語フォントが無く、TextItem の既定フォントが解決できず全体 bypass になっていました（テストは Arial を指定）。これを機に、確認できない素材（未インストールのフォント、外部 URL のファイル）は**そのアイテムが映るフレームだけ**通常描画にしました。
+- 計測（runner、目安）: 依存ファイルの毎フレーム lease は 10/50/200 ファイルで 5.8〜7.6 / 26.6〜43.6 / 107〜168 ms。ShapeItem だけの `TimelineSource.Update` は通常 5.26 ms、キャッシュ再利用 0.04 ms。
+- 成功: NativeChecks、プラグイン build、StoreChecks（Windows 専用区間を含む）、ReadinessChecks、FileLeaseChecks、HostCacheProbe の大半（実 host の export scope、idle clone、WARP での画素一致、実 host のキャッシュ hit/invalidation、選択枠、キャッシュバーの residency、実 MediaFoundation で動画フレームの再利用）。最新の結果は PR #1 と Actions を参照。
+
+**フレーム単位キー**（`FrameDependencyIndex.cs`、`FrameCacheKey.DescribeFrames`、`KeyDependencyTracker.TryCapture(int frame, ...)`）
+- フレーム f のキー = global（モデル JSON から全タイムラインの Items を除いたもの: 設定・reader・キャラクター・root の VideoInfo/LayerSettings/Length）＋ f を含む root アイテム（`IItem.Contains` と同じ半開区間）の JSON ハッシュ＋それらのファイル指紋。CompositeItemPicker が選ぶのはその部分集合（非表示を除く）なので安全側です。
+- トランジション: `TransitionItemPicker(isBefore)` が `Frame - 1` のアイテムを描くので、その時点のアイテムも（再帰的に）含めます。
+- シーンアイテムと AudioSpectrum を含むアイテム（JSON に "AudioSpectrum"）は他タイムラインや音声を読むので、そのフレームは「wide」= 全体キー（他タイムライン JSON を含む）。
+- 4.56.1.0 の renderer を確認: 他シーン参照は SceneSource と AudioSpectrumShapeSource（Scene/Timeline 音声）だけ、別フレーム参照は TransitionItemPicker だけ。
+- lease はそのフレームのファイルだけ。指紋は全ファイルを背景で 128 個ずつ（1回 4 GiB まで）、失敗したら1ファイルずつにして、確認できないファイルはそれを使うフレームだけ bypass。上限は 4096 ファイル。
+- idle 先読み・TryPrime・Prefix はすべてフレーム単位。Linux 単体テスト（StoreChecks の FrameDependencyChecks、規則の変異5件を検出）と CacheChecks（Windows）で確認。
+
+**キャッシュバー**（`CacheBarLayout.cs`、`CacheStatusBar.cs`、`TimelineFrameCache.TryGetPreviewResidency`、`FrameCacheStore.GetResidency/Version`）
+- 緑 = RAM、青 = ディスクのみ。プレビューの現在の viewport・usage（`Playing`、ShowOnlyPreview がなければ `Preview`）で保存されたフレーム。
+- タイムラインのルーラー（`TimelineScaleView`）下端に 3px の帯を追加（`EventManager.RegisterClassHandler` で Loaded を受け、Grid に `IsHitTestVisible=false` の子を足す。x = frame × `YMMSettings.TimelineZoom` / 100 − `TimelineViewModel.Viewport.Value.X`）。4.56.1.0 の MVID のときだけ。ツールの「描画キャッシュ」にはタイムライン全体の帯。
+- 表示は lease なしのキー（`TryPeekFrameKeys`）で、ファイルが変わってから次に描画されるまでは古い表示になり得ます（表示専用）。1ピクセル列あたり最大4フレームを標本にし、列の色は標本の最小状態。
+- idle 先読みの範囲を再生位置から 1 秒 → **10 秒**に拡大。RAM 256 MiB / ディスク 4 GiB の上限は変えていません（720p プレビューで RAM 約70フレーム）。
+- **未確認**: 実際の YMM4 画面での表示（帯の位置・ちらつき・スクロール追従）。CI では residency の値までしか確認していません。
+
+**ユーザーの PC で次に確認すること**（未保存プロジェクトを保存してから）
+1. YMM4 を 4.56.1.0 に更新するのがおすすめです。選択枠の再利用、ルーラーのバー、DirectShow のフック不可への対処は 4.56.1.0 の内部を読んで確認したものなので、4.55.1.1 では無効（通常描画）になります。
+2. `build.ps1 -Smoke`（NVENC を含む。CI では GPU が無いため未実行）。
+3. YMM4 上で: 再生・一時停止・シーク時に選択枠が出るか、ルーラー下端と「描画キャッシュ」ツールの緑/青の帯が先読みに合わせて伸びるか、アイテムを1つ編集したときにそのアイテムの範囲だけ帯が消えるか。
 
 ### 2026-10-01 追記（2）— 一時停止中・プレビュー上マウス時のキャッシュと選択枠
 
