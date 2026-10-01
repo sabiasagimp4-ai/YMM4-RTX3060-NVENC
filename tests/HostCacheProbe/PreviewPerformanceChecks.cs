@@ -132,6 +132,7 @@ internal static class PreviewPerformanceChecks
             ProcessingTraceHooks.Discover(); // Installation cost is outside the measured loop.
             try { measurements.Add(Measure("ram-hit-trace", true)); }
             finally { ProcessingTraceHooks.Stop(); CacheTrace.StopAsync().GetAwaiter().GetResult(); }
+            CheckRestoreTrace(Path.GetFullPath("dist/performance-trace.jsonl"));
             // Every frame, with no captures in the preceding measurements.
             for (int frame = 0; frame < Frames; frame++)
             {
@@ -162,6 +163,38 @@ internal static class PreviewPerformanceChecks
             harmony.UnpatchAll(harmony.Id);
         }
         Check(TimelineFrameCache.GpuBytes == 0, "Performance fixture leaked GPU reservations");
+    }
+
+    private static void CheckRestoreTrace(string path)
+    {
+        var records = File.ReadLines(path).Select(line =>
+        {
+            using var document = JsonDocument.Parse(line);
+            return document.RootElement.Clone();
+        }).ToArray();
+        var footer = records.Single(row => row.GetProperty("Kind").GetString() == "summary");
+        Check(footer.GetProperty("Dropped").GetInt64() == 0 && footer.GetProperty("OpenSpans").GetInt64() == 0,
+            "Performance trace was incomplete");
+        var spans = records.Where(row => row.GetProperty("Kind").GetString() == "span")
+            .ToDictionary(row => row.GetProperty("Id").GetInt64());
+        var restores = spans.Values.Where(row => row.GetProperty("Stage").GetString() == "CacheRestore").ToArray();
+        Check(restores.Length == Frames, "Missing restore parent spans");
+        foreach (var stage in new[] { "restore-bitmap-allocation", "restore-copy-from-memory", "restore-command-recording",
+            "cache-output-lock-wait", "cache-output-commit" })
+        {
+            var children = spans.Values.Where(row => row.GetProperty("Stage").GetString() == stage).ToArray();
+            Check(children.Length == Frames, "Missing detailed restore spans: " + stage);
+            foreach (var child in children)
+            {
+                var parent = spans[child.GetProperty("ParentId").GetInt64()];
+                Check(parent.GetProperty("Stage").GetString() == "CacheRestore"
+                    && child.GetProperty("OperationId").GetInt64() == parent.GetProperty("OperationId").GetInt64()
+                    && child.GetProperty("StartTicks").GetInt64() >= parent.GetProperty("StartTicks").GetInt64()
+                    && child.GetProperty("EndTicks").GetInt64() <= parent.GetProperty("EndTicks").GetInt64(),
+                    "Detailed restore span attribution failed: " + stage);
+            }
+        }
+        Console.WriteLine("Detailed restore timing: 100 frames, complete and correctly nested");
     }
 
     private static bool SkipLoader() => false;

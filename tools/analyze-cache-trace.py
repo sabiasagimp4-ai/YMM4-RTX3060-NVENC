@@ -59,7 +59,7 @@ def analyze(path, limit=1_000_000):
     for (scenario, stage, category, component), values in groups.items():
         values.sort()
         def percentile(p):
-            return values[math.ceil((len(values) - 1) * p)]
+            return values[max(0, math.ceil(len(values) * p) - 1)]
         measurements.append(dict(Scenario=scenario, Stage=stage, Category=category, Component=component,
                                  Samples=len(values), MeanMs=sum(values)/len(values),
                                  P50Ms=percentile(.5), P95Ms=percentile(.95), P99Ms=percentile(.99), MaxMs=values[-1]))
@@ -67,6 +67,7 @@ def analyze(path, limit=1_000_000):
     complete = bool(footer) and footer.get('Dropped', 0) == 0 and footer.get('OpenSpans', 0) == 0 and not truncated and parse_errors == 0
     return dict(Session=session, Summary=footer, Complete=complete, AnalysisTruncated=truncated,
                 ParseErrors=parse_errors, RetainedSpans=len(spans), Routes=dict(routes), Coverage=dict(coverage),
+                PercentileMethod='nearest-rank ceil(n*p)-1 over retained samples',
                 Interpretation='Inclusive CPU wall time, not CPU cycles or GPU execution time. Do not sum nested spans. '
                                'Coverage is only discovered hookable interfaces; dropped/open/missing records invalidate completeness.',
                 Measurements=measurements)

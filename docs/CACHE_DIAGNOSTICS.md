@@ -24,7 +24,12 @@
 - セッション: UTCとStopwatchの原点、実際の周波数、OS/runtime、process ID、論理CPU数。
 - 各span: 生の開始/終了ticks、span ID、親ID、operation ID、managed thread ID、frame time ticks、Playing/Paused/Exporting、stage/category/component、outcome。
 - Update経路: render/live/RAM/disk/bypass/exception。対象外の理由、decoderのready/not-readyも別イベント。
-- キー生成、CacheRead（RAM/ディスク検索）、CacheRestore（GPU画像復元）、lookup全体、ホストUpdate、Draw、GPUコピー提出、配列確保、Map待ち、memcpy、RAM登録、ディスク投入。
+- キー生成、CacheRead（RAM/ディスク検索）、CacheRestore（状態検証を含む画像復元）、lookup全体、ホストUpdate、Draw、GPUコピー提出、配列確保、Map待ち、memcpy、RAM登録、ディスク投入。
+- 復元内訳: `cache-state-validation` の下に `capture-dependency-validation`（モデルrevision、親、ファイルlease検証）と
+  `render-environment-key-validation`（現在の描画環境・viewportのキー再検証）。復元前と出力差し替え直前の双方を測る。
+  `restore-bitmap-allocation`、`restore-copy-from-memory`、`restore-command-recording`、`cache-output-lock-wait`、
+  `cache-output-commit`（出力差し替え・旧出力破棄・状態登録）を別spanとして記録する。
+  CopyFromMemory/command recordingはネイティブ呼出しのCPU wall time。GPU完了を意味しない。
 - ディスクworker: 読み書き処理のwall timeとqueue滞在時間。投入元のoperation IDで関連づける。
 - 遅延readback: 次のフレームで完了しても、元のframe time/operation IDに帰属させる。
 - Processor/SourceインターフェースのUpdate/Draw/Read/GetFrame/GetFrameAsyncを実装するクラスをロード済みアセンブリから動的に発見する。

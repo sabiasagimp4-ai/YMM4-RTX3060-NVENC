@@ -601,9 +601,17 @@ internal static class TimelineFrameCache
         return __exception;
     }
 
-    private static bool StillCurrent(Pending value) => EnabledFor(value.UsageKey == "Exporting") && value.Generation == Interlocked.Read(ref generation)
-        && value.Capture.Validate() && MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.UsageKey, value.Devices.DeviceContext, null) == value.LiveKey
-        && (value.Viewport is null || value.CacheKey == MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.UsageKey, value.Devices.DeviceContext, value.Viewport.Value));
+    private static bool StillCurrent(Pending value)
+    {
+        using var validation = CacheTrace.Measure("cache-state-validation");
+        if (!EnabledFor(value.UsageKey == "Exporting") || value.Generation != Interlocked.Read(ref generation)) return false;
+        bool valid;
+        using (CacheTrace.Measure("capture-dependency-validation")) valid = value.Capture.Validate();
+        if (!valid) return false;
+        using var keys = CacheTrace.Measure("render-environment-key-validation");
+        return MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.UsageKey, value.Devices.DeviceContext, null) == value.LiveKey
+            && (value.Viewport is null || value.CacheKey == MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.UsageKey, value.Devices.DeviceContext, value.Viewport.Value));
+    }
 
     // usage: "Exporting", or the preview key from PreviewUsage.KeyFor ("Preview" unless ShowOnlyPreviewEffect is used).
     private static string MakeKey(string model, TimeSpan time, int fps, string usage, ID2D1DeviceContext context, PreviewViewport? viewport) =>
@@ -1192,25 +1200,32 @@ internal static class TimelineFrameCache
         {
             var context = pending.Devices.DeviceContext;
             replacement = version == 1 ? Upload(context, record.Span) : UploadPreview(context, record.Span, pending.Viewport!.Value);
-            lock (cacheGate)
+            var gateWait = CacheTrace.Measure("cache-output-lock-wait");
+            try
             {
-                if (!StillCurrent(pending) || !sources.TryGetValue(source, out var currentState)
-                    || !ReferenceEquals(currentState, pending.State)
-                    || !ReferenceEquals(outputField.GetValue(source), pending.PreviousOutput)) return false;
-                var collector = (DisposeCollector)collectorField.GetValue(source)!;
-                var previous = (ID2D1CommandList?)outputField.GetValue(source);
-                collector.Collect(replacement);
-                outputField.SetValue(source, replacement);
-                if (previous != null) { collector.Remove(previous); previous.Dispose(); }
-                pending.State.Released();
-                pending.State.LastOutput = replacement;
-                pending.State.LastKey = pending.LiveKey;
-                pending.State.LastViewportKey = version == 2 ? pending.CacheKey : null;
-                pending.State.Bytes = bytes;
-                pending.State.Generation = pending.Generation;
-                transferred = true;
-                return true;
+                lock (cacheGate)
+                {
+                    gateWait?.Dispose();
+                    if (!StillCurrent(pending) || !sources.TryGetValue(source, out var currentState)
+                        || !ReferenceEquals(currentState, pending.State)
+                        || !ReferenceEquals(outputField.GetValue(source), pending.PreviousOutput)) return false;
+                    using var swap = CacheTrace.Measure("cache-output-commit");
+                    var collector = (DisposeCollector)collectorField.GetValue(source)!;
+                    var previous = (ID2D1CommandList?)outputField.GetValue(source);
+                    collector.Collect(replacement);
+                    outputField.SetValue(source, replacement);
+                    if (previous != null) { collector.Remove(previous); previous.Dispose(); }
+                    pending.State.Released();
+                    pending.State.LastOutput = replacement;
+                    pending.State.LastKey = pending.LiveKey;
+                    pending.State.LastViewportKey = version == 2 ? pending.CacheKey : null;
+                    pending.State.Bytes = bytes;
+                    pending.State.Generation = pending.Generation;
+                    transferred = true;
+                    return true;
+                }
             }
+            finally { gateWait?.Dispose(); }
         }
         finally
         {
@@ -1222,9 +1237,13 @@ internal static class TimelineFrameCache
     {
         if (!ParseRecord(record, out int width, out int height, out var origin, out int version, out _, out _) || version != 1)
             throw new InvalidDataException("Invalid scene pixel record");
-        using var bitmap = context.CreateBitmap(new SizeI(width, height), new BitmapProperties1(
-            new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied), 96, 96));
-        bitmap.CopyFromMemory(record[RecordHeader..], width * 4).CheckError();
+        ID2D1Bitmap1 allocated;
+        using (CacheTrace.Measure("restore-bitmap-allocation"))
+            allocated = context.CreateBitmap(new SizeI(width, height), new BitmapProperties1(
+                new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied), 96, 96));
+        using var bitmap = allocated;
+        using (CacheTrace.Measure("restore-copy-from-memory")) bitmap.CopyFromMemory(record[RecordHeader..], width * 4).CheckError();
+        using var recording = CacheTrace.Measure("restore-command-recording");
         var command = context.CreateCommandList();
         using var oldTarget = context.Target;
         var drawing = false;
@@ -1253,9 +1272,12 @@ internal static class TimelineFrameCache
             || BitConverter.SingleToInt32Bits(dpiX) != BitConverter.SingleToInt32Bits(viewport.DpiX)
             || BitConverter.SingleToInt32Bits(dpiY) != BitConverter.SingleToInt32Bits(viewport.DpiY)
             || !IsValidViewport(viewport, context.MaximumBitmapSize)) throw new InvalidDataException("Invalid preview pixel record");
-        using var bitmap = context.CreateBitmap(new SizeI(width, height), new BitmapProperties1(
-            viewport.BackBufferFormat, dpiX, dpiY));
-        bitmap.CopyFromMemory(record[PreviewRecordHeader..], width * 4).CheckError();
+        ID2D1Bitmap1 allocated;
+        using (CacheTrace.Measure("restore-bitmap-allocation"))
+            allocated = context.CreateBitmap(new SizeI(width, height), new BitmapProperties1(viewport.BackBufferFormat, dpiX, dpiY));
+        using var bitmap = allocated;
+        using (CacheTrace.Measure("restore-copy-from-memory")) bitmap.CopyFromMemory(record[PreviewRecordHeader..], width * 4).CheckError();
+        using var recording = CacheTrace.Measure("restore-command-recording");
         var command = context.CreateCommandList();
         using var oldTarget = context.Target;
         var oldTransform = context.Transform;
