@@ -328,6 +328,32 @@ try {
         Set-Preview $true
         Play-Stress 'cold-playback'
         Play-Stress 'warm-playback'
+        # A slow software/VM decoder skips different frames on successive plays. Revisit exactly the
+        # frame times observed on the cold pass, instead of calling a mostly unrendered second pass warm.
+        $records = New-Object System.Collections.Generic.List[object]
+        $reader = [IO.StreamReader]::new([IO.File]::Open($TracePath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite))
+        try {
+            while (-not $reader.EndOfStream) {
+                $line = $reader.ReadLine()
+                try { $records.Add(($line | ConvertFrom-Json)) } catch { } # writer can have a partial final line
+            }
+        } finally { $reader.Dispose() }
+        $coldAt = ($records | Where-Object { $_.Stage -eq 'scenario' -and $_.Component -eq 'cold-playback' } | Select-Object -Last 1).StartTicks
+        $warmAt = ($records | Where-Object { $_.Stage -eq 'scenario' -and $_.Component -eq 'warm-playback' } | Select-Object -Last 1).StartTicks
+        $revisit = @($records | Where-Object { $_.Stage -eq 'timeline-update' -and $_.Usage -eq 'Playing' -and $_.StartTicks -ge $coldAt -and $_.StartTicks -lt $warmAt } |
+            ForEach-Object { [int][Math]::Round($_.FrameTimeTicks * 30.0 / 10000000) } | Sort-Object -Unique | Select-Object -First 5)
+        if ($revisit.Count -lt 3) { throw 'No cold playback frame times to revisit' }
+        $revisit | ConvertTo-Json | Set-Content (Join-Path $ArtifactDirectory 'stress-revisit.json') -Encoding UTF8
+        foreach ($pass in @(1,2)) {
+            Scenario ("stress-revisit-$pass")
+            foreach ($frame in $revisit) {
+                [Win]::SetForegroundWindow($main.Handle) | Out-Null
+                # Fixed CI timeline: 5 seconds / 150 pixels at 30 fps = one pixel per frame; origin x=100.
+                Click-At (100 + $frame) 518 "cold frame $frame"
+                Start-Sleep -Seconds 2
+            }
+            Snapshot-Stress ("stress-revisit-$pass")
+        }
         Scenario 'stress-seek'
         foreach ($x in @(250, 580, 350, 700, 190)) {
             Click-At $x 518 'the ruler during stress seek'
@@ -343,12 +369,14 @@ try {
         Snapshot-Stress 'stress-delete'
         Save-Stress 'stress-delete'
         Scenario 'stress-undo'
+        [Win]::SetForegroundWindow($main.Handle) | Out-Null
         [System.Windows.Forms.SendKeys]::SendWait('^z')
         Start-Sleep -Seconds 3
         Snapshot-Stress 'stress-undo'
         Save-Stress 'stress-undo'
         Shot 'stress-undo'
         Scenario 'stress-redo'
+        [Win]::SetForegroundWindow($main.Handle) | Out-Null
         [System.Windows.Forms.SendKeys]::SendWait('^y')
         Start-Sleep -Seconds 3
         Snapshot-Stress 'stress-redo'

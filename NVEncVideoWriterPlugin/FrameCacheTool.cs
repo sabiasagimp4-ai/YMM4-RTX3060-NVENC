@@ -262,6 +262,7 @@ public sealed class FrameCacheToolView : UserControl
     private readonly Button purge = new() { Content = "保存したキャッシュを消去", HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(12, 6, 12, 6) };
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly PluginSettingsPanel settingsPanel = new();
+    private long metricsAt;
 
     public FrameCacheToolView()
     {
@@ -355,5 +356,11 @@ public sealed class FrameCacheToolView : UserControl
             + $"GPU {TimelineFrameCache.GpuBytes / 1048576.0:N1} MiB / RAM {(store?.RamBytes ?? 0) / 1048576.0:N0} / {(store?.RamBudget ?? 0) / 1048576.0:N0} MiB（設定上限 {CacheMemoryController.Maximum / 1048576.0:N0} MiB）"
             + $" / ディスク {(store?.DiskBytes ?? 0) / 1048576.0:N0} MiB / 4 GiB\n"
             + $"ディスク書込待ち {(store?.QueuedWriteBytes ?? 0) / 1048576.0:N0} MiB（RAMの使用量表示とは別に保持）";
+        if (CacheTrace.Enabled && Environment.TickCount64 >= metricsAt)
+        {
+            metricsAt = Environment.TickCount64 + 5000;
+            using var metrics = CacheTrace.Measure("cache-metrics", "state");
+            if (metrics is not null) metrics.Detail = counts.Text + Environment.NewLine + status.Text;
+        }
     }
 }
