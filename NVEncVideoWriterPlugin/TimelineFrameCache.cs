@@ -14,6 +14,8 @@ using Vortice.Mathematics;
 using YukkuriMovieMaker.Commons;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
+using ItemRect = (YukkuriMovieMaker.Project.Items.IVideoItem item, Vortice.RawRectF rect, System.Numerics.Vector2[] quad,
+    YukkuriMovieMaker.Player.Video.DrawDescription desc, System.Collections.Generic.IEnumerable<YukkuriMovieMaker.Player.Video.VideoController> itemControllers);
 
 namespace NVEncVideoWriterPlugin;
 
@@ -24,6 +26,10 @@ internal static class TimelineFrameCache
     private const int RecordHeader = 24;
     private const int PreviewRecordHeader = 32;
     private const long GpuBudget = 384L * 1024 * 1024;
+    // Rect reuse depends on which preview controllers the host builds and from what state; read in YMM4 4.56.1.0.
+    private static readonly Guid RectReuseVerifiedHost = Guid.Parse("23e5b5b5-adcf-43b7-b976-b6b63f8dadea");
+    private static readonly TimeSpan RectsRefreshDelay = TimeSpan.FromMilliseconds(100);
+    private static readonly ConditionalWeakTable<string, ModelTraits> modelTraits = new();
     private static readonly ConditionalWeakTable<object, SourceState> sources = new();
     private static readonly ConditionalWeakTable<object, PlayerAssociation> sourcePlayers = new();
     private static readonly ConditionalWeakTable<Timeline, LatestViewport> latestViewports = new();
@@ -35,10 +41,11 @@ internal static class TimelineFrameCache
     private static FieldInfo playerSourceField = null!, playerContextField = null!, playerTargetField = null!;
     private static PropertyInfo needRects = null!, itemRects = null!, previewZoom = null!, previewCenter = null!, backBuffer = null!, playerIsPlaying = null!;
     private static MethodInfo visibleVideoSize = null!, previewTransform = null!;
+    private static FieldInfo? timelineChangedField, pointerOverPreviewField;
     private static Type pickerType = null!;
     private static long hits, misses, gpuBytes, generation;
     private static string status = "自動キャッシュは停止中です";
-    private static bool enabled;
+    private static bool enabled, rectsSupported, refreshSupported;
 
     internal static bool Enabled
     {
@@ -111,6 +118,7 @@ internal static class TimelineFrameCache
             var update = type.GetMethods(Instance).Single(m => m.Name == "Update" && m.GetParameters().Length == 2
                 && m.GetParameters()[0].ParameterType == typeof(TimeSpan));
             var dispose = type.GetMethod("Dispose", Instance, [typeof(bool)])!;
+            var edit = playerType.GetMethod("Edit", Instance, Type.EmptyTypes);
             if (playerSourceField.FieldType != type || playerContextField.FieldType != typeof(IGraphicsDevicesAndContext)
                 || previewZoom.PropertyType != typeof(float) || previewCenter.PropertyType != typeof(Vector2)
                 || playerIsPlaying.PropertyType != typeof(bool) || backBuffer.PropertyType != typeof(ID2D1Bitmap1)
@@ -123,6 +131,13 @@ internal static class TimelineFrameCache
             EnsureNoExternalHarmonyOwners(update, harmony.Id);
             EnsureNoExternalHarmonyOwners(dispose, harmony.Id);
             EnsureNoExternalHarmonyOwners(draw, harmony.Id);
+            // Optional: without them, frames that need item rects are rendered normally.
+            rectsSupported = host.ManifestModule.ModuleVersionId == RectReuseVerifiedHost && itemRects.PropertyType == typeof(List<ItemRect>);
+            timelineChangedField = playerType.GetField("isTimelineChanged", Instance);
+            pointerOverPreviewField = playerType.GetField("isMouseOverPreviewArea", Instance);
+            refreshSupported = rectsSupported && edit?.ReturnType == typeof(void)
+                && timelineChangedField?.FieldType == typeof(bool) && pointerOverPreviewField?.FieldType == typeof(bool)
+                && (Harmony.GetPatchInfo(edit)?.Owners.All(owner => owner == harmony.Id) ?? true);
             harmony.Patch(update, prefix: new HarmonyMethod(typeof(TimelineFrameCache), nameof(Prefix)),
                 postfix: new HarmonyMethod(typeof(TimelineFrameCache), nameof(Postfix)),
                 finalizer: new HarmonyMethod(typeof(TimelineFrameCache), nameof(Finalizer)));
@@ -131,6 +146,11 @@ internal static class TimelineFrameCache
             patched.Add(dispose);
             harmony.Patch(draw, prefix: new HarmonyMethod(typeof(TimelineFrameCache), nameof(ObservePlayer)));
             patched.Add(draw);
+            if (refreshSupported)
+            {
+                harmony.Patch(edit!, prefix: new HarmonyMethod(typeof(TimelineFrameCache), nameof(BeforeEdit)));
+                patched.Add(edit!);
+            }
             if (!FrameRenderReadiness.TryInstall(host, harmony, out reason))
                 throw new NotSupportedException(reason);
             reason = string.Empty;
@@ -155,9 +175,13 @@ internal static class TimelineFrameCache
     private sealed class SourceState(Scene scene)
     {
         internal readonly KeyDependencyTracker Tracker = new(scene);
+        internal readonly PreviewRects<ItemRect> Rects = new();
         internal string? LastKey;
         internal string? LastViewportKey;
         internal ID2D1CommandList? LastOutput;
+        // The key and project revision of the item rects currently in TimelineItemRects (null: none or unknown).
+        internal string? RectsKey;
+        internal long RectsRevision;
         internal long Bytes;
         internal long Generation;
         internal void Released()
@@ -167,13 +191,22 @@ internal static class TimelineFrameCache
             LastKey = null;
             LastViewportKey = null;
             LastOutput = null;
+            RectsKey = null;
         }
         ~SourceState() { Released(); try { Tracker.Dispose(); } catch { } }
     }
 
+    private sealed class ModelTraits(string model)
+    {
+        internal readonly bool ShowOnlyPreview = PreviewUsage.ModelUsesShowOnlyPreview(model);
+        internal readonly bool RectsReusable = PreviewUsage.RectsReusable(model);
+    }
+
+    private enum RectsUpdate { Clear, Keep, Restore, Defer }
+
     private sealed class Pending(SourceState state, Scene scene, IGraphicsDevicesAndContext devices,
         ID2D1CommandList? previousOutput, KeyCapture capture, string liveKey, string? cacheKey,
-        long generation, TimeSpan time, object usage, PreviewViewport? viewport) : IDisposable
+        long generation, TimeSpan time, string usageKey, PreviewViewport? viewport, bool wantRects, bool rectsReusable) : IDisposable
     {
         private int disposed;
         internal readonly SourceState State = state;
@@ -185,8 +218,10 @@ internal static class TimelineFrameCache
         internal readonly string? CacheKey = cacheKey;
         internal readonly long Generation = generation;
         internal readonly TimeSpan Time = time;
-        internal readonly object Usage = usage;
+        internal readonly string UsageKey = usageKey;
         internal readonly PreviewViewport? Viewport = viewport;
+        internal readonly bool WantRects = wantRects;
+        internal readonly bool RectsReusable = rectsReusable;
         internal bool CacheHit;
         public void Dispose() { if (Interlocked.Exchange(ref disposed, 1) == 0) Capture.Dispose(); }
     }
@@ -200,9 +235,10 @@ internal static class TimelineFrameCache
         try
         {
             string usageName = usage.ToString() ?? string.Empty;
-            bool exporting = usageName == "Exporting", playing = usageName == "Playing";
-            if (!exporting && !playing) return Bypass("プレビューのキャッシュは通常再生用の描画だけが対象です。");
-            if ((bool)needRects.GetValue(__instance)!) return Bypass("アイテムの表示枠が必要な描画のため、通常描画を使用します。");
+            bool exporting = usageName == "Exporting", paused = usageName == "Paused", preview = paused || usageName == "Playing";
+            if (!exporting && !preview) return Bypass("キャッシュの対象はプレビュー（再生・一時停止）と動画出力の描画だけです。");
+            bool wantRects = (bool)needRects.GetValue(__instance)!;
+            if (wantRects && (exporting || !rectsSupported)) return Bypass("アイテムの表示枠が必要な描画のため、通常描画を使用します。");
             var scene = (Scene)sceneField.GetValue(__instance)!;
             if (scene.ParentScenes.Length != 0) return Bypass("入れ子のシーンは通常描画を使用します。");
             var picker = pickerField.GetValue(__instance)!;
@@ -213,15 +249,36 @@ internal static class TimelineFrameCache
             if (!ValidContext(context)) return Bypass("描画コンテキストの状態が対象外のため、通常描画を使用します。");
             var state = sources.GetValue(__instance, _ => new SourceState(scene));
             if (!state.Tracker.TryCapture(out capture, out var reason, settle: true)) return Bypass(reason);
-            PreviewViewport? viewport = playing && TryGetPreviewViewportForSource(__instance, out var currentViewport)
+            var traits = modelTraits.GetValue(capture!.Model, static model => new ModelTraits(model));
+            string usageKey = exporting ? usageName : PreviewUsage.KeyFor(usageName, traits.ShowOnlyPreview);
+            PreviewViewport? viewport = preview && TryGetPreviewViewportForSource(__instance, out var currentViewport)
                 && currentViewport.SceneId == scene.ID && currentViewport.TimelineId == scene.Timeline.ID ? currentViewport : null;
-            string liveKey = MakeKey(capture!.Key, time, scene.FPS, usage, context, null);
-            string? cacheKey = exporting ? liveKey : viewport is { } value ? MakeKey(capture.Key, time, scene.FPS, usage, context, value) : null;
+            string liveKey = MakeKey(capture.Key, time, scene.FPS, usageKey, context, null);
+            string? cacheKey = exporting ? liveKey : viewport is { } value ? MakeKey(capture.Key, time, scene.FPS, usageKey, context, value) : null;
             long currentGeneration = Interlocked.Read(ref generation);
+            long revision = capture.Revision;
             var previousOutput = (ID2D1CommandList?)outputField.GetValue(__instance);
             pending = new Pending(state, scene, devices, previousOutput, capture, liveKey, cacheKey,
-                currentGeneration, time, usage, viewport);
+                currentGeneration, time, usageKey, viewport, wantRects, traits.RectsReusable);
             capture = null;
+            // With rects requested, a reused frame restores the rects of an earlier render of the same key and
+            // project revision, keeps the live ones, or (paused, pointer away from the preview) is shown without
+            // them until BeforeEdit asks the player to re-render it. Otherwise the frame is rendered normally.
+            ItemRect[]? recalled = null;
+            RectsUpdate? stored = RectsUpdate.Clear;
+            if (wantRects)
+            {
+                stored = null;
+                if (!state.Rects.IsMissing(time))
+                {
+                    if (traits.RectsReusable && state.Rects.TryRecall(liveKey, currentGeneration, revision, out var rects))
+                    {
+                        recalled = rects;
+                        stored = RectsUpdate.Restore;
+                    }
+                    else if (paused && refreshSupported && !PointerOverPreview(__instance)) stored = RectsUpdate.Defer;
+                }
+            }
             lock (cacheGate)
             {
                 if (currentGeneration == Interlocked.Read(ref generation) && state.Generation == currentGeneration
@@ -229,16 +286,20 @@ internal static class TimelineFrameCache
                     && state.LastOutput is { NativePointer: not 0 }
                     && ReferenceEquals(state.LastOutput, previousOutput))
                 {
-                    pending.CacheHit = true;
-                    Hit(devices, __instance);
-                    __state = pending;
-                    return false;
+                    var update = wantRects && traits.RectsReusable && !state.Rects.IsMissing(time)
+                        && state.RectsKey == liveKey && state.RectsRevision == revision ? RectsUpdate.Keep : stored;
+                    if (update is { } live)
+                    {
+                        Hit(__instance, pending, live, recalled);
+                        __state = pending;
+                        return false;
+                    }
                 }
             }
-            if (cacheKey is not null && store.Value.TryGet(cacheKey, out var record) && TryReplaceFrame(__instance, pending, record))
+            if (stored is { } fromStore && cacheKey is not null && store.Value.TryGet(cacheKey, out var record)
+                && TryReplaceFrame(__instance, pending, record))
             {
-                pending.CacheHit = true;
-                Hit(devices, __instance);
+                Hit(__instance, pending, fromStore, recalled);
                 __state = pending;
                 return false;
             }
@@ -257,6 +318,7 @@ internal static class TimelineFrameCache
         {
             if (__state.CacheHit) return;
             __state.State.Released(); // The host update disposed the previous source-owned output.
+            if (__state.WantRects) __state.State.Rects.Rendered(); // the host computed this frame's rects
             if (!FrameRenderReadiness.IsUpdateReady(__instance))
             {
                 status = FrameRenderReadiness.CoverageProblem ?? "動画のデコード完了を確認できないフレームは保存しません。";
@@ -273,6 +335,8 @@ internal static class TimelineFrameCache
                     status = "描画したフレームを保存しました。";
                 }
             }
+            // Rects of a frame whose decoding was not confirmed are never remembered (returned above).
+            var rects = __state.WantRects && __state.RectsReusable ? SnapshotRects(__instance) : null;
             lock (cacheGate) if (StillCurrent(__state) && sources.TryGetValue(__instance, out var current) && ReferenceEquals(current, __state.State))
             {
                 current.LastKey = __state.LiveKey;
@@ -280,6 +344,9 @@ internal static class TimelineFrameCache
                 current.LastOutput = output;
                 current.Bytes = 0;
                 current.Generation = __state.Generation;
+                current.RectsKey = rects is null ? null : __state.LiveKey;
+                current.RectsRevision = __state.Capture.Revision;
+                if (rects is not null) current.Rects.Remember(__state.LiveKey, rects, __state.Generation, __state.Capture.Revision);
             }
         }
         catch (Exception error) { status = "フレームの保存に失敗しました: " + error.GetType().Name; }
@@ -289,12 +356,13 @@ internal static class TimelineFrameCache
     private static Exception? Finalizer(Exception? __exception, Pending? __state) { __state?.Dispose(); return __exception; }
 
     private static bool StillCurrent(Pending value) => Enabled && value.Generation == Interlocked.Read(ref generation)
-        && value.Capture.Validate() && MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.Usage, value.Devices.DeviceContext, null) == value.LiveKey
-        && (value.Viewport is null || value.CacheKey == MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.Usage, value.Devices.DeviceContext, value.Viewport.Value));
+        && value.Capture.Validate() && MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.UsageKey, value.Devices.DeviceContext, null) == value.LiveKey
+        && (value.Viewport is null || value.CacheKey == MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.UsageKey, value.Devices.DeviceContext, value.Viewport.Value));
 
-    private static string MakeKey(string model, TimeSpan time, int fps, object usage, ID2D1DeviceContext context, PreviewViewport? viewport)
+    // usage: "Exporting", or the preview key from PreviewUsage.KeyFor ("Preview" unless ShowOnlyPreviewEffect is used).
+    private static string MakeKey(string model, TimeSpan time, int fps, string usage, ID2D1DeviceContext context, PreviewViewport? viewport)
     {
-        string value = $"pixels-v4|{RenderEnvironment(context)}|{model}|{FrameTimeKey.For(time, fps)}|{usage}|{context.AntialiasMode}|{context.TextAntialiasMode}|{context.PrimitiveBlend}";
+        string value = $"pixels-v5|{RenderEnvironment(context)}|{model}|{FrameTimeKey.For(time, fps)}|{usage}|{context.AntialiasMode}|{context.TextAntialiasMode}|{context.PrimitiveBlend}";
         if (viewport is { } view)
             value += $"|{view.SceneId:N}|{view.TimelineId:N}|{view.Width}|{view.Height}|{Bits(view.Transform.M11)}|{Bits(view.Transform.M12)}|{Bits(view.Transform.M21)}|{Bits(view.Transform.M22)}|{Bits(view.Transform.M31)}|{Bits(view.Transform.M32)}|{Bits(view.TargetOffset.X)}|{Bits(view.TargetOffset.Y)}|{Bits(view.DpiX)}|{Bits(view.DpiY)}|{view.BackBufferFormat.Format}|{view.BackBufferFormat.AlphaMode}|{view.AntialiasMode}|{view.TextAntialiasMode}|{view.PrimitiveBlend}|{view.UnitMode}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
@@ -369,7 +437,9 @@ internal static class TimelineFrameCache
             using (capture)
             {
                 if (expectedModelKey is not null && capture!.Key != expectedModelKey) return false;
-                var key = MakeKey(capture!.Key, time, scene.FPS, usage, context, viewport);
+                var traits = modelTraits.GetValue(capture!.Model, static model => new ModelTraits(model));
+                string usageKey = exporting ? usageName : PreviewUsage.KeyFor(usageName, traits.ShowOnlyPreview);
+                var key = MakeKey(capture.Key, time, scene.FPS, usageKey, context, viewport);
                 var output = (ID2D1CommandList)outputField.GetValue(timelineSource)!;
                 var record = viewport is { } view ? CapturePreview(context, output, view) : CaptureScene(context, output, scene);
                 lock (cacheGate)
@@ -482,14 +552,64 @@ internal static class TimelineFrameCache
     private static bool ValidContext(ID2D1DeviceContext context) => context.Transform == Matrix3x2.Identity
         && context.Dpi.Width == 96 && context.Dpi.Height == 96 && context.UnitMode == UnitMode.Dips;
     private static bool Bypass(string reason) { status = reason; return true; }
-    private static void Hit(IGraphicsDevicesAndContext devices, object source)
+    private static void Hit(object source, Pending pending, RectsUpdate update, ItemRect[]? recalled)
     {
+        pending.CacheHit = true;
+        var devices = pending.Devices;
         devices.CacheProvider.InvalidateIfSourceSettingsChanged();
         devices.CacheProvider.Clear();
         var rects = (IList)itemRects.GetValue(source)!;
-        lock (rects) rects.Clear();
+        lock (rects)
+        {
+            if (update != RectsUpdate.Keep) rects.Clear();
+            if (update == RectsUpdate.Restore)
+            {
+                var typed = (List<ItemRect>)rects;
+                foreach (var rect in recalled!) typed.Add((rect.item, rect.rect, (Vector2[])rect.quad.Clone(), rect.desc, rect.itemControllers));
+            }
+        }
+        lock (cacheGate)
+        {
+            pending.State.RectsKey = update is RectsUpdate.Keep or RectsUpdate.Restore ? pending.LiveKey : null;
+            pending.State.RectsRevision = pending.Capture.Revision;
+        }
+        if (pending.WantRects)
+        {
+            if (update == RectsUpdate.Defer) pending.State.Rects.MarkMissing(pending.Time, System.Diagnostics.Stopwatch.GetTimestamp());
+            else pending.State.Rects.Rendered();
+        }
         Interlocked.Increment(ref hits);
-        status = "動画出力キャッシュを再利用しました";
+        status = update == RectsUpdate.Defer ? "キャッシュから表示しました（表示枠は静止後に再計算します）"
+            : pending.WantRects ? "キャッシュから表示しました（表示枠も復元しました）" : "動画出力キャッシュを再利用しました";
+    }
+
+    // The controllers are materialized: the host enumerates them from Draw and the UI thread later.
+    private static ItemRect[] SnapshotRects(object source)
+    {
+        var rects = (List<ItemRect>)itemRects.GetValue(source)!;
+        lock (rects)
+            return rects.Select(rect => (rect.item, rect.rect, (Vector2[])rect.quad.Clone(), rect.desc,
+                (IEnumerable<YukkuriMovieMaker.Player.Video.VideoController>)rect.itemControllers.ToArray())).ToArray();
+    }
+
+    // Unknown pointer state counts as over the preview: the frame is then rendered with its rects.
+    private static bool PointerOverPreview(object source) =>
+        !sourcePlayers.TryGetValue(source, out var association) || association.Player is null
+        || !association.Player.TryGetTarget(out var player) || !ReferenceEquals(playerSourceField.GetValue(player), source)
+        || pointerOverPreviewField?.GetValue(player) is not false;
+
+    // Runs on the player's render loop before it decides whether to update a paused frame: a frame shown
+    // without rects is re-rendered once the playhead rests on it, or at once when the pointer is over the preview.
+    private static void BeforeEdit(object __instance)
+    {
+        try
+        {
+            if (playerSourceField.GetValue(__instance) is not { } source || !sources.TryGetValue(source, out var state)) return;
+            var delay = pointerOverPreviewField!.GetValue(__instance) is true ? TimeSpan.Zero : RectsRefreshDelay;
+            if (state.Rects.ShouldRequestRefresh(System.Diagnostics.Stopwatch.GetTimestamp(), delay))
+                timelineChangedField!.SetValue(__instance, true);
+        }
+        catch { }
     }
     private static void Disposed(object __instance, bool disposing)
     {
@@ -631,7 +751,7 @@ internal static class TimelineFrameCache
     {
         if (!StillCurrent(pending) || !ParseRecord(record.Span, out int width, out int height, out var origin, out int version, out float dpiX, out float dpiY))
             return false;
-        bool exporting = pending.Usage.ToString() == "Exporting";
+        bool exporting = pending.UsageKey == "Exporting";
         if (exporting && version != 1) return false;
         if (!exporting)
         {

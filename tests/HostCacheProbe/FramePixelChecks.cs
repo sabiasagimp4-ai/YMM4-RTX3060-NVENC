@@ -112,6 +112,8 @@ internal static class FramePixelChecks
             }
             Check(TimelineFrameCache.GpuBytes == 0, "Source disposal leaked global GPU reservation");
             Console.WriteLine("Actual host automatic source cache: hit/parity/invalidation/GPU cleanup OK");
+            PreviewRectChecks.Run(host, context);
+            Check(TimelineFrameCache.GpuBytes == 0, "Preview rect checks leaked global GPU reservation");
             CheckVideoDecodeFailureIsNotStored(host, context, videoPath);
         }
         finally
@@ -222,8 +224,8 @@ internal static class FramePixelChecks
         var cached = CapturePreview(dc, savedImage, width, height, transform);
         Check(direct.SequenceEqual(cached), "Viewport cache changed pixels under TimelineVideoPlayer's late zoom/pan transform");
         var makeKey = typeof(TimelineFrameCache).GetMethod("MakeKey", BindingFlags.NonPublic | BindingFlags.Static)!;
-        var key = (string)makeKey.Invoke(null, ["model", TimeSpan.Zero, 30, TimelineSourceUsage.Playing, dc, viewport])!;
-        var changed = (string)makeKey.Invoke(null, ["model", TimeSpan.Zero, 30, TimelineSourceUsage.Playing, dc,
+        var key = (string)makeKey.Invoke(null, ["model", TimeSpan.Zero, 30, "Preview", dc, viewport])!;
+        var changed = (string)makeKey.Invoke(null, ["model", TimeSpan.Zero, 30, "Preview", dc,
             viewport with { Transform = Matrix3x2.CreateTranslation(1, 0) * transform }])!;
         Check(key != changed, "Preview cache key ignored the view transform");
         Console.WriteLine("Late preview zoom/pan parity and transform-key invalidation OK");
