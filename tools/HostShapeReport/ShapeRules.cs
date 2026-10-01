@@ -14,11 +14,17 @@ internal static class ShapeRules
     internal static string Predict(Type type, Type videoSource)
     {
         if (!type.IsClass || type.ContainsGenericParameters) return "unhookable";
-        if (FindField(type, "decodedFrame") is { } frame && !frame.FieldType.IsValueType
-            && HasTime(frame.FieldType, "SampleTime") && HasTime(frame.FieldType, "SampleDuration")) return "MF2";
-        if (HasTime(type, "currentTime") && HasTime(type, "currentDuration") && HasTime(type, "streamStartTime")) return "legacy";
-        if (type.Name == "CachedVideoFileSource" && InnerSources(type, videoSource).Count == 1) return "wrapper";
-        return "unverified";
+        return type.FullName switch
+        {
+            "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.Source2.MFVideoFileSource2" =>
+                FindField(type, "decodedFrame") is { } frame && !frame.FieldType.IsValueType
+                && HasTime(frame.FieldType, "SampleTime") && HasTime(frame.FieldType, "SampleDuration") ? "MF2" : "unverified",
+            "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.MFVideoFileSource" => StreamClock(type, false) ? "MF-legacy" : "unverified",
+            "YukkuriMovieMaker.Plugin.FileSource.FFmpeg.FFmpegVideoFileSource" => StreamClock(type, true) ? "FFmpeg" : "unverified",
+            "YukkuriMovieMaker.Plugin.FileSource.WIC.WICGifVideoSource" or "YukkuriMovieMaker.Plugin.FileSource.WIC.WICWebpVideoSource" => "WIC",
+            "YukkuriMovieMaker.Plugin.CachedVideoFileSource" => WrappedSource(type, videoSource) is not null ? "wrapper" : "unverified",
+            _ => "unverified",
+        };
     }
 
     internal static FieldInfo? FindField(Type type, string name)
@@ -28,13 +34,20 @@ internal static class ShapeRules
         return null;
     }
 
-    internal static List<FieldInfo> InnerSources(Type type, Type videoSource)
+    // CachedVideoFileSource delegates to resource.Source.
+    internal static PropertyInfo? WrappedSource(Type type, Type videoSource)
     {
-        var fields = new List<FieldInfo>();
-        for (var value = type; value is not null; value = value.BaseType)
-            fields.AddRange(value.GetFields(Instance | BindingFlags.DeclaredOnly).Where(field => videoSource.IsAssignableFrom(field.FieldType)));
-        return fields;
+        if (FindField(type, "resource") is not { } resource || resource.FieldType.IsValueType) return null;
+        PropertyInfo? source;
+        try { source = resource.FieldType.GetProperty("Source", Instance); }
+        catch (AmbiguousMatchException) { return null; }
+        return source?.GetMethod is not null && source.GetIndexParameters().Length == 0 && videoSource.IsAssignableFrom(source.PropertyType)
+            ? source : null;
     }
+
+    private static bool StreamClock(Type type, bool needsDuration) =>
+        HasTime(type, "currentTime") && HasTime(type, "currentDuration") && HasTime(type, "streamStartTime")
+        && (!needsDuration || HasTime(type, "Duration"));
 
     // A field of that name decides alone; otherwise a readable, non-indexed property is accepted.
     private static bool HasTime(Type type, string name)

@@ -227,10 +227,15 @@ internal static class FrameRenderReadiness
     private static void DecoderFinalizer(object __instance, object[] __args, MethodBase __originalMethod, Exception? __exception)
     {
         var scope = current.Value;
-        if (scope is null || Volatile.Read(ref scope.Completed) != 0)
+        // TimelineSource.Update prefetches items about a second ahead with Task.Run, which captures the
+        // current scope; that decode can finish after the frame completed. The frame that later adopts the
+        // prefetched source updates it again at its own time inside its own scope, so the late decode
+        // proves nothing for any frame and is ignored.
+        if (scope is not null && Volatile.Read(ref scope.Completed) != 0) return;
+        if (scope is null)
         {
-            // Decode outside any open render scope. If a render is in flight, attribution may have been
-            // lost (execution context not flowed), so every in-flight frame is treated as unverified.
+            // Decode outside any render scope. If a render is in flight, attribution may have been lost
+            // (execution context not flowed), so every in-flight frame is treated as unverified.
             if (!active.IsEmpty) FailAllActive();
             return;
         }
@@ -326,10 +331,7 @@ internal static class FrameRenderReadiness
         var targets = types.ToDictionary(type => type, type => ImplementationOf(type, hostBinding.InterfaceUpdate));
         var names = new Dictionary<Type, string>();
         foreach (var type in types)
-        {
-            if (DescribeMf2(type) is { } mf2) { hostBinding.Verified[type] = mf2.Holds; names[type] = mf2.Name; }
-            else if (DescribeLegacy(type) is { } legacy) { hostBinding.Verified[type] = legacy.Holds; names[type] = legacy.Name; }
-        }
+            if (DescribeVerified(type) is { } verified) { hostBinding.Verified[type] = verified.Holds; names[type] = verified.Name; }
         foreach (var type in types)
         {
             if (hostBinding.Verified.TryGetValue(type, out var verified)) hostBinding.Classifiers[type] = verified;
@@ -410,41 +412,68 @@ internal static class FrameRenderReadiness
     private static bool Covers(TimeSpan start, TimeSpan duration, TimeSpan time) =>
         duration > TimeSpan.Zero && start <= time && time < start + duration;
 
-    // MF2 source: the frame is valid only while decodedFrame is set and its sample interval contains t.
+    // Pinned to host types whose Update was read (ILSpy, YMM4 4.56.1.0; see CLAUDE_HANDOFF.md). A pinned
+    // type whose fields no longer match, and every other implementation, is unverified.
+    internal const string Mf2TypeName = "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.Source2.MFVideoFileSource2";
+    internal const string MfLegacyTypeName = "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.MFVideoFileSource";
+    internal const string FFmpegTypeName = "YukkuriMovieMaker.Plugin.FileSource.FFmpeg.FFmpegVideoFileSource";
+    internal const string WicGifTypeName = "YukkuriMovieMaker.Plugin.FileSource.WIC.WICGifVideoSource";
+    internal const string WicWebpTypeName = "YukkuriMovieMaker.Plugin.FileSource.WIC.WICWebpVideoSource";
+    internal const string WrapperTypeName = "YukkuriMovieMaker.Plugin.CachedVideoFileSource";
+
+    private static (string Name, Func<object, TimeSpan, bool> Holds)? DescribeVerified(Type type) => type.FullName switch
+    {
+        Mf2TypeName => DescribeMf2(type),
+        MfLegacyTypeName => DescribeStreamClock(type, "MF-legacy", excludeStretchedToEnd: false),
+        FFmpegTypeName => DescribeStreamClock(type, "FFmpeg", excludeStretchedToEnd: true),
+        // Synchronous WIC decode: failures throw (the decoder finalizer fails the frame). The only swallowed
+        // GIF error clears the frame deterministically for that file.
+        WicGifTypeName or WicWebpTypeName => ("WIC (synchronous decode; an exception fails the frame)", static (_, _) => true),
+        _ => null,
+    };
+
+    // MFVideoFileSource2 itself treats the frame as valid exactly while decodedFrame is set and its sample
+    // interval contains t; a failed TryDecodeAt leaves it null and draws transparency.
     private static (string Name, Func<object, TimeSpan, bool> Holds)? DescribeMf2(Type type)
     {
         if (FindField(type, "decodedFrame") is not { } frameField || frameField.FieldType.IsValueType) return null;
         if (TimeReader(frameField.FieldType, "SampleTime") is not { } start
             || TimeReader(frameField.FieldType, "SampleDuration") is not { } duration) return null;
-        return ($"MF2 ({frameField.DeclaringType!.Name}.decodedFrame: {frameField.FieldType.Name}.SampleTime/SampleDuration)",
+        return ($"MF2 ({frameField.FieldType.Name}.SampleTime/SampleDuration contains t)",
             (instance, time) => frameField.GetValue(instance) is { } frame && Covers(start(frame), duration(frame), time));
     }
 
-    // Legacy source: timeout/error clears the frame (currentDuration = 0). How streamStartTime relates to t
-    // is not verified, so a nonzero stream start must hold under both readings or the frame is unverified.
-    private static (string Name, Func<object, TimeSpan, bool> Holds)? DescribeLegacy(Type type)
+    // MFVideoFileSource and FFmpegVideoFileSource add streamStartTime to t and keep the displayed sample as
+    // [currentTime, currentTime + currentDuration); timeouts, errors and out-of-range times set a zero duration.
+    // FFmpeg also stretches the last decoded frame up to the stream end when decoding stops early (end of
+    // file or a read error), which cannot be told apart from a transient failure, so that is rejected.
+    private static (string Name, Func<object, TimeSpan, bool> Holds)? DescribeStreamClock(Type type, string label, bool excludeStretchedToEnd)
     {
         if (TimeReader(type, "currentTime") is not { } start || TimeReader(type, "currentDuration") is not { } duration
             || TimeReader(type, "streamStartTime") is not { } streamStart) return null;
-        return ("legacy (currentTime/currentDuration/streamStartTime)", (instance, time) =>
-        {
-            TimeSpan from = start(instance), length = duration(instance), offset = streamStart(instance);
-            return Covers(from, length, time) && (offset == TimeSpan.Zero || Covers(from, length, time + offset));
-        });
+        Func<object, TimeSpan>? length = null;
+        if (excludeStretchedToEnd && (length = TimeReader(type, "Duration")) is null) return null;
+        return ($"{label} (currentTime/currentDuration contains t + streamStartTime{(length is null ? string.Empty : ", not stretched to the end")})",
+            (instance, time) =>
+            {
+                TimeSpan from = start(instance), span = duration(instance), offset = streamStart(instance);
+                return Covers(from, span, time + offset) && (length is null || from + span < offset + length(instance));
+            });
     }
 
-    // CachedVideoFileSource delegates to one inner source. The inner source's own sample state is checked
-    // here too, because the wrapper may serve a frame without calling the inner Update.
+    // CachedVideoFileSource (the factory wraps every video source in it) delegates Update and Output to
+    // resource.Source. The inner state is checked here too, so the wrapper never vouches for more than it holds.
     private static (string Name, Func<object, TimeSpan, bool> Holds)? DescribeWrapper(Type type, Type videoSource,
         IReadOnlyDictionary<Type, Func<object, TimeSpan, bool>> verified)
     {
-        if (type.Name != "CachedVideoFileSource") return null;
-        var fields = new List<FieldInfo>();
-        for (var value = type; value is not null; value = value.BaseType)
-            fields.AddRange(value.GetFields(Instance | BindingFlags.DeclaredOnly).Where(field => videoSource.IsAssignableFrom(field.FieldType)));
-        if (fields is not [var inner]) return null;
-        return ($"wrapper (inner {inner.Name} must be a verified source holding t)", (instance, time) =>
-            inner.GetValue(instance) is { } source && verified.TryGetValue(source.GetType(), out var holds) && holds(source, time));
+        if (type.FullName != WrapperTypeName || FindField(type, "resource") is not { } resource || resource.FieldType.IsValueType) return null;
+        PropertyInfo? source;
+        try { source = resource.FieldType.GetProperty("Source", Instance); }
+        catch (AmbiguousMatchException) { return null; }
+        if (source?.GetMethod is null || source.GetIndexParameters().Length != 0 || !videoSource.IsAssignableFrom(source.PropertyType)) return null;
+        return ("wrapper (resource.Source must be a verified source holding t)", (instance, time) =>
+            resource.GetValue(instance) is { } held && source.GetValue(held) is { } inner
+            && verified.TryGetValue(inner.GetType(), out var holds) && holds(inner, time));
     }
 
     private sealed class MethodHandleComparer : IEqualityComparer<MethodInfo>

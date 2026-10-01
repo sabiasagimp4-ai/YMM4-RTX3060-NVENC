@@ -68,7 +68,7 @@ if (interfaces.Length == 1)
             DumpProperties(frame.FieldType, "    ");
         }
         if (type.Name == "CachedVideoFileSource")
-            Console.WriteLine($"  inner video source fields: {string.Join(", ", ShapeRules.InnerSources(type, videoSource).Select(field => field.Name))}");
+            Console.WriteLine($"  wrapped source: {(ShapeRules.WrappedSource(type, videoSource) is { } source ? $"resource.{source.Name}: {TypeName(source.PropertyType)}" : "not found")}");
     }
 }
 
