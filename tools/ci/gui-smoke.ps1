@@ -85,15 +85,6 @@ function Texts($element, [string] $label) {
     $texts | Select-Object -First 200 | ForEach-Object { Write-Output "  $_" }
 }
 
-# The cache tool's counters (reuse by path, renders, stored preview frames, disk reads/writes).
-function Counts([string] $label) {
-    foreach ($window in Windows-Of $process) {
-        $condition = New-Object System.Windows.Automation.PropertyCondition($ae::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text)
-        $ae::FromHandle($window.Handle).FindAll($scope::Descendants, $condition) | ForEach-Object { $_.Current.Name } |
-            Where-Object { $_ -match (U '\u518D\u5229\u7528|\u4FDD\u5B58|\u5148\u8AAD\u307F') } | ForEach-Object { Write-Output "counts ($label): $_" }
-    }
-}
-
 function List-Windows($process) {
     Windows-Of $process | ForEach-Object { Write-Output ("window: [{0}] '{1}' {2}" -f $_.Class, $_.Title, $_.Rect) }
 }
@@ -248,7 +239,13 @@ try {
     Click-At 250 518 'the ruler at 5 s'
     Start-Sleep -Seconds 4
     Shot 'seek'
-    Counts 'after the seek'
+    # YMM4 draws an item's border only under the mouse (or while dragging): hover over the Layer 00 rectangle in the
+    # preview. On a cached frame, the item rects it hit-tests are the ones the cache restored.
+    [Win]::SetCursorPos(468, 237) | Out-Null
+    Start-Sleep -Milliseconds 300
+    [Win]::SetCursorPos(472, 237) | Out-Null
+    Start-Sleep -Seconds 2
+    Shot 'seek-hover'
 
     # Normal playback beyond the pre-rendered 10 s: seek to 16 s and play at once (before the pre-renderer's idle
     # delay), so the host renders these frames and the cache stores them; then the same range again.
@@ -260,8 +257,7 @@ try {
         Start-Sleep -Seconds 3
         [System.Windows.Forms.SendKeys]::SendWait(' ')
         Start-Sleep -Seconds 2
-        Shot "playback-$pass"
-        Counts "after playback pass $pass"
+        Shot "playback-$pass" # the tool's counters are in the picture (its texts are not exposed to UI Automation)
     }
     List-Windows $process
     foreach ($window in Windows-Of $process) { Texts ($ae::FromHandle($window.Handle)) $window.Title }
