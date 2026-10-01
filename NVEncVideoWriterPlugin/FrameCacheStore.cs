@@ -137,23 +137,33 @@ internal sealed class FrameCacheStore : IDisposable
         }
     }
 
-    // Read-ahead for frames about to be shown: queues reads (ahead of writes) for the keys stored on disk only, in
-    // order, up to half the RAM budget so that they do not evict each other before use. Never waits for I/O.
+    // Read-ahead for frames about to be shown, in the order given: the stored ones up to half the RAM budget form the
+    // window. Those in RAM are kept (moved to the recent end), those on disk only are read before queued writes.
+    // Counting the frames already in RAM keeps the window from outgrowing RAM and evicting itself. Never waits.
     internal int Prefetch(IReadOnlyList<string?> keys)
     {
         lock (_gate)
         {
-            if (_disposed || !_indexReady || !DiskReadable()) return 0;
+            if (_disposed || !_indexReady) return 0;
+            bool disk = DiskReadable();
             long bytes = 0;
             int queued = 0;
             foreach (string? candidate in keys)
             {
                 if (candidate is null || !ValidKey(candidate)) continue;
                 string key = candidate.ToLowerInvariant();
-                if (_ram.ContainsKey(key) || !_disk.TryGetValue(key, out var entry)) continue;
-                bytes += entry.Bytes - HeaderBytes;
-                if (bytes > _ramBudget / 2) break;
-                if (QueueRead(key, _generation)) queued++;
+                if (_ram.TryGetValue(key, out var memory))
+                {
+                    bytes += memory.Pixels.LongLength;
+                    if (bytes > _ramBudget / 2) break;
+                    Touch(_ramLru, memory.Node);
+                }
+                else if (disk && _disk.TryGetValue(key, out var entry))
+                {
+                    bytes += entry.Bytes - HeaderBytes;
+                    if (bytes > _ramBudget / 2) break;
+                    if (QueueRead(key, _generation)) queued++;
+                }
             }
             return queued;
         }

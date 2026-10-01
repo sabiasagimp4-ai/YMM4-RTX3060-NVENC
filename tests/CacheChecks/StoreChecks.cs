@@ -232,8 +232,9 @@ internal static class StoreChecks
             Check(cache.DiskDeliveries == 1 && cache.DiskReads == 1, $"delivery counters: {cache.DiskDeliveries}/{cache.DiskReads}");
             Check(cache.TryGet(key(20), TimeSpan.Zero, out _, out fromDisk) && !fromDisk && cache.DiskDeliveries == 1, "a second hit counts as RAM");
             Check(!cache.TryGet(key(99), TimeSpan.FromSeconds(5), out _, out _), "a key that is not stored does not wait");
-            // RAM budget 32: read-ahead may use 16 bytes, one frame; key(20) is already in RAM.
-            Check(cache.Prefetch([key(20), key(21), key(22), null, "not-a-key"]) == 1, "read-ahead ignores RAM frames and stays within half the RAM budget");
+            // RAM budget 32: the read-ahead window is 16 bytes, one frame. key(20) in RAM fills it; then one read.
+            Check(cache.Prefetch([key(20), key(21)]) == 0, "a frame already in RAM counts toward the read-ahead window");
+            Check(cache.Prefetch([null, "not-a-key", key(99), key(21), key(22)]) == 1, "read-ahead stays within half the RAM budget");
             WaitFor(() => { cache.GetResidency([key(21)], residency); return residency[0] == 2; }, "read-ahead warms RAM");
             Check(cache.TryGet(key(21), out var prefetched) && prefetched.Span.SequenceEqual(frame) && cache.DiskDeliveries == 2,
                 "a prefetched frame is a disk delivery");
