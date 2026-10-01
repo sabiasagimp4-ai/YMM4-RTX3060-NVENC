@@ -101,16 +101,30 @@ try {
         Start-Sleep -Seconds 2
         $windows = @(Windows-Of $process)
         $windows | ForEach-Object { Write-Output ("window: [{0}] '{1}' {2}" -f $_.Class, $_.Title, $_.Rect) }
-        $candidate = $windows | Where-Object { $_.Title -match 'gui-smoke' } | Sort-Object Area -Descending | Select-Object -First 1
+        # The main window is titled "YukkuriMovieMaker v<version> ..."; wait until the project has loaded.
+        $loading = $windows | Where-Object { $_.Title -match '^Loading' }
+        $candidate = $windows | Where-Object { -not $loading -and $_.Class -like 'HwndWrapper*' -and $_.Title -match '^YukkuriMovieMaker v' } |
+            Sort-Object Area -Descending | Select-Object -First 1
         # The first start shows the "about" window (ShowDialog) before the main window.
         foreach ($window in $windows | Where-Object { -not $candidate -and $_.Class -like 'HwndWrapper*' -and $_.Title -match '^About' }) {
             Write-Output "closing '$($window.Title)'"
             [Win]::PostMessage($window.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
         }
+        # Message boxes (e.g. "associate the YMM4 file extensions?"): answer No, or the only button there is.
         foreach ($window in $windows | Where-Object { $_.Class -eq '#32770' }) {
-            Texts ($ae::FromHandle($window.Handle)) 'dialog'
-            [Win]::PostMessage($window.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+            $dialog = $ae::FromHandle($window.Handle)
+            Texts $dialog 'dialog'
+            $buttons = @($dialog.FindAll($scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition ($ae::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button))))
+            $button = $buttons | Where-Object { $_.Current.Name -match '^&?No' } | Select-Object -First 1
+            if (-not $button -and $buttons.Count -eq 1) { $button = $buttons[0] }
+            if ($button) {
+                Write-Output "answering '$($window.Title)' with '$($button.Current.Name)'"
+                $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+            } else {
+                [Win]::PostMessage($window.Handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+            }
         }
+        if ($candidate -and @($windows | Where-Object { $_.Class -eq '#32770' }).Count -ne 0) { continue }
         if ($candidate) {
             foreach ($window in $windows | Where-Object { $_.Handle -ne $candidate.Handle -and $_.Area -gt 10000 -and $_.Class -like 'HwndWrapper*' }) {
                 Write-Output "closing extra window '$($window.Title)'"
