@@ -85,6 +85,15 @@ function Texts($element, [string] $label) {
     $texts | Select-Object -First 200 | ForEach-Object { Write-Output "  $_" }
 }
 
+# The cache tool's counters (reuse by path, renders, stored preview frames, disk reads/writes).
+function Counts([string] $label) {
+    foreach ($window in Windows-Of $process) {
+        $condition = New-Object System.Windows.Automation.PropertyCondition($ae::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text)
+        $ae::FromHandle($window.Handle).FindAll($scope::Descendants, $condition) | ForEach-Object { $_.Current.Name } |
+            Where-Object { $_ -match (U '\u518D\u5229\u7528|\u4FDD\u5B58|\u5148\u8AAD\u307F') } | ForEach-Object { Write-Output "counts ($label): $_" }
+    }
+}
+
 function List-Windows($process) {
     Windows-Of $process | ForEach-Object { Write-Output ("window: [{0}] '{1}' {2}" -f $_.Class, $_.Title, $_.Rect) }
 }
@@ -239,6 +248,21 @@ try {
     Click-At 250 518 'the ruler at 5 s'
     Start-Sleep -Seconds 4
     Shot 'seek'
+    Counts 'after the seek'
+
+    # Normal playback beyond the pre-rendered 10 s: seek to 16 s and play at once (before the pre-renderer's idle
+    # delay), so the host renders these frames and the cache stores them; then the same range again.
+    foreach ($pass in 1, 2) {
+        Click-At 580 518 'the ruler at 16 s'
+        Start-Sleep -Milliseconds 300
+        [Win]::SetForegroundWindow($main.Handle) | Out-Null
+        [System.Windows.Forms.SendKeys]::SendWait(' ')
+        Start-Sleep -Seconds 3
+        [System.Windows.Forms.SendKeys]::SendWait(' ')
+        Start-Sleep -Seconds 2
+        Shot "playback-$pass"
+        Counts "after playback pass $pass"
+    }
     List-Windows $process
     foreach ($window in Windows-Of $process) { Texts ($ae::FromHandle($window.Handle)) $window.Title }
 }

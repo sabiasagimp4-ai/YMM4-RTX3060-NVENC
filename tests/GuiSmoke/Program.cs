@@ -38,11 +38,12 @@ internal static class Program
         timeline.VideoInfo.Width = 1280;
         timeline.VideoInfo.Height = 720;
         timeline.VideoInfo.FPS = 30;
-        var first = new ShapeItem { Frame = 0, Length = 300, Layer = 0 };
+        // 20 s: the idle pre-renderer covers 10 s from the playhead, so normal playback near the end renders new frames.
+        var first = new ShapeItem { Frame = 0, Length = 600, Layer = 0 };
         first.X.SetFirstValue(-250);
         var second = new ShapeItem { Frame = 150, Length = 150, Layer = 1 };
         second.X.SetFirstValue(250);
-        var text = new TextItem { Frame = 30, Length = 240, Layer = 2, Text = "cache smoke", Font = "Arial" };
+        var text = new TextItem { Frame = 30, Length = 540, Layer = 2, Text = "cache smoke", Font = "Arial" };
         text.Y.SetFirstValue(200);
         timeline.Items = timeline.Items.Add(first).Add(second).Add(text);
         var scenes = new Scenes(false);
