@@ -1,8 +1,33 @@
 # Claude 引継ぎ — YMM4 RTX3060 NVENC / AE風キャッシュ
 
-更新日: 2026-10-01（追記3まで）。これは **未完成の作業保存（WIP checkpoint）** です。製品完成・配布可能・AE完全再現を意味しません。
+更新日: 2026-10-01（追記4まで）。これは **未完成の作業保存（WIP checkpoint）** です。製品完成・配布可能・AE完全再現を意味しません。
 
 ## 最初に読むこと
+
+### 2026-10-01 追記（4）— YMM4 の版が変わっても止まらないようにする
+
+ユーザー:「バージョンが変わったら全部動かなくなってしまう可能性があるのは不便」。従来は本体・Plugin・Settings の MVID/SHA-256 が KnownHosts と一致しないと、キャッシュだけでなく **NVENC 出力まで開始しない**作りでした。
+
+**出力（`HostIntegration.Install`）**: どの版でも `HostExportScope` の構造契約（`VideoFileWriter.CreateFileAsync(ProgressMessage, CancellationToken)`、`scene`/`settings`、`EncodeFrom`/`EncodeTo` の型）が合えば出力フックを入れます。予定フレーム数・取消の判定で完成ファイルを置き換えないので、中身が変わっても既存ファイルは壊れません（意味が変わった場合は「出力されない」側に倒れます）。
+
+**キャッシュ（`HostFingerprint.cs`、`HostContracts.cs`、`HostBaselines.cs`、`HostFeatures.cs`）**
+- `HostFingerprint`: PE を System.Reflection.Metadata で読み、型ごとに「基底・interface・フィールド・シリアライズ属性・全メソッドの IL（トークンを名前に、分岐先を命令番号に、コンパイラ生成の番号を # に）＋コンパイラ生成の入れ子型」を SHA-256 にします。読み込み・実行はしません。4.56.1.0 全 5146 型で約 2.5 秒、決定的。
+- `HostContracts.Rules`: 機能ごとの「前提にしている本体の部分」= 明示した型（`Type`、`Type+`=入れ子込み、`Type::Method`=そのメソッドだけ）＋ **witness**（その機能の規則に関わることをするコードの全型）。witness は 4.56.1.0 を読んだときの grep を機械化したもの: `TimelineSourceUsage` を参照する型（usage で描画が変わるコード）、`Timeline(Item)SourceDescription::get_Scenes`（他シーンを読む）、`Player.Audio.Items.SceneSource`、`IItemPicker`、`GetFiles/GetResources` の定義、描画系 namespace から `YukkuriMovieMaker.Settings.*::` の参照、`VideoController/VideoEffectController::.ctor`、`CreateVideoFileSource` など。対象 assembly は YukkuriMovieMaker と YukkuriMovieMaker.Plugin（FrameCacheKey がそれ以外の `$type` を bypass するため）。デコーダーは assembly 単位（FFmpeg / MediaFoundation / WIC）。
+- 機能: `core`（キャッシュ全体）、`preview`（TimelineVideoPlayer）、`selection-rects`、`wrapped-sources`、`ruler-bars`、`decoder:<assembly>`。`Requires` の依存つき。
+- 未確認の版では起動時に `HostContracts.Describe(本体フォルダー)` → `Evaluate`（記録済みの版のどれかと core が一致すれば、その版との差が無い機能だけ ON）。判定は `%LOCALAPPDATA%\YMM4-RTX3060-NVENC\host-contracts.json` に（本体 DLL の MVID 群＋プラグイン MVID をキーに）保存。Windows CI で初回 1.6 秒、2回目 8 ms。
+- `HostFeatures.For(host)`: 4.56.1.0 の MVID なら全機能、それ以外の KnownHosts（4.55.1.1）は従来どおり（preview のみ、デコーダーは形で判定）、照合で決めた版はその結果。`TimelineFrameCache`（preview/rects）、`FrameRenderReadiness`（wrapped、デコーダー）、`TimelineCacheBars` は MVID 比較をやめてこれを見ます。
+- 記録の更新: `dotnet run --project tools/HostFingerprint -- emit NVEncVideoWriterPlugin/HostBaselines.cs <版>=<本体フォルダー>`（渡さなかった版は保持。**Rules を変えたら全ての記録済みの版を渡し直す**こと）。`contracts <dir>` で内訳と判定、`compare <旧> <新>` で版の比較、`members <旧> <新> <型>` でメソッド単位の差。
+
+**実データ（CI の host-versions、公式更新サーバーの 4.54.0.0〜4.56.0.1 と release の 4.56.1.0）**: 連続する版の比較で core が一致したのは 4.55.0.0→4.55.0.1 と 4.56.0.0→4.56.0.1。4.56.0.x→4.56.1.0 の core の差は `ItemEx` だけだったので、`ItemEx::Contains`（フレーム範囲の判定）だけに絞りました。4.56.1.0 は versionlist2.php には無いが `Application Files/YukkuriMovieMaker_4_56_1_0/` から取得でき、release の zip と全機能一致。
+
+**キーの漏れ（witness で発見、修正済み）**: 背景画像・テクスチャ・画像ブラシ（`Player.Video.Effects.BackgroundImageEffect`/`TextureEffect`、`Brush.BitmapBrushSource`）は `FileSettings.FileExtensions.GetFileType` で動画/画像を決めますが、この設定がキーに無く、拡張子設定を変えると古いフレームが出得ました。`FrameCacheKey` の snapshot に `FileTypes` を追加（Format 2）、tracker が collection と各要素を監視。CacheChecks に検査を追加。同じ調査で、`OutlineEffect` の `IsAviUtlOutlineEffect` と `VideoItem` の `IsFixedFpsEnabled` は exo 出力専用で描画には無関係と確認。
+
+**新しい版の自動確認（`.github/workflows/ymm4-watch.yml`、main に取り込まれてから有効）**: 毎日 06:17 JST に versionlist2.php を見て、未報告の版があれば `tools/ci/fetch-ymm4.sh`（YMM4 自身の更新手順: `YukkuriMovieMaker.json` のハッシュを照合）で Actions cache に取得 → contracts 判定 → Windows でプラグインのビルド・CacheChecks・`HostCacheProbe --unread --gpu`（照合で ON の機能だけ画素一致などを検査）→ issue「YMM4 <版> の確認結果」を作成。`ci/ymm4-watch` への push は試行（issue を作らず summary に出す）。YMM4-dlls の同名ブランチに `CI_WATCH_VERSION` を置くと版を指定できます。
+
+**新しい版で core が一致しなかったときの手順（次の Claude 向け）**
+1. ymm4-watch の issue / host-versions（`TYPES` 入力で `members` 差分）で、どの型・メソッドが変わったか見る。
+2. その版の DLL を読む（クラウドからは manjubox.net に出られないので、ユーザーに YMM4-dlls の Release へ zip を置いてもらうか、CI 上で ILSpy にかけて差分の型だけ確認する）。前提が崩れていないか、`HostContracts.Rules` の witness に新しい種類のコードが要るかを判断。
+3. 問題なければ `emit` でその版を記録に追加し、`KnownHosts` には入れない（照合で動く）。前提が崩れていれば規則・キーを直してから記録。
 
 ### 2026-10-01 追記（3）— Windows CI、フレーム単位キー、キャッシュバー
 
