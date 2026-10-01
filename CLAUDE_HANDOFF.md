@@ -13,6 +13,8 @@ goal「できることはないか探し続けて」で、描画中に読まれ�
 - 検出できない場合: キャッシュ無効の間（このプロセスがまだ検証していない間）に YMM4 が読み込み済みのファイルが上書きされたとき。README に記載。
 - より細かくするには: 各 TimelineSource の `timelineResources`・`prefetchedResources` を見て、古い内容を持つソースが全て破棄されたら解除する方法があるが、未実装（再起動までの通常描画で安全側）。
 - 試験: CacheChecks（上書きでそのフレームだけ「上書き」の理由で通常描画・`RendersNormally`、他フレームは不変、元の内容に戻しても通常描画のまま、`HostContent.Forget`（再起動相当）後は新しいキー）。
+- 同じ監査で（35b8b75）: 同梱 Community の MIDI 読み込み（`MidiAudioSourcePlugin`、.mid/.midi）は `MidiPluginSettings` と SoundFont ファイルで音を合成するが、どちらもキーに無い。MIDI ファイルがあれば `audioForeign`（音声を読む wide フレームだけ通常描画）。CacheChecks（音声波形図形のフレームが MIDI 追加で通常描画、他フレーム不変、削除で戻る）。
+- 監査で問題なしと確認したもの: 描画中の `DateTime.Now`・乱数・`Guid.NewGuid`（シェーダー登録 ID のみ）、SVG（D2D の SVG は外部ファイルを読まない）、player の YMMSettings（操作点・選択・スナップ・UI 倍率、出力画素に入らない）、`TimelineSettings`（UI 用のレイヤー設定の写し）。
 
 ### 2026-10-01 追記（8）— 外部プラグイン・図形・フォントによる bypass をアイテム単位に
 
