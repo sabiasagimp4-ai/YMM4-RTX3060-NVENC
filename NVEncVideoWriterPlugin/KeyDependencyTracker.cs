@@ -80,6 +80,15 @@ internal sealed class KeyDependencyTracker : IDisposable
     public bool TryCapture(int frame, out KeyCapture? capture, out string reason, bool settle = false, bool background = false) =>
         Capture(frame, out capture, out reason, settle, background);
 
+    // True when the current description renders this frame normally whatever its files' state (a tachie, a plugin's
+    // code, a file or font that cannot be verified). It stays so until an edit, so the idle pre-renderer passes it.
+    internal bool RendersNormally(int frame)
+    {
+        lock (gate)
+            return !disposed && cachedRevision >= 0 && cachedRevision == Revision && cachedEligible
+                && cachedFrames is { } frames && !frames.For(frame).Cacheable;
+    }
+
     private sealed record Description(bool Eligible, string Model, string[] Paths, FrameDependencyIndex? Frames, string Reason,
         Type[][] SourceReaders, long Ticks);
 

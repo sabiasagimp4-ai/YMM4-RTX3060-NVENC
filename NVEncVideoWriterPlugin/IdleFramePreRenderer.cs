@@ -183,14 +183,27 @@ internal static class IdleFramePreRenderer
     private static void RenderBatch(Session current, Job job, TimelineFrameCache.PreviewViewport viewport,
         int anchorFrame, int startFrame, int endFrame)
     {
-        int rendered = 0, skipped = 0;
+        int rendered = 0, skipped = 0, normal = 0;
         try
         {
-            if (!current.Tracker.TryCapture(startFrame, out var initial, out string reason))
+            // Frames that always render normally (a tachie, a plugin's code) are passed over, here and below:
+            // stopping at one would retry it on every idle tick and never read further ahead.
+            KeyCapture? initial = null;
+            string reason = string.Empty;
+            int first = startFrame;
+            while (first <= endFrame && !current.Tracker.TryCapture(first, out initial, out reason) && current.Tracker.RendersNormally(first))
+                first++;
+            if (initial is null)
             {
-                SetStatus(reason);
+                if (first > endFrame)
+                {
+                    Volatile.Write(ref current.NextFrame, endFrame + 1);
+                    SetStatus($"フレーム {startFrame}～{endFrame} は通常描画のフレームのため、先読みしません。");
+                }
+                else SetStatus(reason);
                 return;
             }
+            normal += first - startFrame;
             using (initial)
             {
                 if (!initial!.Validate() || !CanContinue(current, job.Token, anchorFrame)) return;
@@ -200,7 +213,7 @@ internal static class IdleFramePreRenderer
                 using var cloneTracker = new KeyDependencyTracker(cloneScene, current.Tracker.VerifiedFingerprints);
                 using var source = new TimelineSourceAndDevices(cloneScene);
 
-                for (int frame = startFrame; frame <= endFrame; frame++)
+                for (int frame = first; frame <= endFrame; frame++)
                 {
                     if (!CanContinue(current, job.Token, anchorFrame)
                         || !TimelineFrameCache.TryGetLatestPreviewViewport(current.Info.Timeline, current.Info.Scenes, out var latestViewport)
@@ -208,6 +221,12 @@ internal static class IdleFramePreRenderer
                         return;
                     if (!TryCapturePair(current.Tracker, cloneTracker, frame, out var liveCapture, out var cloneCapture, out reason))
                     {
+                        if (current.Tracker.RendersNormally(frame) && cloneTracker.RendersNormally(frame))
+                        {
+                            normal++;
+                            Volatile.Write(ref current.NextFrame, frame + 1);
+                            continue;
+                        }
                         SetStatus(reason);
                         return;
                     }
@@ -234,7 +253,8 @@ internal static class IdleFramePreRenderer
                     Thread.Sleep(8);
                 }
             }
-            string stored = skipped == 0 ? string.Empty : $"（保存済みの {skipped} フレームは描画せず）";
+            string stored = (skipped == 0 ? string.Empty : $"（保存済みの {skipped} フレームは描画せず）")
+                + (normal == 0 ? string.Empty : $"（通常描画の {normal} フレームは対象外）");
             SetStatus(rendered == 0
                 ? "先読み範囲の確認が完了しました。" + stored
                 : $"プレビュー範囲の {rendered} フレームを先読みしました。" + stored);

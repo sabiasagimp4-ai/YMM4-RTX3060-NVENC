@@ -459,7 +459,10 @@ internal static class Program
         WaitForFrameKey(tracker, 10);
         Check(!tracker.TryCapture(305, out _, out string tachieReason) && tachieReason.Contains("立ち絵"), "A frame showing a tachie was cached: " + tachieReason);
         Check(WaitForFrameKey(tracker, 10) == at10, "A tachie elsewhere disabled or changed unrelated frames");
+        // The idle pre-renderer passes over such frames instead of stopping there.
+        Check(tracker.RendersNormally(305) && !tracker.RendersNormally(10), "Frames that always render normally were not told apart");
         timeline.Items = timeline.Items.Remove(tachie);
+        Check(!tracker.RendersNormally(305), "A frame was still reported as rendered normally after an edit, before the project was described again");
 
         // Code this plugin did not read (a plugin's effect, item type, or a bundled Community effect, all foreign to
         // the host assemblies): only the frames showing that item render normally.
