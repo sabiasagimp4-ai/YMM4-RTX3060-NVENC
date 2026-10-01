@@ -265,14 +265,18 @@ internal static class TimelineFrameCache
         internal readonly bool WantRects = wantRects;
         internal readonly bool RectsReusable = rectsReusable;
         internal bool CacheHit;
-        public void Dispose() { if (Interlocked.Exchange(ref disposed, 1) == 0) Capture.Dispose(); }
+        private int handedOver;
+        // A pending preview store keeps the capture past this update; Harmony's finalizer still calls Dispose.
+        internal void HandOver() => Volatile.Write(ref handedOver, 1);
+        public void Dispose() { if (Volatile.Read(ref handedOver) == 0) Release(); }
+        internal void Release() { if (Interlocked.Exchange(ref disposed, 1) == 0) Capture.Dispose(); }
     }
 
     private sealed class DeferredStore(Pending pending, PreviewReadback readback) : IDisposable
     {
         internal readonly Pending Pending = pending;
         internal readonly PreviewReadback Readback = readback;
-        public void Dispose() { Readback.Dispose(); Pending.Dispose(); }
+        public void Dispose() { Readback.Dispose(); Pending.Release(); }
     }
 
     private static bool Prefix(object __instance, TimeSpan time, object usage, out Pending? __state)
@@ -424,6 +428,7 @@ internal static class TimelineFrameCache
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
         var readback = BeginPreviewReadback(pending.Devices.DeviceContext, output, viewport);
         if (readback is null) return false;
+        pending.HandOver();
         pending.State.Deferred = new DeferredStore(pending, readback);
         Interlocked.Add(ref previewStoreTicks, System.Diagnostics.Stopwatch.GetTimestamp() - started);
         if (!pending.Playing && !refreshSupported) CompleteDeferred(pending.State);
