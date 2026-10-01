@@ -292,6 +292,7 @@ public sealed class FrameCacheToolView : UserControl
         };
         scenario.TextChanged += (_, _) => { if (CacheDiagnostics.IsRecording) CacheDiagnostics.MarkScenario(scenario.Text); };
         panel.Children.Add(settingsPanel);
+        panel.Children.Add(purge);
         panel.Children.Add(status);
         panel.Children.Add(new TextBlock { Text = "キャッシュ状況（タイムライン全体）", Margin = new Thickness(0, 12, 0, 4) });
         var bar = new CacheStatusBar(() => IdleFramePreRenderer.CurrentTimeline,
@@ -310,7 +311,6 @@ public sealed class FrameCacheToolView : UserControl
         legend.Inlines.Add(" ディスク　（プレビューの現在の表示倍率・位置で保存されたフレーム。タイムラインの目盛りの下端にも表示します）");
         panel.Children.Add(legend);
         panel.Children.Add(counts);
-        panel.Children.Add(purge);
         panel.Children.Add(error);
         Content = new ScrollViewer
         {
@@ -322,7 +322,15 @@ public sealed class FrameCacheToolView : UserControl
         {
             purge.IsEnabled = false;
             error.Text = string.Empty;
-            try { await Task.Run(TimelineFrameCache.Clear); }
+            try
+            {
+                await Task.Run(() =>
+                {
+                    using var span = CacheTrace.Measure("cache-purge");
+                    try { TimelineFrameCache.Clear(); }
+                    catch { if (span is not null) span.Outcome = "exception"; throw; }
+                });
+            }
             catch (Exception exception) { error.Text = "キャッシュを完全に消去できませんでした: " + exception.GetBaseException().Message; }
             finally { purge.IsEnabled = true; Refresh(); }
         };

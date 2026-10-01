@@ -10,7 +10,7 @@ spec.loader.exec_module(module)
 
 
 class StressEvidenceTests(unittest.TestCase):
-    def report(self, progress=True, dropped=0):
+    def report(self, progress=True, dropped=0, edit_counts=None):
         rows = [{'Kind': 'session', 'StopwatchFrequency': 1000, 'Scenario': 'startup'}]
         phases = ['off-playback', 'cold-playback', 'warm-playback', 'stress-seek', 'stress-delete', 'stress-undo', 'stress-redo', 'stress-purge']
         for index, phase in enumerate(phases):
@@ -25,7 +25,10 @@ class StressEvidenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'trace.jsonl'
             path.write_text('\n'.join(json.dumps(row) for row in rows), encoding='utf-8')
-            return module.analyze(path)
+            if edit_counts is not None:
+                for name, count in edit_counts.items():
+                    (Path(directory) / (name + '.ymmp')).write_text(json.dumps({'Timelines': [{'Items': [{}] * count}]}))
+            return module.analyze(path, directory if edit_counts is not None else None)
 
     def test_real_progress_is_required(self):
         self.assertTrue(self.report()['StressPassed'])
@@ -33,6 +36,12 @@ class StressEvidenceTests(unittest.TestCase):
 
     def test_drops_invalidate_coverage(self):
         self.assertFalse(self.report(dropped=1)['StressPassed'])
+
+    def test_edit_keystrokes_without_saved_changes_are_rejected(self):
+        counts = {'stress-delete': 420, 'stress-undo': 421, 'stress-redo': 420, 'stress-30s': 421}
+        self.assertTrue(self.report(edit_counts=counts)['StressPassed'])
+        counts['stress-delete'] = 421
+        self.assertFalse(self.report(edit_counts=counts)['StressPassed'])
 
 
 if __name__ == '__main__':

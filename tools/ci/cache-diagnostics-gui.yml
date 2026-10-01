@@ -53,6 +53,7 @@ jobs:
         run: |
           dotnet run --project tests\GuiSmoke\GuiSmoke.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR "$env:GITHUB_WORKSPACE\dist\stress-30s.ymmp" --stress "$env:GITHUB_WORKSPACE\dist\assets"
           if ($LASTEXITCODE -ne 0) { throw 'Project generation failed' }
+          & .\tools\ci\prepare-stress-project.ps1 -Project "$env:GITHUB_WORKSPACE\dist\stress-30s-portable.ymmp"
       - name: YMM4 with the plugin (screenshots in this log)
         shell: powershell
         run: |
@@ -63,7 +64,7 @@ jobs:
         if: always()
         run: |
           if (-not (Test-Path dist/gui-trace.jsonl)) { throw 'No real GUI trace produced' }
-          python tools/analyze-stress-trace.py dist/gui-trace.jsonl --output dist/stress-summary.json
+          python tools/analyze-stress-trace.py dist/gui-trace.jsonl --projects dist --output dist/stress-summary.json
           if ($LASTEXITCODE -ne 0) { throw 'Stress evidence checks failed; see retained logs and screenshots' }
       - uses: actions/upload-artifact@v4
         if: always()

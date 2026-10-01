@@ -71,6 +71,8 @@ internal static class TimelineFrameCache
             if (previewEnabled == preview && exportEnabled == export) return;
             Volatile.Write(ref previewEnabled, preview);
             Volatile.Write(ref exportEnabled, export);
+            using (var setting = CacheTrace.Measure("cache-settings", "state", preview ? "preview-on" : "preview-off"))
+                if (setting is not null) setting.Detail = export ? "export-on" : "export-off";
             Interlocked.Increment(ref generation); // in-flight captures of a switched-off use are dropped
             status = preview && export ? "キャッシュ待機中（プレビュー・動画出力）"
                 : preview ? "キャッシュ待機中（プレビューのみ）"

@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 
-def analyze(path):
+def analyze(path, projects=None):
     spec = importlib.util.spec_from_file_location('cache_trace', Path(__file__).with_name('analyze-cache-trace.py'))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -15,7 +15,10 @@ def analyze(path):
     markers, updates = [], []
     with Path(path).open(encoding='utf-8-sig') as stream:
         for line in stream:
-            row = json.loads(line)
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue  # The base analyzer already flags damaged/truncated records as incomplete.
             if row.get('Stage') == 'scenario':
                 markers.append((row['StartTicks'], row.get('Component', '')))
             elif row.get('Stage') == 'timeline-update':
@@ -44,6 +47,20 @@ def analyze(path):
         errors.append('Trace dropped/open/truncated/invalid records; timing coverage is incomplete')
     if any(row.get('Outcome') == 'exception' for row in updates):
         errors.append('Timeline update threw an exception')
+    if projects is not None:
+        counts = {}
+        for name, expected in [('stress-delete', 420), ('stress-undo', 421), ('stress-redo', 420), ('stress-30s', 421)]:
+            saved = Path(projects) / (name + '.ymmp')
+            if not saved.exists():
+                errors.append(f'Saved project missing: {name}')
+                continue
+            project = json.loads(saved.read_text(encoding='utf-8-sig'))
+            timelines = project.get('Timelines', [])
+            count = sum(len(t.get('Items', [])) for t in timelines)
+            counts[name] = count
+            if count != expected:
+                errors.append(f'{name}: expected {expected} saved items, got {count}')
+        report['EditEvidence'] = counts
     report['PlaybackEvidence'] = results
     report['StressErrors'] = errors
     report['StressPassed'] = not errors
@@ -54,8 +71,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('trace')
     parser.add_argument('--output', required=True)
+    parser.add_argument('--projects', help='Directory containing projects saved by real YMM4 after edits')
     args = parser.parse_args()
-    result = analyze(args.trace)
+    result = analyze(args.trace, args.projects)
     Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     print(json.dumps({'PlaybackEvidence': result['PlaybackEvidence'], 'StressErrors': result['StressErrors']}, ensure_ascii=False))
     raise SystemExit(0 if result['StressPassed'] else 1)

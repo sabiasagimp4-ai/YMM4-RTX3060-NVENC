@@ -75,3 +75,26 @@ Playing/Paused/ExportingとRAM/live/renderを混ぜない。対象外理由とco
 RTX3060実機の結果とWARP CIの結果は混ぜない。
 
 `compute-cache` は登録classの計算、`frame-cost` はrender／restore別のUpdate+Draw ticksと周波数、`cache-admission` はreadback開始前の見送り、`disk-compression`／`disk-decompression` はworkerのcodec CPU経過時間を示す。GPU実行時間ではない。動的providerの安全条件と費用判定は [DYNAMIC_CACHE_API.md](DYNAMIC_CACHE_API.md)。
+
+## 30秒の動画・テキスト負荷fixture
+
+`make-stress-media.ps1` と `GuiSmoke --stress` で1920×1080・30fps・900フレームを生成する。
+3秒のH.264動画12本を10区間へ配置し、動画アイテム120個／同時表示12本、
+1秒の文字アイテム300個／同時表示10個（4行に標準ぼかし）、音声1個を配置する。
+位置と文字列は1秒ごとに変わる。計421アイテム。素材はFFmpegの試験信号であり、実作品の性能を代表しない。
+YMM4のシリアライザーと `RefreshTimelineLengthAndMaxLayer` を使い、生成後に長さ・個数を検証する。
+
+Windows CIの使い捨てYMM4を `gui-smoke.ps1 -Stress` で操作する。
+RAM上限256MiB・idle生成OFFで、無効→有効初回→有効再再生、5回のシーク、削除、Undo、Redo、消去を試行する。
+各再生は35秒待つ。画面、5秒ごとのprocess CPU使用時間・private/working set・handle数・キャッシュ表示、
+編集後にホストが保存した各ymmp、詳細JSONLを `dist` に残す。
+以下は再生時刻が20秒以上進んだことと編集個数420→421→420→421を検証する。
+
+```sh
+python tools/analyze-stress-trace.py dist/gui-trace.jsonl --projects dist --output dist/stress-summary.json
+```
+
+操作名の存在だけでは成功としない。drop/OpenSpans/例外は失敗扱い。
+キャッシュ消去後は直後の描画で再登録され得るため、表示が永続的に0であることを要件にしない。
+プロジェクトの同梱版は `prepare-stress-project.ps1` で展開先の絶対素材パスへ書き換えてから開く。
+CIの基本adapter／ソフトウェア描画の時間をRTX3060実機のFPSとして報告しない。

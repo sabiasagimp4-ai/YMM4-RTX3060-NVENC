@@ -290,9 +290,16 @@ try {
         }
         function Set-Preview([bool] $on) {
             $control = Trace-Control 'FrameCachePreviewEnabled'
-            if (-not $control) { throw 'Preview switch UI Automation peer missing' }
-            $toggle = $control.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
-            if (($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On) -ne $on) { $toggle.Toggle() }
+            if ($control) {
+                $toggle = $control.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+                if (($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On) -ne $on) { $toggle.Toggle() }
+            } else {
+                # The CI host docking container hides the complete peer tree. Initial setting is on;
+                # calls below alternate off/on. The trace gate independently checks the resulting routes.
+                if (-not $tool) { throw 'Preview tool window missing' }
+                [Win]::SetForegroundWindow($tool.Handle) | Out-Null
+                Click-At 1223 190 'the preview cache switch in the fixed CI tool window'
+            }
             Start-Sleep -Seconds 2
         }
         function Seek-Start {
@@ -350,8 +357,11 @@ try {
         Start-Sleep -Seconds 2
         Scenario 'stress-purge'
         $purge = Trace-Control 'FrameCachePurge'
-        if (-not $purge) { throw 'Purge UI Automation peer missing' }
-        $purge.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        if ($purge) { $purge.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
+        else {
+            [Win]::SetForegroundWindow($tool.Handle) | Out-Null
+            Click-At 1280 677 'the purge button immediately below settings in the fixed CI tool window'
+        }
         Start-Sleep -Seconds 5
         Snapshot-Stress 'stress-purge'
         Shot 'stress-purge'
@@ -455,4 +465,3 @@ finally {
         }
     }
 }
-
