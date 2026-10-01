@@ -19,6 +19,7 @@ internal static class IdleFramePreRenderer
     private const int MaximumFrames = 30;
     private static double idleDelaySeconds = 8;
     private static IdleCacheOrder cacheOrder;
+    private static int rangeStart, rangeEnd;
     private static readonly object gate = new();
     private static DispatcherTimer? timer;
     private static Session? session;
@@ -35,13 +36,14 @@ internal static class IdleFramePreRenderer
 
     internal static string Status => Volatile.Read(ref status);
 
-    internal static void Configure(double delaySeconds, IdleCacheOrder order) => OnUi(() =>
+    internal static void Configure(double delaySeconds, IdleCacheOrder order, int startFrame = 0, int endFrameExclusive = 0) => OnUi(() =>
     {
         lock (gate)
         {
-            if (idleDelaySeconds == delaySeconds && cacheOrder == order) return;
+            if (idleDelaySeconds == delaySeconds && cacheOrder == order && rangeStart == startFrame && rangeEnd == endFrameExclusive) return;
             idleDelaySeconds = delaySeconds;
             cacheOrder = order;
+            rangeStart = Math.Max(0, startFrame); rangeEnd = Math.Max(0, endFrameExclusive);
             CancelActiveJobLocked();
             if (session is { } current)
             {
@@ -194,12 +196,13 @@ internal static class IdleFramePreRenderer
             return;
         }
 
-        int length = current.Info.Timeline.Length;
+        var range = IdleFramePlan.Range(current.Info.Timeline.Length, rangeStart, rangeEnd);
+        int length = range.End - range.Start;
         long start = Interlocked.Read(ref current.NextOrdinal);
         long end = Math.Min(length - 1L, start + MaximumFrames - 1);
         if (current.LiveScene.FPS <= 0 || start > end)
         {
-            SetStatus("タイムライン全体の停止中キャッシュを確認しました。");
+            SetStatus("指定範囲の停止中キャッシュを確認しました。");
             return;
         }
         var job = new Job(current);
@@ -225,9 +228,9 @@ internal static class IdleFramePreRenderer
             KeyCapture? initial = null;
             string reason = string.Empty;
             long first = startOrdinal;
-            int length = current.Info.Timeline.Length;
+            var range = IdleFramePlan.Range(current.Info.Timeline.Length, job.RangeStart, job.RangeEnd);
             var order = job.Order;
-            while (first <= endOrdinal && IdleFramePlan.TryGetFrame(length, anchorFrame, order, first, out int candidate)
+            while (first <= endOrdinal && IdleFramePlan.TryGetFrame(range.Start, range.End, anchorFrame, order, first, out int candidate)
                 && !current.Tracker.TryCapture(candidate, out initial, out reason) && current.Tracker.RendersNormally(candidate)) first++;
             if (initial is null)
             {
@@ -251,7 +254,7 @@ internal static class IdleFramePreRenderer
 
                 for (long ordinal = first; ordinal <= endOrdinal; ordinal++)
                 {
-                    if (!IdleFramePlan.TryGetFrame(length, anchorFrame, order, ordinal, out int frame)) return;
+                    if (!IdleFramePlan.TryGetFrame(range.Start, range.End, anchorFrame, order, ordinal, out int frame)) return;
                     if (TimelineFrameCache.StoreIfCreated is { } cache && cache.RamBudget < 32L + 4L * viewport.Width * viewport.Height)
                     {
                         SetStatus("1フレームを保存できるRAMの空きを待っています。");
@@ -545,6 +548,8 @@ internal static class IdleFramePreRenderer
     private sealed class Job(Session session) : IDisposable
     {
         internal IdleCacheOrder Order { get; } = cacheOrder;
+        internal int RangeStart { get; } = rangeStart;
+        internal int RangeEnd { get; } = rangeEnd;
         internal Session Session { get; } = session;
         internal CancellationTokenSource Cancellation { get; } = CancellationTokenSource.CreateLinkedTokenSource(session.Lifetime.Token);
         internal CancellationToken Token => Cancellation.Token;

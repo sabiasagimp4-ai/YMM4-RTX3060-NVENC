@@ -30,6 +30,7 @@ internal sealed class KeyDependencyTracker : IDisposable
     private string cachedReason = string.Empty;
     private string cachedPartialReason = string.Empty;
     private FrameDependencyIndex? cachedFrames;
+    private ICacheDependencyProvider[] dynamicProviders = [];
     private readonly Dictionary<FrameDependencyIndex.Dependencies, string> frameKeys = new(ReferenceEqualityComparer.Instance);
     private bool cachedEligible;
     private string cachedModel = string.Empty;
@@ -145,9 +146,24 @@ internal sealed class KeyDependencyTracker : IDisposable
                 return false;
             }
             string[] files = dependencies?.Files ?? cachedPaths;
+            (ICacheDependencyProvider Provider, CacheDependencySnapshot Snapshot)[] dynamicSnapshots;
+            try
+            {
+                long ticks = frame is int position ? scene.Timeline.VideoInfo.GetTimeFrom(position).Ticks : 0;
+                if (dynamicProviders.Any(provider => !provider.CanCaptureOnCurrentThread))
+                { reason = "動的な入力依存をこのスレッドでは確認できません。"; return false; }
+                dynamicSnapshots = dynamicProviders.Select(provider => (provider, provider.CaptureDependencies(ticks))).ToArray();
+                if (dynamicSnapshots.Any(pair => pair.Item2 is null || !pair.Item1.IsCurrent(pair.Item2)))
+                { reason = "動的な入力依存が検査中に変化しました。"; return false; }
+            }
+            catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
+            { reason = "動的な入力依存を確認できません: " + error.GetType().Name; return false; }
+            string DynamicKey() => dynamicSnapshots.Length == 0 ? KeyFor(dependencies, files)
+                : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+                    "dynamic-frame-v1:" + KeyFor(dependencies, files) + string.Concat(dynamicSnapshots.Select(pair => pair.Snapshot.Key).Order(StringComparer.Ordinal)))));
             if (files.Length == 0)
             {
-                capture = new KeyCapture(this, KeyFor(dependencies, files), cachedModel, before, cachedParents, null);
+                capture = new KeyCapture(this, DynamicKey(), cachedModel, before, cachedParents, null, dynamicSnapshots);
                 return true;
             }
             if (fingerprintTask is { IsCompleted: true }) AdoptFingerprints(before);
@@ -168,7 +184,7 @@ internal sealed class KeyDependencyTracker : IDisposable
                         reason = HostContent.Reason;
                         return false;
                     }
-                    capture = new KeyCapture(this, KeyFor(dependencies, files), cachedModel, before, cachedParents, lease);
+                    capture = new KeyCapture(this, DynamicKey(), cachedModel, before, cachedParents, lease, dynamicSnapshots);
                     reason = string.Empty;
                     return true;
                 }
@@ -221,6 +237,9 @@ internal sealed class KeyDependencyTracker : IDisposable
         cachedParents = scene.ParentScenes.ToArray();
         cachedReason = description.Reason;
         cachedEligible = description.Eligible && description.Frames is not null;
+        try { dynamicProviders = cachedEligible ? FrameCacheKey.CaptureDynamicProviders(scene) : []; }
+        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
+        { dynamicProviders = []; cachedEligible = false; cachedReason = "動的な入力依存の列挙に失敗しました: " + error.GetType().Name; }
         cachedRevision = current;
         return true;
     }
@@ -251,6 +270,8 @@ internal sealed class KeyDependencyTracker : IDisposable
             model = string.Empty;
             if (!disposed && cachedRevision != Revision && describeTask is { IsCompleted: true }) AdoptDescription(Revision);
             if (disposed || cachedRevision != Revision || !cachedEligible || cachedFrames is null) return false;
+            // Providers run on capture's owning render context. UI status/read-ahead cannot call them safely.
+            if (dynamicProviders.Length != 0) return false;
             if (fingerprintTask is { IsCompleted: true }) AdoptFingerprints(cachedRevision);
             bool unverified = false;
             for (int i = 0; i < frames.Count; i++)
@@ -500,13 +521,20 @@ internal sealed class KeyCapture : IDisposable
     private readonly KeyDependencyTracker tracker;
     private readonly Guid[] parents;
     private readonly FileDependencyLease? lease;
+    private readonly (ICacheDependencyProvider Provider, CacheDependencySnapshot Snapshot)[] dynamicSnapshots;
     private int disposed;
     public string Key { get; }
     public string Model { get; }
     public long Revision { get; }
-    internal KeyCapture(KeyDependencyTracker tracker, string key, string model, long revision, Guid[] parents, FileDependencyLease? lease)
-    { this.tracker = tracker; Key = key; Model = model; Revision = revision; this.parents = parents; this.lease = lease; }
+    internal KeyCapture(KeyDependencyTracker tracker, string key, string model, long revision, Guid[] parents, FileDependencyLease? lease,
+        (ICacheDependencyProvider Provider, CacheDependencySnapshot Snapshot)[]? dynamicSnapshots = null)
+    { this.tracker = tracker; Key = key; Model = model; Revision = revision; this.parents = parents; this.lease = lease; this.dynamicSnapshots = dynamicSnapshots ?? []; }
+    private bool DynamicCurrent()
+    {
+        try { return dynamicSnapshots.All(pair => pair.Provider.CanCaptureOnCurrentThread && pair.Provider.IsCurrent(pair.Snapshot)); }
+        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException) { return false; }
+    }
     public bool Validate() => Volatile.Read(ref disposed) == 0 && tracker.ValidateRevision(Revision)
-        && tracker.HasParents(parents) && (lease?.VerifyPaths() ?? true) && Volatile.Read(ref disposed) == 0;
+        && tracker.HasParents(parents) && DynamicCurrent() && (lease?.VerifyPaths() ?? true) && Volatile.Read(ref disposed) == 0;
     public void Dispose() { if (Interlocked.Exchange(ref disposed, 1) == 0) lease?.Dispose(); }
 }

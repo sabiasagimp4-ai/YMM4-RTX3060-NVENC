@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../NVEncVideoWriterPlugin/FrameAdmissionHistory.cs" Link="FrameAdmissionHistory.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/FrameCacheEconomics.cs" Link="FrameCacheEconomics.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/ProcessingTraceHooks.cs" Link="ProcessingTraceHooks.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/CacheTrace.cs" Link="CacheTrace.cs" />
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />

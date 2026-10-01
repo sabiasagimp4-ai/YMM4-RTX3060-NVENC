@@ -15,6 +15,13 @@ internal static class IdleFramePlanChecks
         Check(!IdleFramePlan.TryGetFrame(0, 0, 0, 0, out _) && !IdleFramePlan.TryGetFrame(5, 0, 0, -1, out _), "empty and negative boundary");
         Check(!IdleFramePlan.TryGetFrame(5, 0, 0, 5, out _), "finished traversal stops");
         Check(IdleFramePlan.TryGetFrame(int.MaxValue, int.MaxValue - 2, IdleCacheOrder.FromCurrentTime, 3, out int frame) && frame == 1, "large timeline does not overflow");
+        Check(IdleFramePlan.Range(100, 20, 0) == (20, 100) && IdleFramePlan.Range(100, 80, 20) == (80, 80), "configured end/empty range");
+        foreach (var order in Enum.GetValues<IdleCacheOrder>())
+            foreach (int anchor in new[] { 0, 22, 99 })
+            {
+                var frames = Enumerable.Range(0, 7).Select(i => { Check(IdleFramePlan.TryGetFrame(20, 27, anchor, order, i, out int f), "range traversal"); return f; }).ToArray();
+                Check(frames.Order().SequenceEqual(Enumerable.Range(20, 7)), "bounded range includes every frame once");
+            }
         Console.WriteLine("Idle plan: CTI forward/wrap, around CTI, start, exhaustive boundaries and no duplicates passed.");
     }
 

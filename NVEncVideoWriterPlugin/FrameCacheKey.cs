@@ -400,6 +400,29 @@ internal static class FrameCacheKey
         }
     }
 
+    // Discover providers through the host's animatable tree. This adds dependencies; it never grants trust to
+    // unknown plugin code or certifies its processor/thread safety. Rebuilt with each project description.
+    internal static ICacheDependencyProvider[] CaptureDynamicProviders(Scene scene)
+    {
+        var roots = scene.Scenes.Timelines.Append(scene.Timeline).Distinct().SelectMany(t => t.Items).Cast<object>().ToArray();
+        var pending = new Stack<object>(roots.Concat(roots.OfType<IItem>().Select(GetCharacter).OfType<Character>()));
+        var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var result = new List<ICacheDependencyProvider>();
+        while (pending.TryPop(out var value))
+        {
+            if (!visited.Add(value)) continue;
+            if (visited.Count > 100_000) throw new InvalidDataException("Dynamic dependency tree exceeds bounds");
+            if (value is ICacheDependencyProvider provider)
+            {
+                if (result.Count >= 4096) throw new InvalidDataException("Too many dependency providers");
+                result.Add(provider);
+            }
+            foreach (var child in value is Character owner ? CharacterParts(owner) : Animatables(value))
+                if (child is not null) pending.Push(child);
+        }
+        return result.ToArray();
+    }
+
     // How a random move serializes (StringEnumConverter): the safety net for one the walk did not reach.
     private const string RandomMoveJson = "\"ランダム移動\"";
 

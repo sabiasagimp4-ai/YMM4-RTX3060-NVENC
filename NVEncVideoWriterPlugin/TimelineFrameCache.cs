@@ -152,6 +152,7 @@ internal static class TimelineFrameCache
         try { if (store.IsValueCreated) store.Value.Clear(); }
         catch { status = "キャッシュを完全には消去できませんでした"; throw; }
         status = "キャッシュを消去しました";
+        DynamicComputeCache.Shared.Clear();
     }
 
     internal static bool TryInstall(Assembly host, Harmony harmony, out string reason)
@@ -270,6 +271,7 @@ internal static class TimelineFrameCache
         internal GpuFrame? ActiveGpuFrame;
         internal readonly Dictionary<string, GpuFrame> GpuFrames = [];
         internal readonly FrameAdmissionHistory GpuAdmission = new();
+        internal readonly FrameCacheEconomics Economics = new();
         internal long Generation;
         // A rendered preview frame whose GPU readback is still running; finished on this source's render thread.
         internal DeferredStore? Deferred;
@@ -548,6 +550,12 @@ internal static class TimelineFrameCache
     private static bool StorePreview(Pending pending, ID2D1CommandList output, PreviewViewport viewport)
     {
         CompleteDeferred(pending.State);
+        if (!pending.State.Economics.ShouldAdmit(pending.CacheKey!, (long)viewport.Width * viewport.Height * 4 + PreviewRecordHeader, gpuRetentionEnabled))
+        {
+            using var trace = CacheTrace.Measure("cache-admission", "policy");
+            if (trace is not null) trace.Outcome = "render-cheaper";
+            return false;
+        }
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
         var readback = BeginPreviewReadback(pending.Devices.DeviceContext, output, viewport);
         if (readback is null) return false;
@@ -572,6 +580,7 @@ internal static class TimelineFrameCache
             var record = FinishPreviewReadback(deferred.Readback);
             lock (cacheGate) if (StillCurrent(deferred.Pending))
             {
+                if (!deferred.Pending.State.Economics.ShouldAdmit(deferred.Pending.CacheKey!, record.LongLength, gpuRetentionEnabled)) return;
                 if (!store.Value.PutOwned(deferred.Pending.CacheKey!, record)) return;
                 Interlocked.Increment(ref previewStored);
                 status = "描画したプレビューのフレームを保存しました。";
@@ -602,7 +611,9 @@ internal static class TimelineFrameCache
             if (state.ReadAheadFrame == frame || state.Environment is not { } environment) return;
             state.ReadAheadFrame = frame;
             var frames = new List<int>();
-            int ahead = playing ? Math.Clamp(scene.FPS / 2, 4, 30) : 2;
+            // Extend the lead when observed disk latency rises; Prefetch still caps the byte window at half RAM.
+            double leadSeconds = Math.Clamp(0.5 + store.Value.DiskReadMilliseconds * 0.004, 0.5, 2);
+            int ahead = playing ? Math.Clamp((int)Math.Ceiling(scene.FPS * leadSeconds), 4, 120) : 2;
             for (int i = 1; i <= ahead; i++) frames.Add(frame + i);
             if (!playing) frames.AddRange([frame - 1, frame - 2]);
             frames.RemoveAll(value => value < 0);
@@ -936,7 +947,20 @@ internal static class TimelineFrameCache
         PreviewPerformance.Add(PreviewStage.PreviewDraw, drawTicks);
         // CPU time in Update + Draw, excluding the gap, Present, audio and playback/scheduler waits.
         if (__exception is null && __state.Update is { } update)
-            PreviewPerformance.Add(PreviewStage.TotalPreview, update.TotalTicks + drawTicks);
+        {
+            long ticks = update.TotalTicks + drawTicks;
+            PreviewPerformance.Add(PreviewStage.TotalPreview, ticks);
+            if (update.Pending is { CacheKey: { } key, Viewport: { } view } pending)
+            {
+                if (update.RunsHost) pending.State.Economics.ObserveRender(key, ticks);
+                else if (ReferenceEquals(pending.Path, RamTimes))
+                    pending.State.Economics.ObserveRestore((long)view.Width * view.Height * 4 + PreviewRecordHeader, ticks);
+                else if (ReferenceEquals(pending.Path, GpuTimes))
+                    pending.State.Economics.ObserveRestore((long)view.Width * view.Height * 4 + PreviewRecordHeader, ticks, gpu: true);
+                using var costTrace = CacheTrace.Measure("frame-cost", "cpu-wall");
+                if (costTrace is not null) costTrace.Detail = $"path={(update.RunsHost ? "render" : "restore")};ticks={ticks};frequency={System.Diagnostics.Stopwatch.Frequency}";
+            }
+        }
         return __exception;
     }
 

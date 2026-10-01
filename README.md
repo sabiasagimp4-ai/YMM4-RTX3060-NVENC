@@ -61,3 +61,5 @@ Windows、.NET 10 SDK、Visual Studio 2022のC++ツール、Windows SDKが必要
 MITの [YMM4_NVEncPlugin](https://github.com/tarutaru247/YMM4_NVEncPlugin) を基にしています。[Radeon AMF実装](https://github.com/disnana/YMM4_AMF_Plugin) と [GPU出力の解析記事](https://qiita.com/harupython/items/f03cd6f04375115f82f9)、[高速化の記事](https://qiita.com/harupython/items/4be768e58cba3a2921b3) を調査の参考にしました。AMFとlibvipsは組み込んでいません。
 
 本体は [MIT](LICENSE)。元実装・Harmony・NVIDIAヘッダーの由来は [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) を参照してください。YMM4本体やNVIDIAドライバーは同梱しません。
+
+動的な計算共有・依存報告・費用判断・無損失圧縮の契約は [DYNAMIC_CACHE_API.md](docs/DYNAMIC_CACHE_API.md) を参照。

@@ -29,7 +29,7 @@ internal static class PluginSettings
         bool available = HostIntegration.CacheAvailable;
         CacheMemoryController.Configure(settings.AutomaticRamBudget, settings.RamLimitMiB * CacheMemoryPolicy.MiB);
         TimelineFrameCache.SetEnabled(available && settings.PreviewCache, available && settings.ExportCache);
-        IdleFramePreRenderer.Configure(settings.IdleDelaySeconds, settings.IdleOrder);
+        IdleFramePreRenderer.Configure(settings.IdleDelaySeconds, settings.IdleOrder, settings.IdleRangeStartFrame, settings.IdleRangeEndFrame);
         IdleFramePreRenderer.Enabled = available && settings.PreviewCache && settings.CacheFramesWhenIdle;
         KnownCode.Trusted = settings.TrustedPlugins;
         // Switched on after start: hook the export now, before the next one begins.

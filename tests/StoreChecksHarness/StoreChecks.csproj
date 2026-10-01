@@ -7,6 +7,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../NVEncVideoWriterPlugin/FrameAdmissionHistory.cs" Link="FrameAdmissionHistory.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/FrameCacheEconomics.cs" Link="FrameCacheEconomics.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/DynamicComputeCache.cs" Link="DynamicComputeCache.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/CacheDependencyContract.cs" Link="CacheDependencyContract.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameCacheStore.cs" Link="FrameCacheStore.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/PreviewPerformance.cs" Link="PreviewPerformance.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/CacheMemoryPolicy.cs" Link="CacheMemoryPolicy.cs" />

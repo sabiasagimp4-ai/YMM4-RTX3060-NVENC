@@ -30,6 +30,10 @@ public sealed class FrameCacheToolSettings : SettingsBase<FrameCacheToolSettings
     private int ramLimitMiB = 2048;
     private double idleDelaySeconds = 8;
     private IdleCacheOrder idleOrder;
+    private int idleRangeStartFrame, idleRangeEndFrame;
+    public int IdleRangeStartFrame { get => idleRangeStartFrame; set => Set(ref idleRangeStartFrame, Math.Max(0, value)); }
+    // Exclusive end. Zero means the timeline's end; this is an explicit cache range, not YMM4 selection mirroring.
+    public int IdleRangeEndFrame { get => idleRangeEndFrame; set => Set(ref idleRangeEndFrame, Math.Max(0, value)); }
 
     public bool AutomaticRamBudget { get => automaticRamBudget; set => Set(ref automaticRamBudget, value); }
     public int RamLimitMiB { get => ramLimitMiB; set => Set(ref ramLimitMiB, Math.Clamp(value, 64, 16384)); }
@@ -160,6 +164,8 @@ public sealed class PluginSettingsPanel : StackPanel
             [("現在位置から末尾、先頭へ", (object)IdleCacheOrder.FromCurrentTime),
              ("現在位置の前後から", (object)IdleCacheOrder.AroundCurrentTime),
              ("タイムラインの先頭から", (object)IdleCacheOrder.FromStart)]);
+        AddFrameRange("先読み開始フレーム", nameof(FrameCacheToolSettings.IdleRangeStartFrame));
+        AddFrameRange("終了フレーム（含まない・0は末尾）", nameof(FrameCacheToolSettings.IdleRangeEndFrame));
         // YMM4's settings window creates a panel each time it opens: listen only while shown.
         System.ComponentModel.PropertyChangedEventHandler changed = (_, _) => Dispatcher.BeginInvoke(Refresh);
         Loaded += (_, _) => { settings.PropertyChanged += changed; Refresh(); ListPlugins(); };
@@ -167,6 +173,16 @@ public sealed class PluginSettingsPanel : StackPanel
 
         void Bind(CheckBox box, string property) => box.SetBinding(ToggleButton.IsCheckedProperty,
             new System.Windows.Data.Binding(property) { Source = settings, Mode = System.Windows.Data.BindingMode.TwoWay });
+
+        void AddFrameRange(string label, string property)
+        {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(12, 4, 0, 0) };
+            row.Children.Add(new TextBlock { Text = label, MinWidth = 220, VerticalAlignment = VerticalAlignment.Center });
+            var input = new TextBox { MinWidth = 100 };
+            input.SetBinding(TextBox.TextProperty, new System.Windows.Data.Binding(property)
+                { Source = settings, Mode = System.Windows.Data.BindingMode.TwoWay, ValidatesOnExceptions = true });
+            row.Children.Add(input); Children.Add(row);
+        }
 
         void AddChoice(string label, string property, IEnumerable<(string Label, object Value)> choices)
         {

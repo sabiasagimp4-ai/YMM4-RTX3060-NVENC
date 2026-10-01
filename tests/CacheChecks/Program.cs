@@ -46,6 +46,7 @@ internal static class Program
         CheckFramePreparesOwnFiles();
         CheckIdentitySeeds();
         CheckCommunity();
+        CheckDynamicDependencies();
         Type[][] readerTypes = FrameCacheKey.CaptureSourceReaderTypes();
         Check(FrameCacheKey.SourceReadersMatch(readerTypes), "Unchanged source reader stamp mismatched");
         Check(!FrameCacheKey.SourceReadersMatch([readerTypes[0].Append(typeof(Program)).ToArray(), readerTypes[1], readerTypes[2]]), "Source reader list change was not detected");
@@ -717,6 +718,43 @@ internal static class Program
 
     // Stand-ins for a plugin's code: types outside the host assemblies.
     private sealed class ForeignBlurEffect : YukkuriMovieMaker.Project.Effects.GaussianBlurEffect { }
+
+    private sealed class DynamicBlurEffect : YukkuriMovieMaker.Project.Effects.GaussianBlurEffect, ICacheDependencyProvider
+    {
+        public bool CanCaptureOnCurrentThread => true;
+        [Newtonsoft.Json.JsonIgnore] public string ExternalState { get; set; } = "initial";
+        [Newtonsoft.Json.JsonIgnore] public bool FailValidation { get; set; }
+        public CacheDependencySnapshot CaptureDependencies(long ticks) => new("test/dynamic-blur", "1", ExternalState, "cpu", [new("previous-input", ExternalState, ticks - 1, ticks)]);
+        public bool IsCurrent(CacheDependencySnapshot snapshot) => !FailValidation && snapshot.StateToken == ExternalState;
+    }
+    private static void CheckDynamicDependencies()
+    {
+        var previousTrust = KnownCode.Trusted.ToArray();
+        KnownCode.Trusted = previousTrust.Append(typeof(Program).Assembly.GetName().Name!).ToArray();
+        try
+        {
+            var effect = new DynamicBlurEffect();
+            var timeline = new Timeline(); var scenes = new Scenes(false); scenes.AddScene(timeline);
+            var item = new ShapeItem { Frame = 0, Length = 20 }; item.VideoEffects = [effect]; timeline.Items.Add(item);
+            var scene = new Scene(timeline, scenes, []);
+            Check(FrameCacheKey.CaptureDynamicProviders(scene).Contains(effect), "Dynamic provider not found in host animatable tree");
+            using var tracker = new KeyDependencyTracker(scene);
+            Check(tracker.TryCapture(5, out var first, out string reason), reason);
+            using (first!)
+            {
+                Check(first!.Validate(), "Initial dynamic capture not valid");
+                string before = first.Key;
+                effect.ExternalState = "changed-without-project-notification";
+                Check(!first.Validate(), "Hidden dependency change did not invalidate active capture");
+                Check(tracker.TryCapture(5, out var next, out reason), reason);
+                using (next!) Check(next!.Key != before && next.Validate(), "Dynamic state missing from frame key");
+            }
+            effect.FailValidation = true;
+            Check(!tracker.TryCapture(5, out _, out _), "Failing dynamic provider did not bypass cache");
+            Console.WriteLine("Dynamic host dependencies: animatable discovery, hidden state keys, post-capture validation and fail-closed bypass passed.");
+        }
+        finally { KnownCode.Trusted = previousTrust; }
+    }
     private sealed class ForeignShapeItem : ShapeItem { }
     // Readers in the plugin assemblies YMM4 ships (its folder) are built in, so a project with a file or a font
     // stays cacheable; the same assembly names from user\plugin, or other names in YMM4's folder, are not.

@@ -73,3 +73,5 @@ Playing/Paused/ExportingとRAM/live/renderを混ぜない。対象外理由とco
 (3)readback/キー/描画/ディスクのどこが占めるか、(4)操作後に古い画素を使っていないか、を照合して行う。
 観測結果による先読み量・描画batch等の適応と、処理側が完全な依存/完成状態を提供する契約APIを別々に進める。
 RTX3060実機の結果とWARP CIの結果は混ぜない。
+
+`compute-cache` は登録classの計算、`frame-cost` はrender／restore別のUpdate+Draw ticksと周波数、`cache-admission` はreadback開始前の見送り、`disk-compression`／`disk-decompression` はworkerのcodec CPU経過時間を示す。GPU実行時間ではない。動的providerの安全条件と費用判定は [DYNAMIC_CACHE_API.md](DYNAMIC_CACHE_API.md)。

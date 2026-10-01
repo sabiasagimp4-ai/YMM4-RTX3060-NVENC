@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Buffers.Binary;
+using System.IO.Compression;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -23,6 +25,7 @@ internal sealed class FrameCacheStore : IDisposable
     private const int MaxQueuedOperations = 128;
     private const long MaxQueuedWriteBytes = MaxFrameBytes;
     private static ReadOnlySpan<byte> Magic => "YMMFRM01"u8;
+    private static ReadOnlySpan<byte> CompressedMagic => "YMMFRZ01"u8;
     private readonly object _gate = new();
     private long _version;
     private readonly object _clearGate = new();
@@ -31,7 +34,7 @@ internal sealed class FrameCacheStore : IDisposable
     private readonly string _rootDirectory;
     private string _directory;
     private readonly Dictionary<string, (byte[] Pixels, LinkedListNode<string> Node, bool FromDisk)> _ram = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, (long Bytes, LinkedListNode<string> Node)> _disk = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (long Bytes, int RawBytes, LinkedListNode<string> Node)> _disk = new(StringComparer.Ordinal);
     private readonly LinkedList<string> _ramLru = new();
     private readonly LinkedList<string> _diskLru = new();
     private readonly BlockingCollection<DiskOperation> _operations = new(new ReadsFirst(), MaxQueuedOperations);
@@ -117,6 +120,18 @@ internal sealed class FrameCacheStore : IDisposable
     // Disk misses warm RAM in the background; this method never waits for file I/O.
     internal bool TryGet(string key, out ReadOnlyMemory<byte> pixels) => TryGet(key, TimeSpan.Zero, out pixels, out _);
 
+    // Strict cached-only lookup for UI/observers: no read scheduling, waiting, LRU movement or hit accounting.
+    internal bool TryGetCached(string key, out ReadOnlyMemory<byte> pixels)
+    {
+        pixels = default;
+        lock (_gate)
+        {
+            if (_disposed || !ValidKey(key) || !_ram.TryGetValue(key.ToLowerInvariant(), out var memory)) return false;
+            pixels = memory.Pixels;
+            return true;
+        }
+    }
+
     // A frame stored on disk only is read before any queued write, and the caller waits at most `wait` for it. The
     // read runs on the disk worker; the wait is for callers off the UI thread that would otherwise render the frame.
     internal bool TryGet(string key, TimeSpan wait, out ReadOnlyMemory<byte> pixels, out bool fromDisk)
@@ -182,8 +197,8 @@ internal sealed class FrameCacheStore : IDisposable
                 }
                 else if (disk && _disk.TryGetValue(key, out var entry))
                 {
-                    if (entry.Bytes - HeaderBytes > _ramBudget) continue;
-                    bytes += entry.Bytes - HeaderBytes;
+                    if (entry.RawBytes > _ramBudget) continue;
+                    bytes += entry.RawBytes;
                     if (bytes > _ramBudget / 2) break;
                     if (QueueRead(key, _generation)) queued++;
                 }
@@ -471,7 +486,21 @@ internal sealed class FrameCacheStore : IDisposable
                 lock (_gate)
                     if (_disposed || operation.Generation != _generation || length > _ramBudget) return;
                 using (CacheTrace.Measure("disk-allocation")) pixels = new byte[length];
-                using (CacheTrace.Measure("disk-read-bytes", "io-wall")) file.ReadExactly(pixels);
+                if (header[..8].SequenceEqual(CompressedMagic))
+                {
+                    int compressedLength = checked((int)(file.Length - HeaderBytes));
+                    byte[] encoded = ArrayPool<byte>.Shared.Rent(compressedLength);
+                    try
+                    {
+                        using (CacheTrace.Measure("disk-read-bytes", "io-wall")) file.ReadExactly(encoded.AsSpan(0, compressedLength));
+                        using var decode = CacheTrace.Measure("disk-decompression");
+                        using var decoder = new BrotliDecoder();
+                        var status = decoder.Decompress(encoded.AsSpan(0, compressedLength), pixels, out int consumed, out int written);
+                        if (status != OperationStatus.Done || consumed != compressedLength || written != length) throw new InvalidDataException();
+                    }
+                    finally { ArrayPool<byte>.Shared.Return(encoded); }
+                }
+                else using (CacheTrace.Measure("disk-read-bytes", "io-wall")) file.ReadExactly(pixels);
                 using (CacheTrace.Measure("disk-checksum"))
                     if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(pixels), header[16..])) throw new InvalidDataException();
                 if (trace is not null) trace.Outcome = "verified";
@@ -503,27 +532,38 @@ internal sealed class FrameCacheStore : IDisposable
         byte[] snapshot = operation.Pixels!;
         if (Volatile.Read(ref _diskBlocked) || operation.Generation != _diskGeneration || operation.Generation != Volatile.Read(ref _generation)
             || snapshot.LongLength > _diskBudget - HeaderBytes) return;
-        if (_disk.ContainsKey(operation.Key) && !RemoveDisk(operation.Key)) return;
-        long bytes = snapshot.LongLength + HeaderBytes;
-        while ((_diskBytes > _diskBudget - bytes || _disk.Count >= MaxDiskEntries) && _diskLru.First is not null)
-            if (!RemoveDisk(_diskLru.First.Value)) return;
-        // Undeletable retired records still consume physical disk budget.
-        if (_diskBytes > _diskBudget - bytes) return;
         string temp = Path.Combine(_directory, $"{operation.Key}.{Guid.NewGuid():N}.ymmtmp");
+        byte[]? compressed = null;
         try
         {
+            int compressedLength = 0;
+            // Worker only. Tiny records stay raw. Incompressible data falls back without expanding the file.
+            if (snapshot.Length >= 1024)
+            {
+                compressed = ArrayPool<byte>.Shared.Rent(snapshot.Length);
+                using var compression = CacheTrace.Measure("disk-compression");
+                if (!BrotliEncoder.TryCompress(snapshot, compressed.AsSpan(0, snapshot.Length), out compressedLength, quality: 0, window: 22)
+                    || compressedLength > snapshot.Length - snapshot.Length / 8) compressedLength = 0;
+            }
+            long bytes = (compressedLength > 0 ? compressedLength : snapshot.LongLength) + HeaderBytes;
+            if (_disk.ContainsKey(operation.Key) && !RemoveDisk(operation.Key)) return;
+            while ((_diskBytes > _diskBudget - bytes || _disk.Count >= MaxDiskEntries) && _diskLru.First is not null)
+                if (!RemoveDisk(_diskLru.First.Value)) return;
+            // Undeletable retired records still consume physical disk budget.
+            if (_diskBytes > _diskBudget - bytes) return;
             Span<byte> header = stackalloc byte[HeaderBytes];
-            Magic.CopyTo(header);
+            (compressedLength > 0 ? CompressedMagic : Magic).CopyTo(header);
             BinaryPrimitives.WriteInt64LittleEndian(header[8..], snapshot.LongLength);
             using (CacheTrace.Measure("disk-checksum")) SHA256.HashData(snapshot, header[16..]);
             using (var file = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                using (CacheTrace.Measure("disk-write-bytes", "io-wall")) { file.Write(header); file.Write(snapshot); }
+                using (CacheTrace.Measure("disk-write-bytes", "io-wall"))
+                { file.Write(header); file.Write(compressedLength > 0 ? compressed.AsSpan(0, compressedLength) : snapshot.AsSpan()); }
             }
             File.Move(temp, RecordPath(operation.Key), true);
             lock (_gate)
             {
-                _disk.Add(operation.Key, (bytes, _diskLru.AddLast(operation.Key)));
+                _disk.Add(operation.Key, (bytes, snapshot.Length, _diskLru.AddLast(operation.Key)));
                 _diskWrites++;
             }
             Interlocked.Increment(ref _version);
@@ -532,7 +572,7 @@ internal sealed class FrameCacheStore : IDisposable
         }
         catch (Exception error) when (IsFileFailure(error))
         { if (trace is not null) { trace.Outcome = "write-failed"; trace.Detail = error.GetType().Name; } }
-        finally { DeleteOrAccount(temp); }
+        finally { if (compressed is not null) ArrayPool<byte>.Shared.Return(compressed); DeleteOrAccount(temp); }
     }
 
     private void ProcessClear(DiskOperation operation)
@@ -641,14 +681,14 @@ internal sealed class FrameCacheStore : IDisposable
             {
                 using var file = OpenRecord(key);
                 file.ReadExactly(header);
-                if (!ValidHeader(header, file.Length, out _) || file.Length > _diskBudget ||
+                if (!ValidHeader(header, file.Length, out int rawBytes) || file.Length > _diskBudget ||
                     _diskBytes > _diskBudget - file.Length || _disk.Count >= MaxDiskEntries)
                 {
                     file.Dispose();
                     DeleteOrAccount(path);
                     continue;
                 }
-                lock (_gate) _disk.Add(key, (file.Length, _diskLru.AddLast(key)));
+                lock (_gate) _disk.Add(key, (file.Length, rawBytes, _diskLru.AddLast(key)));
                 Interlocked.Increment(ref _version);
                 Interlocked.Add(ref _diskBytes, file.Length);
             }
@@ -718,7 +758,8 @@ internal sealed class FrameCacheStore : IDisposable
     {
         long size = BinaryPrimitives.ReadInt64LittleEndian(header[8..]);
         length = size > 0 && size <= MaxFrameBytes ? (int)size : 0;
-        return header[..8].SequenceEqual(Magic) && length != 0 && fileLength == size + HeaderBytes;
+        return length != 0 && (header[..8].SequenceEqual(Magic) && fileLength == size + HeaderBytes
+            || header[..8].SequenceEqual(CompressedMagic) && fileLength > HeaderBytes && fileLength < size + HeaderBytes);
     }
     private static bool ValidKey(string? key) => key is { Length: 64 } && key.All(char.IsAsciiHexDigit);
     private static bool IsOwnedTemp(string name) => name.Length == 104 && name[64] == '.' &&
