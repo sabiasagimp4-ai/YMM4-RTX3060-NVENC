@@ -52,21 +52,32 @@
   - 他アイテムの描画結果や音声を参照する可能性がある型（音声波形、画面の複製など）は、ILSpy で確認して whitelist 外なら全体キーに戻します。
   - host の item 型の知識が必要なので、DLL 到着後に実装する想定です。
 
-**host DLL / Windows で最初に確認すること**
-0. `dotnet run --project tools/HostShapeReport -- 'D:\YukkuriMovieMaker_v4_Lite' > host-shapes.txt` を実行します（MetadataLoadContext で読むだけで、YMM4 のコードは実行しません。出力は名前とシグネチャのみです）。各 `IVideoFileSource` 実装の `predicted:` が、実ホストでの分類になります（ReadinessChecks で binder と一致することを検査済み）。MF2 が `unverified` と予測された場合は、形状が想定と違います。
-1. `dotnet build ... -c Release` が通ること。次に `ReadinessChecks` → `StoreChecks` → `CacheChecks` → `HostCacheProbe --gpu` の順で実行します。HostCacheProbe の `Render readiness coverage` 出力を ILSpy と照合してください。
-2. ILSpy で確認する内容:
-   - (a) MF2 の `decodedFrame.SampleTime/SampleDuration` の単位と、t（Update 引数）との関係
-   - (b) legacy の `streamStartTime` の意味
-   - (c) `CachedVideoFileSource` が内部の Update を呼ばずに frame を返す経路と、その frame の由来
-   - (d) 組込み FileSource assembly が plugin ctor より前に読み込まれるか
-   - (e) `TimelineSource.Update` 内で `IVideoFileSource.Update` が EC を flow したまま呼ばれるか（`UnsafeQueueUserWorkItem` や SuppressFlow がないか）
-   - (f) `VideoFileWriter.CreateFileAsync` の frame loop 範囲と `EncodeFrom`/`EncodeTo` の包含・範囲指定 flag（`HostExportScope.ExpectedFrames` が一致しないと、全出力が `.partial` のまま公開されません）
-   - (g) `TimelineVideoPlayer.Draw` が `TimelineSource.Update` を BeginDraw の内側で呼ぶか（プレビューで見たフレームを保存する機能の実装可否）
-   - (h) 小さい Update が JIT で inline 化されてフックを迂回しないか（Harmony/MonoMod は patch 対象の inline を抑止しますが、既に JIT 済みの呼出し側は要注意です）
-   - (i) `TimelineFrameCache.Hit()` の `CacheProvider.Clear()` が、直前のフレームで使ったデコーダーなどの遊休リソースまで破棄しないか。破棄する場合、ヒット→ミスの切替えごとにデコーダーを作り直して再生が引っかかります。host の Update がリソースをいつ返却・破棄するかを確認してください。
-   - (j) idle 先読みの `TimelineSourceAndDevices` が live と同じ GPU adapter を使うか。キーに adapter を含めたため、異なる場合は先読み結果がヒットしません（単一 GPU の対象 PC では同一のはずです）。
-3. decoder 失敗を注入する実 host 回帰試験（MF2 の読込を timeout させ、保存されないことを確認）を追加する。
+**YMM4 4.56.1.0 の実バイナリでの確認結果（2026-10-01）**
+
+ユーザーが公式 Lite zip を private repo `sabiasagimp4-ai/ymm4-dlls` の Release に置き、クラウド側で ILSpy と MetadataLoadContext で読みました（DLL や逆コンパイル結果は commit していません）。**zip の中身は 4.56.1.0 で、PC の 4.55.1.1 とは別版**です。
+
+- **ビルド**: 4.56.1.0 の DLL を参照して、プラグイン（Release）、HostCacheProbe、CacheChecks が 0 warnings / 0 errors で通りました。ManagedSmoke は C# 部分のみ成功で、ネイティブ DLL は Windows ビルドが必要です。HostCacheProbe の `IdleFramePreRendererChecks` に既存のコンパイルエラー（internal な `KeyCapture.Key` の参照）があったので修正しました。
+- (a) **MF2**（`MFVideoFileSource2`）: `decodedFrame.SampleTime/SampleDuration` は TimeSpan です。Update 自身が `decodedFrame != null && SampleTime <= t < SampleTime + SampleDuration` を有効判定にし、失敗時は null で透明を描きます。binder の判定はこれと同じです。
+- (b) **旧 MF**（`MFVideoFileSource`）: Update の冒頭で `time += streamStartTime` とし、`[currentTime, +currentDuration)` を stream 時計で保持します。timeout・エラー・範囲外では `currentDuration = 0` です。判定は `Covers(t + streamStartTime)` に確定しました。
+  - **FFmpeg**（`FFmpegVideoFileSource`）も同じ時計を使います。ただし EOF や**読込エラー**でデコードが途中で止まると、直前のフレームを stream 終端まで引き延ばして表示するため、終端まで届く区間は未確認として扱います（最終フレーム付近は保存しません）。
+- (c) `VideoFileSourceFactory.Create` は、すべての動画ソースを `CachedVideoFileSource(filePath, VideoResource(devices, source))` で包みます。wrapper の Update は常に `resource.Source.Update(time)` に委譲します。旧規則（直接の field）ではここが未確認になり、**動画を含むフレームがまったく保存されない状態でした**。判定を `resource.Source` に修正済みです。
+  - WIC の GIF/WebP は同期デコードで、失敗は例外になります（GIF が握りつぶす1種のエラーは、そのファイルでは毎回同じ結果です）。このため「例外なし＝完了」として扱います。
+  - 連番画像（読込失敗が黙って空になる）と DirectShow は未確認のままです。
+- (d) 実行時の確認が必要です（遅延読込は bind で対応済み）。
+- (e) `TimelineSource.Update` は Parallel.ForEach / AsParallel / Task.Run を使い、EC は flow します。ただし**先読み（`PrefetchResources`）は約1秒先のアイテムを Task.Run で作って Update するため、フレーム終了後にデコードすることがあります**。採用するフレームが自分の scope で再度 Update するので、完了済み scope 上のデコードは無視するよう変更しました。
+- (f) `CreateFileAsync` は `start = max(0, min(min(from,to), len-1))`、`end = min(len, max(from,to))` で、1フレームにつき `WriteVideo` を1回呼びます。`HostExportScope.ExpectedFrames` と一致します。writer は最初の await より前に作られます。
+- (g) `TimelineVideoPlayer` は `Update` を `Draw()`（BeginDraw）の**前**に呼びます。Postfix でのキャプチャは描画と衝突しません。
+  - 再生中は `NeedTimelineItemRects = isMouseOverPreviewArea`、一時停止中は常に true で usage は `Paused` です。このため、**マウスがプレビュー上にある再生中と一時停止中のシークは、キャッシュ対象外**です。
+- (h) wrapper の Update は小さいですが、内側のデコーダーの Update は大きく、内側でも同じ状態検査をするので安全側です。
+- (i) host 自身が `TimelineSource.Update` の最後に毎回 `CacheProvider.Clear()` を呼びます。`Hit()` の Clear はこれと同じなので問題ありません。
+- (j) `YukkuriMovieMaker.ItemEditor.TimelineSourceAndDevices` は player と同じく `new GraphicsDevices()` を使います。内部 field `source` も想定どおりです。
+- フレーム時刻: player は `VideoInfo.GetTimeFrom`（`round(frame×10⁷/fps)`）を使います。idle は切り捨てで 1 tick ずれていたので、同じ変換に揃えました。
+- 版: `HostIntegration` は 4.55.1.1 と 4.56.1.0 の MVID/SHA-256 を受け入れます。4.56.1.0 の値はこの zip から算出しました。4.55.1.1 の decoder 形状は未確認ですが、binder は型名と形状の両方を照合するので、合わなければ未確認扱いになります。
+
+**次に Windows で確認すること**
+1. `tools/HostShapeReport` を手元の YMM4 に対して実行し、4.55.1.1 でも `predicted:` が MF2 / MF-legacy / FFmpeg / WIC / wrapper になるか確認します。または YMM4 を 4.56.1.0 に更新します（未保存プロジェクトを保存してから）。
+2. `build.ps1 -Smoke`（GPU を使う HostCacheProbe と NativeSmoke を含む）を実行します。
+3. decoder 失敗を注入する実 host 回帰試験を追加します（例: MF2 の `MFFrameDecoder.TryDecodeAt` を test 用に false にして、保存されないことを確認）。
 
 ### 以前の状態（2026-10-01 checkpoint 時点）
 
