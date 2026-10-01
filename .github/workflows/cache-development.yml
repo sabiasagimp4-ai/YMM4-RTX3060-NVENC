@@ -2,7 +2,7 @@ name: cache-development
 
 on:
   push:
-    branches: ['codex/ae-cache-continuation']
+    branches: ['main', 'codex/ae-cache-continuation']
   pull_request:
     paths: ['NVEncVideoWriterPlugin/**', 'tests/**', '.github/workflows/cache-development.yml']
   workflow_dispatch:
@@ -93,3 +93,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Integration checks failed' }
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu
           if ($LASTEXITCODE -ne 0) { throw 'Pixel checks failed' }
+      - name: GPU retention, invalidation and trace measurement (WARP)
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR --preview-performance
+          if ($LASTEXITCODE -ne 0) { throw 'Preview performance checks failed' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: preview-performance
+          path: dist
+          if-no-files-found: ignore
+          retention-days: 14
