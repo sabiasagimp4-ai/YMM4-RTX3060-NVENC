@@ -206,6 +206,37 @@ internal static class Program
                 + (described ? $"model {model.Length / 1024} KiB" : "bypassed: " + reason) + $" ({runs} samples; no threshold)");
         }
 
+        // Where the time goes, for 1000 shapes (each phase as TryDescribe does it).
+        {
+            var timeline = new Timeline();
+            var scenes = new Scenes(false);
+            scenes.AddScene(timeline);
+            timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, 1000).Select(i => Shape(i, blur: false)));
+            var items = timeline.Items.ToArray();
+            double Phase(Action action)
+            {
+                action();
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                action();
+                return clock.Elapsed.TotalMilliseconds;
+            }
+            string json = string.Empty;
+            double files = Phase(() => { foreach (var item in items) item.GetFiles().ToList(); });
+            double resources = Phase(() => { foreach (var item in items) item.GetResources().ToList(); });
+            double serialize = Phase(() => json = YukkuriMovieMaker.Json.Json.GetJsonText(new { Timelines = new[] { new { timeline.ID, timeline.Items } } }));
+            Newtonsoft.Json.Linq.JObject parsed = null!;
+            double parse = Phase(() =>
+            {
+                using var reader = new Newtonsoft.Json.JsonTextReader(new StringReader(json)) { DateParseHandling = Newtonsoft.Json.DateParseHandling.None };
+                parsed = Newtonsoft.Json.Linq.JObject.Load(reader);
+            });
+            double types = Phase(() => parsed.Descendants().OfType<Newtonsoft.Json.Linq.JProperty>().Count(p => p.Name == "$type"));
+            double texts = Phase(() => { foreach (var token in parsed.Descendants().OfType<Newtonsoft.Json.Linq.JObject>().Take(1000)) token.ToString(Newtonsoft.Json.Formatting.None); });
+            double whole = Phase(() => FrameCacheKey.TryDescribe(new Scene(timeline, scenes, []), readers, out _, out _, out _, out _));
+            Console.WriteLine($"Describe phases, 1000 shapes: GetFiles {files:F0} ms, GetResources {resources:F0} ms, YMM4 JSON {serialize:F0} ms ({json.Length / 1024} KiB), "
+                + $"parse {parse:F0} ms, $type scan {types:F0} ms, per-object texts {texts:F0} ms; whole description {whole:F0} ms");
+        }
+
         static IItem Shape(int i, bool blur)
         {
             var shape = new ShapeItem { Frame = i * 3, Length = 30, Layer = i % 10 };
