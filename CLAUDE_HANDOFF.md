@@ -1,8 +1,17 @@
 # Claude 引継ぎ — YMM4 RTX3060 NVENC / AE風キャッシュ
 
-更新日: 2026-10-01（追記6まで）。これは **未完成の作業保存（WIP checkpoint）** です。製品完成・配布可能・AE完全再現を意味しません。
+更新日: 2026-10-01（追記7まで）。これは **未完成の作業保存（WIP checkpoint）** です。製品完成・配布可能・AE完全再現を意味しません。
 
 ## 最初に読むこと
+
+### 2026-10-01 追記（7）— NVENC 出力とキャッシュの設定を分けた
+
+ユーザー:「NVENCを使うものと、YMM標準のプレビューのままキャッシュを使うものを設定で分けれるようにしといて」。8a8a1b5。
+- `FrameCacheToolSettings`（設定ファイル名は従来どおり `NVEncVideoWriterPlugin.FrameCacheToolSettings.json`）に 3 つの切り替え: `PreviewCache`（YMM4 標準のプレビューのままキャッシュ。アイドル時の先読み・帯を含む）、`ExportCache`（どの出力形式でも動画出力の描画をキャッシュ）、`NvencOutput`（出力形式「RTX 3060 NVENC 出力」）。`SettingsVersion` 0 のファイルは旧 `Enabled` を両方のキャッシュへ引き継ぐ。新規は NVENC のみ有効。
+- UI: ツール「描画キャッシュ」と YMM4 の設定（その他 > RTX 3060 NVENC・描画キャッシュ）に同じ 3 つのチェックボックス（`PluginSettingsPanel`、`FrameCacheToolSettings.Default` に双方向バインド）。変更は `PluginSettings` がその場で反映し保存する。
+- `TimelineFrameCache.SetEnabled(preview, export)`。`Enabled` は「どちらか」（テスト用の setter は両方）。Update・保存・idle の prime・帯・idle 先読みはそれぞれの用途のスイッチを見る。
+- NVENC: 起動時に無効なら `HostExportScope` のフックを入れない（`HostIntegration.ExportHooked`）。後で有効にしたら `PluginSettings` がその場で入れる。無効のまま NVENC 形式で出力すると `RequireExportScope` が理由つきで中止、設定画面にも同じ文言。出力フックの失敗は NVENC 出力だけを無効にし、キャッシュは続ける（以前は全体を無効化）。
+- 試験: HostCacheProbe（プレビューだけ・出力だけの切り替えで、もう一方が再利用されないこと。旧・新・現行の設定ファイルの読み込み）。YMM4 の設定画面の表示は GUI では未確認。
 
 ### 2026-10-01 追記（6）— ChatGPT の v2 引継ぎ（`docs/AE_YMM4_Cache_v2_Handoff_2026-10-01.md`）への対応
 
