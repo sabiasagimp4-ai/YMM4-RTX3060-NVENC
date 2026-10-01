@@ -107,9 +107,9 @@ internal static class IdleFramePreRendererChecks
         var tracker = Activator.CreateInstance(trackerType, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
             null, [scene], null)!;
         var captureType = assembly.GetType("NVEncVideoWriterPlugin.KeyCapture", true)!;
-        var args = new object?[] { 0, null, null, false };
+        var args = new object?[] { 0, null, null, false, false };
         bool captured = (bool)trackerType.GetMethod("TryCapture", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                [typeof(int), captureType.MakeByRefType(), typeof(string).MakeByRefType(), typeof(bool)])!
+                [typeof(int), captureType.MakeByRefType(), typeof(string).MakeByRefType(), typeof(bool), typeof(bool)])!
             .Invoke(tracker, args)!;
         Check(captured, "Could not capture the test scene: " + args[2]);
         capture = (IDisposable)args[1]!;
