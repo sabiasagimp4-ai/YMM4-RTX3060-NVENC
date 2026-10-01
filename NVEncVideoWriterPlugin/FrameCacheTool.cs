@@ -123,7 +123,11 @@ public sealed class FrameCacheToolView : UserControl
         enabled.IsChecked = TimelineFrameCache.Enabled;
         status.Text = HostIntegration.Status + Environment.NewLine + FrameRenderReadiness.Summary
             + Environment.NewLine + TimelineFrameCache.Status + Environment.NewLine + IdleFramePreRenderer.Status;
-        counts.Text = $"再利用 {TimelineFrameCache.Hits:N0} / 新規描画 {TimelineFrameCache.Misses:N0}\n"
+        var store = TimelineFrameCache.StoreIfCreated;
+        counts.Text = $"再利用 {TimelineFrameCache.Hits:N0}（同じ画像 {TimelineFrameCache.LiveReuses:N0} / RAM {TimelineFrameCache.RamHits:N0} / ディスク {TimelineFrameCache.DiskHits:N0}）"
+            + $" / 新規描画 {TimelineFrameCache.Misses:N0} / 対象外 {TimelineFrameCache.Bypasses:N0}\n"
+            + $"プレビュー保存 {TimelineFrameCache.PreviewStored:N0}（描画スレッド {TimelineFrameCache.PreviewStoreMilliseconds:N1} ms/枚）/ 先読み読込 {TimelineFrameCache.ReadAheads:N0}"
+            + (store is null ? "\n" : $" / ディスク読込 {store.DiskReads:N0}（{store.DiskReadMilliseconds:N1} ms/枚）/ 書込 {store.DiskWrites:N0}（混雑で見送り {store.DroppedWrites:N0}）\n")
             + $"GPU {TimelineFrameCache.GpuBytes / 1048576.0:N1} MiB / RAM 上限 256 MiB / ディスク上限 4 GiB";
     }
 }

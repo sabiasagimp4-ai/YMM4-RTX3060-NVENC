@@ -207,7 +207,78 @@ internal static class StoreChecks
                 Check(!reopened.TryGet(Key(2), out _), "oversubscribed startup bypasses new disk writes");
             }
         }
+        CheckDiskDelivery(tempPath, Key);
+        CheckConcurrentIndex(tempPath, Key);
         Console.WriteLine("Cache store: ownership, budgets, cap, restart, checksum, locked-file epoch purge, physical accounting, concurrent purge and disk failure passed.");
+    }
+
+    // A frame stored on disk only reaches the caller: by a bounded wait, or by read-ahead within half the RAM budget.
+    private static void CheckDiskDelivery(string tempPath, Func<int, string> key)
+    {
+        string root = Path.Combine(tempPath, "delivery-store");
+        byte[] frame = Enumerable.Range(0, 16).Select(value => (byte)(value * 3)).ToArray();
+        using (var cache = new FrameCacheStore(root, 64, 1024))
+        {
+            for (int i = 20; i < 24; i++) cache.Put(key(i), frame);
+            byte[] residency = new byte[4];
+            WaitFor(() => { cache.GetResidency([key(20), key(21), key(22), key(23)], residency); return cache.DiskWrites == 4; }, "frames are written to disk");
+        }
+        using (var cache = new FrameCacheStore(root, 32, 1024))
+        {
+            byte[] residency = new byte[1];
+            WaitFor(() => { cache.GetResidency([key(20)], residency); return residency[0] == 1; }, "the index is loaded after restart");
+            Check(cache.TryGet(key(20), TimeSpan.FromSeconds(10), out var pixels, out bool fromDisk) && fromDisk && pixels.Span.SequenceEqual(frame),
+                "a waited request did not deliver the disk-only frame");
+            Check(cache.DiskDeliveries == 1 && cache.DiskReads == 1, $"delivery counters: {cache.DiskDeliveries}/{cache.DiskReads}");
+            Check(cache.TryGet(key(20), TimeSpan.Zero, out _, out fromDisk) && !fromDisk && cache.DiskDeliveries == 1, "a second hit counts as RAM");
+            Check(!cache.TryGet(key(99), TimeSpan.FromSeconds(5), out _, out _), "a key that is not stored does not wait");
+            // RAM budget 32: read-ahead may use 16 bytes, one frame; key(20) is already in RAM.
+            Check(cache.Prefetch([key(20), key(21), key(22), null, "not-a-key"]) == 1, "read-ahead ignores RAM frames and stays within half the RAM budget");
+            WaitFor(() => { cache.GetResidency([key(21)], residency); return residency[0] == 2; }, "read-ahead warms RAM");
+            Check(cache.TryGet(key(21), out var prefetched) && prefetched.Span.SequenceEqual(frame) && cache.DiskDeliveries == 2,
+                "a prefetched frame is a disk delivery");
+            cache.Clear();
+            cache.GetResidency([key(22)], residency);
+            Check(residency[0] == 0 && cache.Prefetch([key(22)]) == 0 && !cache.TryGet(key(22), TimeSpan.FromSeconds(1), out _, out _),
+                "purged frames are neither reported nor delivered");
+        }
+    }
+
+    // The disk index is read by residency queries, requests and read-ahead while the worker writes, evicts and purges.
+    private static void CheckConcurrentIndex(string tempPath, Func<int, string> key)
+    {
+        string root = Path.Combine(tempPath, "stress-store");
+        byte[] frame = Enumerable.Range(0, 16).Select(value => (byte)value).ToArray();
+        var keys = Enumerable.Range(100, 96).Select(key).ToArray();
+        // RAM holds 4 frames and disk 20, so every second writes, reads, evictions and index changes happen.
+        using var cache = new FrameCacheStore(root, 64, 20 * (16 + 48));
+        var errors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        long rounds = 0;
+        void Loop(Action<int> body)
+        {
+            try { for (int i = 0; clock.ElapsedMilliseconds < 3000; i++) { body(i); Interlocked.Increment(ref rounds); } }
+            catch (Exception error) { errors.Enqueue(error); }
+        }
+        Task.WaitAll(
+            Task.Run(() => Loop(i => cache.Put(keys[i % keys.Length], frame))),
+            Task.Run(() => Loop(i => cache.Put(keys[(i * 13) % keys.Length], frame))),
+            Task.Run(() => Loop(_ => { var residency = new byte[keys.Length]; cache.GetResidency(keys, residency); })),
+            Task.Run(() => Loop(i => { cache.TryGet(keys[(i * 7) % keys.Length], out _); cache.Prefetch(keys); })),
+            Task.Run(() => Loop(i => cache.TryGet(keys[i % keys.Length], TimeSpan.FromMilliseconds(2), out _, out _))),
+            Task.Run(() => Loop(i => { if (i % 40 == 0) cache.Clear(); Thread.Sleep(1); })));
+        Check(errors.IsEmpty, "concurrent index access failed: " + string.Join("; ", errors.Select(error => error.GetType().Name + ": " + error.Message)));
+        Check(cache.RamBytes <= 64 && cache.DiskBytes <= 20 * 64, "budgets under concurrency");
+        // Quiesced: the purge barrier empties the index, and new records are counted once each.
+        cache.Clear();
+        var residency = new byte[keys.Length];
+        cache.GetResidency(keys, residency);
+        Check(cache.DiskBytes == 0 && residency.All(value => value == 0), "purge after the stress left disk frames");
+        for (int i = 0; i < 3; i++) cache.Put(keys[i], frame);
+        WaitFor(() => cache.DiskBytes == 3 * 64, "writes after the stress are accounted");
+        int files = Directory.EnumerateFiles(Path.Combine(root, "frames-v1"), "*.ymmframe", SearchOption.AllDirectories).Count();
+        Check(files == 3, $"index and files disagree after the stress: {files} files");
+        Console.WriteLine($"Cache store index under concurrency: {Interlocked.Read(ref rounds)} operations in 3 s, {cache.DiskWrites} disk writes, {cache.DiskReads} reads, {cache.DroppedWrites} writes dropped by backpressure, no errors, accounting consistent.");
     }
 
     private static void Check(bool condition, string message)

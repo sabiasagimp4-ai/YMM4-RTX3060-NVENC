@@ -183,7 +183,7 @@ internal static class IdleFramePreRenderer
     private static void RenderBatch(Session current, Job job, TimelineFrameCache.PreviewViewport viewport,
         int anchorFrame, int startFrame, int endFrame)
     {
-        int rendered = 0;
+        int rendered = 0, skipped = 0;
         try
         {
             if (!current.Tracker.TryCapture(startFrame, out var initial, out string reason))
@@ -218,6 +218,13 @@ internal static class IdleFramePreRenderer
                         // Same conversion as TimelineVideoPlayer, so the primed frame is rendered at the exact time
                         // the player will request (a one-tick difference can select another video sample).
                         var time = cloneScene.Timeline.VideoInfo.GetTimeFrom(frame);
+                        // Stored frames (in RAM, or on disk where the preview reads them ahead) are not rendered again.
+                        if (TimelineFrameCache.IsPreviewStored(source, time, cloneCapture, latestViewport))
+                        {
+                            skipped++;
+                            Volatile.Write(ref current.NextFrame, frame + 1);
+                            continue;
+                        }
                         source.Update(time, TimelineSourceUsage.Playing);
                         if (!CanContinue(current, job.Token, anchorFrame)) return;
                         if (TryPrimeIfCurrent(job.Token, current.LiveScene, cloneScene, source, time, latestViewport, liveCapture, cloneCapture))
@@ -227,9 +234,10 @@ internal static class IdleFramePreRenderer
                     Thread.Sleep(8);
                 }
             }
+            string stored = skipped == 0 ? string.Empty : $"（保存済みの {skipped} フレームは描画せず）";
             SetStatus(rendered == 0
-                ? "先読み範囲の確認が完了しました。"
-                : $"プレビュー範囲の {rendered} フレームを先読みしました。");
+                ? "先読み範囲の確認が完了しました。" + stored
+                : $"プレビュー範囲の {rendered} フレームを先読みしました。" + stored);
         }
         catch (OperationCanceledException) { }
         catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)

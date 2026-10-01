@@ -1,20 +1,11 @@
 namespace NVEncVideoWriterPlugin;
 
-// The host player, the exporter and the idle pre-renderer may turn a frame number into a TimeSpan with
-// different rounding (integer ticks, double seconds, whole milliseconds). A time close to a frame
-// boundary is therefore keyed by its frame number; anything else keeps its exact ticks.
+// Keys the exact requested time. A time one tick away from a frame boundary can make a decoder or a time-dependent
+// effect pick another sample, so near-equal times are never merged. This loses no reuse: every renderer in
+// YMM4 4.56.1.0 that the cache serves (TimelineVideoPlayer playing and paused, VideoFileWriter, the player's
+// current-frame export) and the plugin's own producers (idle pre-render, cache bars) turn frame numbers into
+// times with VideoInfo.GetTimeFrom, so the same frame always arrives with the same ticks.
 internal static class FrameTimeKey
 {
-    // 1/8 frame, at most 1 ms: absorbs millisecond rounding yet stays far from neighboring frames.
-    internal static string For(TimeSpan time, int fps)
-    {
-        if (fps > 0)
-        {
-            long frame = (long)Math.Round(time.Ticks * (double)fps / TimeSpan.TicksPerSecond, MidpointRounding.AwayFromZero);
-            long boundary = (long)Math.Round(frame * (double)TimeSpan.TicksPerSecond / fps, MidpointRounding.AwayFromZero);
-            long tolerance = Math.Min(TimeSpan.TicksPerMillisecond, TimeSpan.TicksPerSecond / fps / 8);
-            if (Math.Abs(time.Ticks - boundary) <= tolerance) return $"f{frame}@{fps}";
-        }
-        return $"t{time.Ticks}";
-    }
+    internal static string For(TimeSpan time, int fps) => $"t{time.Ticks}@{fps}";
 }

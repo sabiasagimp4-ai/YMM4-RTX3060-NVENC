@@ -120,6 +120,12 @@ internal static class FramePixelChecks
                 Check(TimelineFrameCache.GpuBytes == 0, "Preview rect checks leaked global GPU reservation");
             }
             else Console.WriteLine("Preview rect checks skipped: rect reuse is off on this build");
+            if (features.Preview)
+            {
+                PreviewDeliveryChecks.Run(host, context, features.SelectionRects);
+                Check(TimelineFrameCache.GpuBytes == 0, "Preview delivery checks leaked global GPU reservation");
+            }
+            if (features.DecoderVerified(mediaFoundation)) CheckBoundaryTimes(host, context, videoPath);
             if (features.DecoderVerified(mediaFoundation)) CheckVideoDecodeFailureIsNotStored(host, context, videoPath);
             else Console.WriteLine("Video decode-failure check skipped: the MediaFoundation reader is not trusted on this build");
         }
@@ -191,6 +197,56 @@ internal static class FramePixelChecks
             Check(Reused(14, 20), "Reuse did not resume after decoding recovered: " + TimelineFrameCache.Status);
         }
         Console.WriteLine("Real reader decode failure (MF2 TryDecodeAt / legacy timeout): not stored, reuse resumes after recovery OK");
+    }
+
+    // Exact time keys: a time one tick before a frame boundary is a request of its own. With the cache ON and the
+    // boundary frame already stored, the earlier time must show what the host renders for it with the cache OFF
+    // (a key by frame number used to hand it the boundary frame).
+    private static void CheckBoundaryTimes(Assembly host, IGraphicsDevicesAndContext context, string? videoPath)
+    {
+        if (videoPath is null || !System.IO.File.Exists(videoPath))
+        {
+            Console.WriteLine("Boundary time check skipped (pass --video <mp4>)");
+            return;
+        }
+        var timeline = new Timeline();
+        timeline.VideoInfo.Width = 320; timeline.VideoInfo.Height = 180; timeline.VideoInfo.FPS = 30;
+        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        timeline.Items = timeline.Items.Add(new VideoItem { FilePath = videoPath, Frame = 0, Length = 60 });
+        var scene = new Scene(timeline, scenes, []);
+        var source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [context, scene, null], null)!;
+        using (source)
+        {
+            var dc = context.DeviceContext;
+            byte[] Render(TimeSpan time)
+            {
+                source.Update(time, TimelineSourceUsage.Exporting);
+                return TimelineFrameCache.Capture(dc, source.Output, 320, 180, new(-160, -90))!;
+            }
+            var boundary = timeline.VideoInfo.GetTimeFrom(15);
+            var earlier = boundary - TimeSpan.FromTicks(1);
+            TimelineFrameCache.Enabled = false;
+            var atBoundary = Render(boundary);
+            var beforeBoundary = Render(earlier);
+            TimelineFrameCache.Enabled = true;
+            TimelineFrameCache.Clear();
+            bool stored = false;
+            for (int i = 0; i < 100 && !stored; i++) // the video file is fingerprinted in the background first
+            {
+                source.Update(boundary, TimelineSourceUsage.Exporting);
+                long hits = TimelineFrameCache.Hits;
+                source.Update(boundary, TimelineSourceUsage.Exporting);
+                stored = TimelineFrameCache.Hits > hits;
+                if (!stored) Thread.Sleep(50);
+            }
+            Check(stored, "The boundary frame was never reused: " + TimelineFrameCache.Status);
+            long renders = TimelineFrameCache.Misses;
+            Check(Render(earlier).SequenceEqual(beforeBoundary) && TimelineFrameCache.Misses == renders + 1,
+                "One tick before a frame boundary, the cache did not render what the host renders without it");
+            Check(Render(boundary).SequenceEqual(atBoundary), "The boundary frame differs from the host render");
+            Console.WriteLine($"Boundary times (real video, one tick apart): host samples {(atBoundary.SequenceEqual(beforeBoundary) ? "are equal" : "differ")}; cache ON matches cache OFF at both");
+        }
     }
 
     private static MethodInfo clearCurrentFrame = null!;

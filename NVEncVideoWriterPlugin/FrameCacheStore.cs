@@ -1,5 +1,8 @@
 using System.Buffers.Binary;
+using System.Collections;
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -8,6 +11,9 @@ namespace NVEncVideoWriterPlugin;
 
 // Put snapshots the caller's array; stored snapshots are never mutated afterwards, so hits share them
 // read-only instead of copying a whole frame per hit.
+// Locking: _gate guards RAM, the pending sets and the disk index (_disk, _diskLru, _diskGeneration). Only the disk
+// worker changes the disk index, always under _gate and never while doing file I/O; it may read the index without
+// the lock. Every other thread reads it under _gate.
 internal sealed class FrameCacheStore : IDisposable
 {
     internal const int MaxFrameBytes = 128 * 1024 * 1024;
@@ -24,11 +30,11 @@ internal sealed class FrameCacheStore : IDisposable
     private readonly long _diskBudget;
     private readonly string _rootDirectory;
     private string _directory;
-    private readonly Dictionary<string, (byte[] Pixels, LinkedListNode<string> Node)> _ram = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (byte[] Pixels, LinkedListNode<string> Node, bool FromDisk)> _ram = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (long Bytes, LinkedListNode<string> Node)> _disk = new(StringComparer.Ordinal);
     private readonly LinkedList<string> _ramLru = new();
     private readonly LinkedList<string> _diskLru = new();
-    private readonly BlockingCollection<DiskOperation> _operations = new(new ConcurrentQueue<DiskOperation>(), MaxQueuedOperations);
+    private readonly BlockingCollection<DiskOperation> _operations = new(new ReadsFirst(), MaxQueuedOperations);
     private readonly HashSet<PendingKey> _pendingReads = [];
     private readonly HashSet<PendingKey> _pendingWrites = [];
     private readonly Thread? _diskWorker;
@@ -36,7 +42,9 @@ internal sealed class FrameCacheStore : IDisposable
     private bool _disposed;
     private bool _diskBlocked;
     private bool _workerFailed;
+    private bool _indexReady;
     private long _diskBytes, _ramBytes, _hits, _misses, _generation, _diskGeneration, _queuedWriteBytes;
+    private long _diskDeliveries, _diskReads, _diskReadTicks, _diskWrites, _droppedWrites;
 
     internal FrameCacheStore(string path, long ramBudgetBytes = 256L * 1024 * 1024, long diskBudgetBytes = 4L * 1024 * 1024 * 1024)
     {
@@ -56,44 +64,103 @@ internal sealed class FrameCacheStore : IDisposable
     // Changes whenever a frame enters or leaves RAM or disk (for the cache status bars).
     internal long Version => Interlocked.Read(ref _version);
 
-    // 2: in RAM, 1: on disk only, 0: not stored. Never waits for I/O.
+    // 2: in RAM, 1: on disk only, 0: not stored. Never waits for I/O. Frames of a purge that is still being
+    // persisted, or of a disk that stopped working, are not reported.
     internal void GetResidency(IReadOnlyList<string?> keys, Span<byte> residency)
     {
         lock (_gate)
+        {
+            bool disk = DiskReadable();
             for (int i = 0; i < keys.Count; i++)
             {
                 string? key = keys[i];
                 residency[i] = _disposed || key is null || !ValidKey(key) ? (byte)0
-                    : _ram.ContainsKey(key.ToLowerInvariant()) ? (byte)2 : _disk.ContainsKey(key.ToLowerInvariant()) ? (byte)1 : (byte)0;
+                    : _ram.ContainsKey(key.ToLowerInvariant()) ? (byte)2 : disk && _disk.ContainsKey(key.ToLowerInvariant()) ? (byte)1 : (byte)0;
             }
+        }
     }
 
     internal long RamBytes { get { lock (_gate) return _ramBytes; } }
     internal long DiskBytes => Interlocked.Read(ref _diskBytes);
     internal long Hits { get { lock (_gate) return _hits; } }
     internal long Misses { get { lock (_gate) return _misses; } }
+    // Hits whose pixels were read back from disk (the first hit after the read; later hits are RAM hits).
+    internal long DiskDeliveries { get { lock (_gate) return _diskDeliveries; } }
+    internal long DiskReads { get { lock (_gate) return _diskReads; } }
+    internal double DiskReadMilliseconds { get { lock (_gate) return _diskReads == 0 ? 0 : _diskReadTicks * 1000.0 / Stopwatch.Frequency / _diskReads; } }
+    internal long DiskWrites { get { lock (_gate) return _diskWrites; } }
+    // Frames kept in RAM only because the write queue was full (backpressure).
+    internal long DroppedWrites { get { lock (_gate) return _droppedWrites; } }
 
     // Disk misses warm RAM in the background; this method never waits for file I/O.
-    internal bool TryGet(string key, out ReadOnlyMemory<byte> pixels)
+    internal bool TryGet(string key, out ReadOnlyMemory<byte> pixels) => TryGet(key, TimeSpan.Zero, out pixels, out _);
+
+    // A frame stored on disk only is read before any queued write, and the caller waits at most `wait` for it. The
+    // read runs on the disk worker; the wait is for callers off the UI thread that would otherwise render the frame.
+    internal bool TryGet(string key, TimeSpan wait, out ReadOnlyMemory<byte> pixels, out bool fromDisk)
     {
+        pixels = ReadOnlyMemory<byte>.Empty;
+        fromDisk = false;
+        long deadline = Stopwatch.GetTimestamp() + (long)(Math.Max(0, wait.TotalSeconds) * Stopwatch.Frequency);
         lock (_gate)
         {
-            pixels = ReadOnlyMemory<byte>.Empty;
             if (_disposed || !ValidKey(key)) { _misses++; return false; }
             key = key.ToLowerInvariant();
-            if (_ram.TryGetValue(key, out var memory))
+            bool queued = false;
+            while (true)
             {
-                Touch(_ramLru, memory.Node);
-                pixels = memory.Pixels;
-                _hits++;
-                return true;
+                if (_ram.TryGetValue(key, out var memory))
+                {
+                    Touch(_ramLru, memory.Node);
+                    pixels = memory.Pixels;
+                    if (memory.FromDisk)
+                    {
+                        fromDisk = true;
+                        _ram[key] = (memory.Pixels, memory.Node, false);
+                        _diskDeliveries++;
+                    }
+                    _hits++;
+                    return true;
+                }
+                if (!queued)
+                {
+                    queued = true;
+                    // Before the index is loaded every key may be on disk.
+                    if (DiskReadable() && (!_indexReady || _disk.ContainsKey(key))) QueueRead(key, _generation);
+                }
+                long remaining = deadline - Stopwatch.GetTimestamp();
+                if (remaining <= 0 || _disposed || !_pendingReads.Contains(new PendingKey(_generation, key))) break;
+                Monitor.Wait(_gate, TimeSpan.FromSeconds(remaining / (double)Stopwatch.Frequency));
             }
-
             _misses++;
-            if (_diskWorker is not null && !_workerFailed && !Volatile.Read(ref _diskBlocked)) QueueRead(key, _generation);
             return false;
         }
     }
+
+    // Read-ahead for frames about to be shown: queues reads (ahead of writes) for the keys stored on disk only, in
+    // order, up to half the RAM budget so that they do not evict each other before use. Never waits for I/O.
+    internal int Prefetch(IReadOnlyList<string?> keys)
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_indexReady || !DiskReadable()) return 0;
+            long bytes = 0;
+            int queued = 0;
+            foreach (string? candidate in keys)
+            {
+                if (candidate is null || !ValidKey(candidate)) continue;
+                string key = candidate.ToLowerInvariant();
+                if (_ram.ContainsKey(key) || !_disk.TryGetValue(key, out var entry)) continue;
+                bytes += entry.Bytes - HeaderBytes;
+                if (bytes > _ramBudget / 2) break;
+                if (QueueRead(key, _generation)) queued++;
+            }
+            return queued;
+        }
+    }
+
+    // Under _gate.
+    private bool DiskReadable() => _diskWorker is not null && !_workerFailed && !Volatile.Read(ref _diskBlocked) && _diskGeneration == _generation;
 
     internal void Put(string key, byte[] pixels) => Put(key, pixels, owned: false);
 
@@ -118,7 +185,7 @@ internal sealed class FrameCacheStore : IDisposable
                 return;
             }
             var snapshot = owned ? pixels : (byte[])pixels.Clone();
-            AddRam(key, snapshot);
+            AddRam(key, snapshot, fromDisk: false);
             // ponytail: async disk reads only promote frames that fit RAM; streaming hits need a separate delivery API.
             if (_diskWorker is not null && !_workerFailed && !Volatile.Read(ref _diskBlocked)
                 && snapshot.LongLength <= _ramBudget && snapshot.LongLength <= _diskBudget - HeaderBytes)
@@ -143,6 +210,7 @@ internal sealed class FrameCacheStore : IDisposable
                 if (_workerFailed) throw new IOException("The frame cache disk worker stopped before its purge could be persisted.");
 
                 long generation = ++_generation;
+                Monitor.PulseAll(_gate);
                 var retainedClears = new List<DiskOperation>();
                 while (_operations.TryTake(out var pending))
                 {
@@ -184,26 +252,32 @@ internal sealed class FrameCacheStore : IDisposable
             _ramBytes = _queuedWriteBytes = 0;
             _pendingReads.Clear();
             _pendingWrites.Clear();
+            Monitor.PulseAll(_gate);
         }
     }
 
-    private void QueueRead(string key, long generation)
+    // Under _gate. True when a new read was queued.
+    private bool QueueRead(string key, long generation)
     {
         var pending = new PendingKey(generation, key);
-        if (!_pendingReads.Add(pending)) return;
-        if (!_operations.TryAdd(new DiskOperation(OperationKind.Read, generation, key, null, null)))
-            _pendingReads.Remove(pending);
+        if (!_pendingReads.Add(pending)) return false;
+        if (_operations.TryAdd(new DiskOperation(OperationKind.Read, generation, key, null, null))) return true;
+        _pendingReads.Remove(pending);
+        return false;
     }
 
     private void QueueWrite(string key, byte[] pixels, long generation)
     {
         var pending = new PendingKey(generation, key);
-        if (_queuedWriteBytes > MaxQueuedWriteBytes - pixels.LongLength || !_pendingWrites.Add(pending)) return;
+        if (_pendingWrites.Contains(pending)) return;
+        if (_queuedWriteBytes > MaxQueuedWriteBytes - pixels.LongLength) { _droppedWrites++; return; }
+        _pendingWrites.Add(pending);
         _queuedWriteBytes += pixels.LongLength;
         if (!_operations.TryAdd(new DiskOperation(OperationKind.Write, generation, key, pixels, null)))
         {
             _pendingWrites.Remove(pending);
             _queuedWriteBytes -= pixels.LongLength;
+            _droppedWrites++;
         }
     }
 
@@ -231,11 +305,15 @@ internal sealed class FrameCacheStore : IDisposable
             catch (Exception)
             {
                 Volatile.Write(ref _diskBlocked, true);
-                _disk.Clear();
+                lock (_gate)
+                {
+                    _disk.Clear();
+                    _diskLru.Clear();
+                }
                 Interlocked.Increment(ref _version);
-                _diskLru.Clear();
                 Interlocked.Exchange(ref _diskBytes, 0);
             }
+            lock (_gate) _indexReady = true;
 
             foreach (var operation in _operations.GetConsumingEnumerable())
             {
@@ -298,7 +376,7 @@ internal sealed class FrameCacheStore : IDisposable
             Directory.CreateDirectory(_directory);
             if ((File.GetAttributes(_directory) & FileAttributes.ReparsePoint) != 0)
                 throw new IOException("Cache epoch cannot be a directory link.");
-            _diskGeneration = Volatile.Read(ref _generation);
+            lock (_gate) _diskGeneration = _generation;
         }
         catch (Exception error) when (IsFileFailure(error))
         {
@@ -327,14 +405,16 @@ internal sealed class FrameCacheStore : IDisposable
             _pendingReads.Clear();
             _pendingWrites.Clear();
             _queuedWriteBytes = 0;
+            Monitor.PulseAll(_gate);
         }
     }
 
     private void ProcessRead(DiskOperation operation)
     {
         byte[]? pixels = null;
+        long started = Stopwatch.GetTimestamp();
         if (!Volatile.Read(ref _diskBlocked) && operation.Generation == _diskGeneration && operation.Generation == Volatile.Read(ref _generation)
-            && _disk.TryGetValue(operation.Key, out var entry))
+            && _disk.ContainsKey(operation.Key))
         {
             try
             {
@@ -345,7 +425,6 @@ internal sealed class FrameCacheStore : IDisposable
                 pixels = new byte[length];
                 file.ReadExactly(pixels);
                 if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(pixels), header[16..])) throw new InvalidDataException();
-                Touch(_diskLru, entry.Node);
             }
             catch (Exception error) when (IsFileFailure(error))
             {
@@ -356,8 +435,14 @@ internal sealed class FrameCacheStore : IDisposable
 
         lock (_gate)
         {
-            if (pixels is not null && !_disposed && operation.Generation == _generation)
-                AddRam(operation.Key, pixels);
+            if (pixels is null) return;
+            if (_disk.TryGetValue(operation.Key, out var entry)) Touch(_diskLru, entry.Node);
+            if (!_disposed && operation.Generation == _generation)
+            {
+                AddRam(operation.Key, pixels, fromDisk: true);
+                _diskReads++;
+                _diskReadTicks += Stopwatch.GetTimestamp() - started;
+            }
         }
     }
 
@@ -385,7 +470,11 @@ internal sealed class FrameCacheStore : IDisposable
                 file.Write(snapshot);
             }
             File.Move(temp, RecordPath(operation.Key), true);
-            _disk.Add(operation.Key, (bytes, _diskLru.AddLast(operation.Key)));
+            lock (_gate)
+            {
+                _disk.Add(operation.Key, (bytes, _diskLru.AddLast(operation.Key)));
+                _diskWrites++;
+            }
             Interlocked.Increment(ref _version);
             Interlocked.Add(ref _diskBytes, bytes);
         }
@@ -396,16 +485,19 @@ internal sealed class FrameCacheStore : IDisposable
     private void ProcessClear(DiskOperation operation)
     {
         if (_owner is null) throw new IOException("The frame cache has no persistent owner.");
-        _disk.Clear();
+        lock (_gate)
+        {
+            _disk.Clear();
+            _diskLru.Clear();
+        }
         Interlocked.Increment(ref _version);
-        _diskLru.Clear();
         try
         {
             _directory = Path.Combine(_rootDirectory, "epoch-" + SaveNewEpoch());
             Directory.CreateDirectory(_directory);
             if ((File.GetAttributes(_directory) & FileAttributes.ReparsePoint) != 0) throw new IOException("Cache epoch cannot be a directory link.");
-            _diskGeneration = operation.Generation;
             LoadDiskIndex();
+            lock (_gate) _diskGeneration = operation.Generation;
         }
         catch (Exception error) when (IsFileFailure(error))
         {
@@ -420,7 +512,11 @@ internal sealed class FrameCacheStore : IDisposable
         lock (_gate)
         {
             var pending = new PendingKey(operation.Generation, operation.Key);
-            if (operation.Kind == OperationKind.Read) _pendingReads.Remove(pending);
+            if (operation.Kind == OperationKind.Read)
+            {
+                _pendingReads.Remove(pending);
+                Monitor.PulseAll(_gate);
+            }
             else
             {
                 _pendingWrites.Remove(pending);
@@ -429,7 +525,8 @@ internal sealed class FrameCacheStore : IDisposable
         }
     }
 
-    private void AddRam(string key, byte[] pixels)
+    // Under _gate.
+    private void AddRam(string key, byte[] pixels, bool fromDisk)
     {
         if (_ram.Remove(key, out var previous))
         {
@@ -446,16 +543,19 @@ internal sealed class FrameCacheStore : IDisposable
             Interlocked.Increment(ref _version);
             _ramLru.RemoveFirst();
         }
-        _ram.Add(key, (pixels, _ramLru.AddLast(key)));
+        _ram.Add(key, (pixels, _ramLru.AddLast(key), fromDisk));
         Interlocked.Increment(ref _version);
         _ramBytes += pixels.LongLength;
     }
 
     private void LoadDiskIndex()
     {
-        _disk.Clear();
+        lock (_gate)
+        {
+            _disk.Clear();
+            _diskLru.Clear();
+        }
         Interlocked.Increment(ref _version);
-        _diskLru.Clear();
         Interlocked.Exchange(ref _diskBytes, 0);
         Volatile.Write(ref _diskBlocked, false);
         Span<byte> header = stackalloc byte[HeaderBytes];
@@ -495,7 +595,7 @@ internal sealed class FrameCacheStore : IDisposable
                     DeleteOrAccount(path);
                     continue;
                 }
-                _disk.Add(key, (file.Length, _diskLru.AddLast(key)));
+                lock (_gate) _disk.Add(key, (file.Length, _diskLru.AddLast(key)));
                 Interlocked.Increment(ref _version);
                 Interlocked.Add(ref _diskBytes, file.Length);
             }
@@ -550,9 +650,12 @@ internal sealed class FrameCacheStore : IDisposable
     {
         if (!_disk.TryGetValue(key, out var entry)) return true;
         if (!TryDelete(RecordPath(key))) return false;
-        _disk.Remove(key);
+        lock (_gate)
+        {
+            _disk.Remove(key);
+            _diskLru.Remove(entry.Node);
+        }
         Interlocked.Increment(ref _version);
-        _diskLru.Remove(entry.Node);
         Interlocked.Add(ref _diskBytes, -entry.Bytes);
         return true;
     }
@@ -576,6 +679,35 @@ internal sealed class FrameCacheStore : IDisposable
     }
 
     private enum OperationKind { Read, Write, Clear }
+
+    // Reads first: a frame about to be shown must not wait behind queued writes. Writes and purges keep their order.
+    private sealed class ReadsFirst : IProducerConsumerCollection<DiskOperation>
+    {
+        private readonly ConcurrentQueue<DiskOperation> _reads = new(), _others = new();
+        public int Count => _reads.Count + _others.Count;
+        public bool IsSynchronized => false;
+        public object SyncRoot => throw new NotSupportedException();
+        public bool TryAdd(DiskOperation item)
+        {
+            (item.Kind == OperationKind.Read ? _reads : _others).Enqueue(item);
+            return true;
+        }
+        // BlockingCollection calls this only for an item already added, which a concurrent taker may have taken from
+        // the other queue: look again until one is found.
+        public bool TryTake([MaybeNullWhen(false)] out DiskOperation item)
+        {
+            for (var spin = new SpinWait(); ; spin.SpinOnce())
+            {
+                if (_reads.TryDequeue(out item) || _others.TryDequeue(out item)) return true;
+                if (Count == 0 && spin.Count > 100) return false;
+            }
+        }
+        public DiskOperation[] ToArray() => [.. _reads, .. _others];
+        public void CopyTo(DiskOperation[] array, int index) => ToArray().CopyTo(array, index);
+        void ICollection.CopyTo(Array array, int index) => ToArray().CopyTo(array, index);
+        public IEnumerator<DiskOperation> GetEnumerator() => ((IEnumerable<DiskOperation>)ToArray()).GetEnumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
     private readonly record struct PendingKey(long Generation, string Key);
     private sealed record DiskOperation(OperationKind Kind, long Generation, string Key, byte[]? Pixels, TaskCompletionSource? Completion);
 }

@@ -27,13 +27,16 @@ internal static class TimelineFrameCache
     private const int PreviewRecordHeader = 32;
     private const long GpuBudget = 384L * 1024 * 1024;
     private static readonly TimeSpan RectsRefreshDelay = TimeSpan.FromMilliseconds(100);
+    // A paused request for a frame stored on disk only waits this long for the disk worker (off the UI thread: the
+    // player renders on its own task) before rendering the frame itself.
+    private static readonly TimeSpan PausedDiskWait = TimeSpan.FromMilliseconds(50);
     private static readonly ConditionalWeakTable<string, ModelTraits> modelTraits = new();
     private static readonly ConditionalWeakTable<object, SourceState> sources = new();
     private static readonly ConditionalWeakTable<object, PlayerAssociation> sourcePlayers = new();
     private static readonly ConditionalWeakTable<Timeline, LatestViewport> latestViewports = new();
     private static readonly ConditionalWeakTable<ID2D1DeviceContext, string> renderEnvironments = new();
     private static readonly object cacheGate = new();
-    private static readonly Lazy<FrameCacheStore> store = new(() => new FrameCacheStore(Path.Combine(
+    private static Lazy<FrameCacheStore> store = new(() => new FrameCacheStore(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YMM4-RTX3060-NVENC", "cache")));
     private static FieldInfo sceneField = null!, devicesField = null!, outputField = null!, collectorField = null!, pickerField = null!;
     private static FieldInfo playerSourceField = null!, playerContextField = null!, playerTargetField = null!;
@@ -42,6 +45,7 @@ internal static class TimelineFrameCache
     private static FieldInfo? timelineChangedField, pointerOverPreviewField;
     private static Type pickerType = null!;
     private static long hits, misses, gpuBytes, generation;
+    private static long liveReuses, ramHits, diskHits, bypasses, previewStored, previewStoreTicks, readAheads;
     private static string status = "自動キャッシュは停止中です";
     private static bool enabled, previewSupported, rectsSupported, refreshSupported;
 
@@ -54,6 +58,27 @@ internal static class TimelineFrameCache
     internal static long Hits => Interlocked.Read(ref hits);
     internal static long Misses => Interlocked.Read(ref misses);
     internal static long GpuBytes => Interlocked.Read(ref gpuBytes);
+    // Hits by path: the frame already in the source (same request again), the RAM store, a frame read back from disk.
+    internal static long LiveReuses => Interlocked.Read(ref liveReuses);
+    internal static long RamHits => Interlocked.Read(ref ramHits);
+    internal static long DiskHits => Interlocked.Read(ref diskHits);
+    internal static long Bypasses => Interlocked.Read(ref bypasses);
+    // Preview frames stored after the host rendered them (playback, pauses and seeks; idle pre-rendering not counted).
+    internal static long PreviewStored => Interlocked.Read(ref previewStored);
+    // Render-thread time per stored preview frame: drawing into the preview view, GPU readback, copy (not disk I/O).
+    internal static double PreviewStoreMilliseconds
+    {
+        get { long count = PreviewStored; return count == 0 ? 0 : Interlocked.Read(ref previewStoreTicks) * 1000.0 / System.Diagnostics.Stopwatch.Frequency / count; }
+    }
+    // Disk reads queued ahead of the playhead.
+    internal static long ReadAheads => Interlocked.Read(ref readAheads);
+    internal static FrameCacheStore? StoreIfCreated => store.IsValueCreated ? store.Value : null;
+
+    // Tests only: a store with other budgets or in another folder (the caller disposes it).
+    internal static void UseStore(FrameCacheStore replacement) => store = new Lazy<FrameCacheStore>(replacement);
+
+    // Tests only: the preview view of a source, standing in for a TimelineVideoPlayer with a real swap chain.
+    internal static Func<object, PreviewViewport?>? TestViewport { get; set; }
 
     internal readonly record struct PreviewViewport(int Width, int Height, Matrix3x2 Transform, Vector2 TargetOffset,
         float DpiX, float DpiY, Vortice.DCommon.PixelFormat BackBufferFormat,
@@ -197,6 +222,9 @@ internal static class TimelineFrameCache
         internal string StatusStamp = string.Empty;
         internal long Bytes;
         internal long Generation;
+        // A rendered preview frame whose GPU readback is still running; finished on this source's render thread.
+        internal DeferredStore? Deferred;
+        internal int ReadAheadFrame = int.MinValue;
         internal void Released()
         {
             var released = Interlocked.Exchange(ref Bytes, 0);
@@ -219,8 +247,9 @@ internal static class TimelineFrameCache
 
     private sealed class Pending(SourceState state, Scene scene, IGraphicsDevicesAndContext devices,
         ID2D1CommandList? previousOutput, KeyCapture capture, string liveKey, string? cacheKey,
-        long generation, TimeSpan time, string usageKey, PreviewViewport? viewport, bool wantRects, bool rectsReusable) : IDisposable
+        long generation, TimeSpan time, string usageKey, PreviewViewport? viewport, bool wantRects, bool rectsReusable, bool playing) : IDisposable
     {
+        internal readonly bool Playing = playing;
         private int disposed;
         internal readonly SourceState State = state;
         internal readonly Scene Scene = scene;
@@ -239,9 +268,17 @@ internal static class TimelineFrameCache
         public void Dispose() { if (Interlocked.Exchange(ref disposed, 1) == 0) Capture.Dispose(); }
     }
 
+    private sealed class DeferredStore(Pending pending, PreviewReadback readback) : IDisposable
+    {
+        internal readonly Pending Pending = pending;
+        internal readonly PreviewReadback Readback = readback;
+        public void Dispose() { Readback.Dispose(); Pending.Dispose(); }
+    }
+
     private static bool Prefix(object __instance, TimeSpan time, object usage, out Pending? __state)
     {
         __state = null;
+        if (sources.TryGetValue(__instance, out var existing)) CompleteDeferred(existing);
         if (!Enabled) return true;
         KeyCapture? capture = null;
         Pending? pending = null;
@@ -274,7 +311,7 @@ internal static class TimelineFrameCache
             long revision = capture.Revision;
             var previousOutput = (ID2D1CommandList?)outputField.GetValue(__instance);
             pending = new Pending(state, scene, devices, previousOutput, capture, liveKey, cacheKey,
-                currentGeneration, time, usageKey, viewport, wantRects, traits.RectsReusable);
+                currentGeneration, time, usageKey, viewport, wantRects, traits.RectsReusable, usageName == "Playing");
             capture = null;
             // With rects requested, a reused frame restores the rects of an earlier render of the same key and
             // project revision, keeps the live ones, or (paused, pointer away from the preview) is shown without
@@ -306,15 +343,21 @@ internal static class TimelineFrameCache
                     if (update is { } live)
                     {
                         Hit(__instance, pending, live, recalled);
+                        Interlocked.Increment(ref liveReuses);
                         __state = pending;
                         return false;
                     }
                 }
             }
-            if (stored is { } fromStore && cacheKey is not null && store.Value.TryGet(cacheKey, out var record)
-                && TryReplaceFrame(__instance, pending, record))
+            bool fromDisk = false;
+            bool replaced = stored is not null && cacheKey is not null
+                && store.Value.TryGet(cacheKey, paused && viewport is not null ? PausedDiskWait : TimeSpan.Zero, out var record, out fromDisk)
+                && TryReplaceFrame(__instance, pending, record);
+            if (viewport is { } view) ReadAhead(state, scene, time, usageKey, view, !paused);
+            if (replaced)
             {
-                Hit(__instance, pending, fromStore, recalled);
+                Hit(__instance, pending, stored!.Value, recalled);
+                Interlocked.Increment(ref fromDisk ? ref diskHits : ref ramHits);
                 __state = pending;
                 return false;
             }
@@ -329,6 +372,7 @@ internal static class TimelineFrameCache
     private static void Postfix(object __instance, Pending? __state)
     {
         if (__state is null) return;
+        bool deferred = false;
         try
         {
             if (__state.CacheHit) return;
@@ -363,9 +407,85 @@ internal static class TimelineFrameCache
                 current.RectsRevision = __state.Capture.Revision;
                 if (rects is not null) current.Rects.Remember(__state.LiveKey, rects, __state.Generation, __state.Capture.Revision);
             }
+            // Last: storing may finish (and dispose) the capture at once.
+            if (__state.CacheKey is not null && __state.Viewport is { } view) deferred = StorePreview(__state, output, view);
         }
         catch (Exception error) { status = "フレームの保存に失敗しました: " + error.GetType().Name; }
-        finally { __state.Dispose(); }
+        finally { if (!deferred) __state.Dispose(); }
+    }
+
+    // A preview frame the host rendered (playing, paused, seeking) is stored for its view, like an idle pre-rendered
+    // one. The readback is started here and read on this source's next update or player loop, by when the GPU has
+    // finished it, so the render thread does not wait for the GPU. Without the player loop hook, paused frames
+    // (whose next update may never come) are read at once. True when the pending readback took over `pending`.
+    private static bool StorePreview(Pending pending, ID2D1CommandList output, PreviewViewport viewport)
+    {
+        CompleteDeferred(pending.State);
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var readback = BeginPreviewReadback(pending.Devices.DeviceContext, output, viewport);
+        if (readback is null) return false;
+        pending.State.Deferred = new DeferredStore(pending, readback);
+        Interlocked.Add(ref previewStoreTicks, System.Diagnostics.Stopwatch.GetTimestamp() - started);
+        if (!pending.Playing && !refreshSupported) CompleteDeferred(pending.State);
+        return true;
+    }
+
+    // On the source's render thread. The frame is stored only if its capture is still current: an edit, purge or
+    // file change in between drops it.
+    private static void CompleteDeferred(SourceState state)
+    {
+        if (state.Deferred is not { } deferred) return;
+        state.Deferred = null;
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        try
+        {
+            var record = FinishPreviewReadback(deferred.Readback);
+            lock (cacheGate) if (StillCurrent(deferred.Pending))
+            {
+                store.Value.PutOwned(deferred.Pending.CacheKey!, record);
+                Interlocked.Increment(ref previewStored);
+                status = "描画したプレビューのフレームを保存しました。";
+            }
+        }
+        catch (Exception error) { status = "プレビューのフレームの保存に失敗しました: " + error.GetType().Name; }
+        finally
+        {
+            deferred.Dispose();
+            Interlocked.Add(ref previewStoreTicks, System.Diagnostics.Stopwatch.GetTimestamp() - started);
+        }
+    }
+
+    // Tests only (render thread): finishes the pending preview readback of a source.
+    internal static void CompletePendingStore(object source)
+    {
+        if (sources.TryGetValue(source, out var state)) CompleteDeferred(state);
+    }
+
+    // Queues disk reads for the frames the player shows next (playback: the next half second; paused: two frames
+    // either way, for stepping and scrubbing). Keys come from the current description without leasing files: a read
+    // only moves a stored record into RAM, and showing it still needs the exact key of a validated capture.
+    private static void ReadAhead(SourceState state, Scene scene, TimeSpan time, string usage, PreviewViewport viewport, bool playing)
+    {
+        try
+        {
+            int frame = FrameOf(time, scene);
+            if (state.ReadAheadFrame == frame || state.Environment is not { } environment) return;
+            state.ReadAheadFrame = frame;
+            var frames = new List<int>();
+            int ahead = playing ? Math.Clamp(scene.FPS / 2, 4, 30) : 2;
+            for (int i = 1; i <= ahead; i++) frames.Add(frame + i);
+            if (!playing) frames.AddRange([frame - 1, frame - 2]);
+            frames.RemoveAll(value => value < 0);
+            var frameKeys = new string?[frames.Count];
+            if (frames.Count == 0 || !state.Tracker.TryPeekFrameKeys(frames, frameKeys, out _)) return;
+            var keys = new string?[frames.Count];
+            for (int i = 0; i < frames.Count; i++)
+                if (frameKeys[i] is { } frameKey)
+                    keys[i] = ComposeKey(frameKey, scene.Timeline.VideoInfo.GetTimeFrom(frames[i]), scene.FPS, usage, environment, viewport);
+            int queued = store.Value.Prefetch(keys);
+            if (queued != 0) Interlocked.Add(ref readAheads, queued);
+        }
+        catch { } // optional
     }
 
     private static Exception? Finalizer(Exception? __exception, Pending? __state) { __state?.Dispose(); return __exception; }
@@ -384,7 +504,7 @@ internal static class TimelineFrameCache
 
     private static string ComposeKey(string model, TimeSpan time, int fps, string usage, string environment, PreviewViewport? viewport)
     {
-        string value = $"pixels-v6|{environment}|{model}|{FrameTimeKey.For(time, fps)}|{usage}";
+        string value = $"pixels-v7|{environment}|{model}|{FrameTimeKey.For(time, fps)}|{usage}";
         if (viewport is { } view)
             value += $"|{view.SceneId:N}|{view.TimelineId:N}|{view.Width}|{view.Height}|{Bits(view.Transform.M11)}|{Bits(view.Transform.M12)}|{Bits(view.Transform.M21)}|{Bits(view.Transform.M22)}|{Bits(view.Transform.M31)}|{Bits(view.Transform.M32)}|{Bits(view.TargetOffset.X)}|{Bits(view.TargetOffset.Y)}|{Bits(view.DpiX)}|{Bits(view.DpiY)}|{view.BackBufferFormat.Format}|{view.BackBufferFormat.AlphaMode}|{view.AntialiasMode}|{view.TextAntialiasMode}|{view.PrimitiveBlend}|{view.UnitMode}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
@@ -485,6 +605,26 @@ internal static class TimelineFrameCache
         return true;
     }
 
+    // For the idle pre-renderer, on the thread that owns the source, before rendering: whether the preview frame it
+    // would prime is already stored (in RAM or on disk), so that it is not rendered again.
+    internal static bool IsPreviewStored(object timelineSource, TimeSpan time, KeyCapture capture, PreviewViewport viewport)
+    {
+        if (!Enabled) return false;
+        try
+        {
+            timelineSource = GetTimelineSource(timelineSource);
+            var scene = (Scene)sceneField.GetValue(timelineSource)!;
+            var context = ((IGraphicsDevicesAndContext)devicesField.GetValue(timelineSource)!).DeviceContext;
+            if (!ValidContext(context)) return false;
+            var traits = modelTraits.GetValue(capture.Model, static model => new ModelTraits(model));
+            var key = MakeKey(capture.Key, time, scene.FPS, PreviewUsage.KeyFor("Playing", traits.ShowOnlyPreview), context, viewport);
+            var residency = new byte[1];
+            store.Value.GetResidency([key], residency);
+            return residency[0] != 0;
+        }
+        catch { return false; }
+    }
+
     internal static bool TryPrime(object timelineSource, TimeSpan time, object usage) =>
         TryPrimeCore(timelineSource, time, usage, null, null);
 
@@ -561,6 +701,11 @@ internal static class TimelineFrameCache
     private static bool TryGetPreviewViewportForSource(object source, out PreviewViewport viewport)
     {
         viewport = default;
+        if (TestViewport?.Invoke(source) is { } test)
+        {
+            viewport = test with { LastDrawTimestamp = System.Diagnostics.Stopwatch.GetTimestamp() };
+            return true;
+        }
         if (!sourcePlayers.TryGetValue(source, out var association) || association.Player is null
             || !association.Player.TryGetTarget(out var player) || !ReferenceEquals(playerSourceField.GetValue(player), source)) return false;
         var scene = (Scene)sceneField.GetValue(source)!;
@@ -632,7 +777,7 @@ internal static class TimelineFrameCache
     }
     private static bool ValidContext(ID2D1DeviceContext context) => context.Transform == Matrix3x2.Identity
         && context.Dpi.Width == 96 && context.Dpi.Height == 96 && context.UnitMode == UnitMode.Dips;
-    private static bool Bypass(string reason) { status = reason; return true; }
+    private static bool Bypass(string reason) { status = reason; Interlocked.Increment(ref bypasses); return true; }
     private static void Hit(object source, Pending pending, RectsUpdate update, ItemRect[]? recalled)
     {
         pending.CacheHit = true;
@@ -661,7 +806,8 @@ internal static class TimelineFrameCache
         }
         Interlocked.Increment(ref hits);
         status = update == RectsUpdate.Defer ? "キャッシュから表示しました（表示枠は静止後に再計算します）"
-            : pending.WantRects ? "キャッシュから表示しました（表示枠も復元しました）" : "動画出力キャッシュを再利用しました";
+            : pending.WantRects ? "キャッシュから表示しました（表示枠も復元しました）"
+            : pending.UsageKey == "Exporting" ? "動画出力キャッシュを再利用しました" : "キャッシュから表示しました";
     }
 
     // The controllers are materialized: the host enumerates them from Draw and the UI thread later.
@@ -686,6 +832,7 @@ internal static class TimelineFrameCache
         try
         {
             if (playerSourceField.GetValue(__instance) is not { } source || !sources.TryGetValue(source, out var state)) return;
+            CompleteDeferred(state); // the player loop runs this on the render thread, a frame after the readback began
             var delay = pointerOverPreviewField!.GetValue(__instance) is true ? TimeSpan.Zero : RectsRefreshDelay;
             if (state.Rects.ShouldRequestRefresh(System.Diagnostics.Stopwatch.GetTimestamp(), delay))
                 timelineChangedField!.SetValue(__instance, true);
@@ -698,6 +845,8 @@ internal static class TimelineFrameCache
         lock (cacheGate)
         {
             if (!sources.TryGetValue(__instance, out var state)) return;
+            state.Deferred?.Dispose();
+            state.Deferred = null;
             state.Released();
             state.Tracker.Dispose();
             sources.Remove(__instance);
@@ -759,10 +908,32 @@ internal static class TimelineFrameCache
 
     internal static byte[]? CapturePreview(ID2D1DeviceContext context, ID2D1Image output, PreviewViewport viewport)
     {
+        using var readback = BeginPreviewReadback(context, output, viewport);
+        return readback is null ? null : FinishPreviewReadback(readback);
+    }
+
+    // A CPU-readable copy of a preview frame that the GPU may still be producing. Holds its GPU reservation.
+    internal sealed class PreviewReadback(ID2D1Bitmap1 readable, PreviewViewport viewport, long bytes) : IDisposable
+    {
+        private int disposed;
+        internal readonly ID2D1Bitmap1 Readable = readable;
+        internal readonly PreviewViewport Viewport = viewport;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+            Readable.Dispose();
+            Interlocked.Add(ref gpuBytes, -bytes);
+        }
+    }
+
+    // Draws the frame as the player would and queues its copy to a CPU-readable bitmap, without waiting for the GPU.
+    internal static PreviewReadback? BeginPreviewReadback(ID2D1DeviceContext context, ID2D1Image output, PreviewViewport viewport)
+    {
         long bytes = checked((long)viewport.Width * viewport.Height * 4);
         if (!IsValidViewport(viewport, context.MaximumBitmapSize) || bytes > FrameCacheStore.MaxFrameBytes - PreviewRecordHeader
             || !Reserve(bytes * 2)) return null;
         ID2D1Image? oldTarget = null;
+        ID2D1Bitmap1? readable = null;
         var oldTransform = Matrix3x2.Identity;
         var oldAntialias = context.AntialiasMode;
         var oldTextAntialias = context.TextAntialiasMode;
@@ -770,6 +941,7 @@ internal static class TimelineFrameCache
         var oldUnitMode = context.UnitMode;
         var saved = false;
         var drawing = false;
+        var returned = false;
         try
         {
             oldTarget = context.Target;
@@ -777,7 +949,7 @@ internal static class TimelineFrameCache
             saved = true;
             using var target = context.CreateBitmap(new SizeI(viewport.Width, viewport.Height), new BitmapProperties1(
                 viewport.BackBufferFormat, viewport.DpiX, viewport.DpiY, BitmapOptions.Target));
-            using var readable = context.CreateBitmap(new SizeI(viewport.Width, viewport.Height), new BitmapProperties1(
+            readable = context.CreateBitmap(new SizeI(viewport.Width, viewport.Height), new BitmapProperties1(
                 viewport.BackBufferFormat, viewport.DpiX, viewport.DpiY, BitmapOptions.CpuRead | BitmapOptions.CannotDraw));
             context.Target = target;
             context.Transform = viewport.Transform;
@@ -791,23 +963,10 @@ internal static class TimelineFrameCache
             context.EndDraw().CheckError(); drawing = false;
             context.Target = null;
             readable.CopyFromBitmap(target).CheckError();
-            var record = new byte[checked((int)bytes + PreviewRecordHeader)];
-            "YMPX"u8.CopyTo(record);
-            BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(4), viewport.Width);
-            BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(8), viewport.Height);
-            BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(12), 0);
-            BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(16), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(20), 2);
-            BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(24), viewport.DpiX);
-            BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(28), viewport.DpiY);
-            var mapped = readable.Map(MapOptions.Read);
-            try
-            {
-                for (var row = 0; row < viewport.Height; row++)
-                    Marshal.Copy(mapped.Bits + row * mapped.Pitch, record, PreviewRecordHeader + row * viewport.Width * 4, viewport.Width * 4);
-            }
-            finally { readable.Unmap(); }
-            return record;
+            var result = new PreviewReadback(readable, viewport, bytes);
+            readable = null;
+            returned = true;
+            return result;
         }
         finally
         {
@@ -824,8 +983,37 @@ internal static class TimelineFrameCache
                     context.UnitMode = oldUnitMode;
                 }
             }
-            finally { oldTarget?.Dispose(); Interlocked.Add(ref gpuBytes, -bytes * 2); }
+            finally
+            {
+                oldTarget?.Dispose();
+                // The drawing target is gone; a returned readback keeps the other half until it is disposed.
+                Interlocked.Add(ref gpuBytes, returned ? -bytes : -bytes * 2);
+                readable?.Dispose();
+            }
         }
+    }
+
+    // Waits for the copy if the GPU has not finished it yet.
+    internal static byte[] FinishPreviewReadback(PreviewReadback readback)
+    {
+        var viewport = readback.Viewport;
+        var record = new byte[checked(viewport.Width * viewport.Height * 4 + PreviewRecordHeader)];
+        "YMPX"u8.CopyTo(record);
+        BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(4), viewport.Width);
+        BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(8), viewport.Height);
+        BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(12), 0);
+        BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(16), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(20), 2);
+        BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(24), viewport.DpiX);
+        BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(28), viewport.DpiY);
+        var mapped = readback.Readable.Map(MapOptions.Read);
+        try
+        {
+            for (var row = 0; row < viewport.Height; row++)
+                Marshal.Copy(mapped.Bits + row * mapped.Pitch, record, PreviewRecordHeader + row * viewport.Width * 4, viewport.Width * 4);
+        }
+        finally { readback.Readable.Unmap(); }
+        return record;
     }
 
     private static bool TryReplaceFrame(object source, Pending pending, ReadOnlyMemory<byte> record)
