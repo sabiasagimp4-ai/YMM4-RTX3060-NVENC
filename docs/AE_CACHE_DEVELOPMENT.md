@@ -44,6 +44,12 @@ file lease、実ホストの依存キー、WARPの画素一致とディスク供
 RAMをゼロまで縮小→復元したプレビューのディスク供給、古い静止ビューのprime、capture中の取消/消去も含む。
 YMM4のバイナリはコミットしない。実機RTX3060の速度と実GUI操作はこのCIでは検証しない。
 
+実行結果: [YMM4-dlls Windows検証](https://github.com/sabiasagimp4-ai/YMM4-dlls/actions/runs/36854490341) は成功。
+固定release 0.1でnative invariants、プラグインのビルド、StoreChecksHarness、ReadinessChecks、
+FileLeaseChecks、CacheChecks、HostCacheProbe --integration/--gpu（WARP、動画fixture付き）を通過した。
+Linuxでも4.56.1.0の実DLLに対してプラグインとHostCacheProbeをクロスビルドし、警告・エラー0。
+RAM回復時にホストを再描画せずディスク画素を供給すること、古い静止ビューのprime、capture中の取消/消去も成功した。
+
 ## 次に埋める差
 
 | AEの挙動 | 現状と次の作業 |
