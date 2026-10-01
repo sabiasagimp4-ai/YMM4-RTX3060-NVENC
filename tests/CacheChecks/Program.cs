@@ -165,6 +165,7 @@ internal static class Program
         CheckFrameKeys(timeline, nested, tracker);
         MeasureCaptureCost();
         MeasureDescribeCost();
+        CheckBackgroundDescribe();
 
         timeline.Items = timeline.Items.Add(new TachieItem());
         Check(!FrameCacheKey.TryCreate(scene, out _, out string reason) && reason.Contains("非同期"), "Transient lip-sync was cached in the whole-project key");
@@ -213,6 +214,53 @@ internal static class Program
             return shape;
         }
         static IItem Text(int i) => new TextItem { Frame = i * 3, Length = 30, Layer = i % 10, Text = "item " + i, Font = "Arial" };
+    }
+
+    // The preview's render thread does not describe a large project itself: it renders normally while a background
+    // task does, the first time (by the number of items) and after an edit (by how long the last description took).
+    private static void CheckBackgroundDescribe()
+    {
+        var timeline = new Timeline();
+        var scenes = new Scenes(false);
+        scenes.AddScene(timeline);
+        var shapes = Enumerable.Range(0, 1000).Select(i =>
+        {
+            var shape = new ShapeItem { Frame = i * 3, Length = 30, Layer = i % 10 };
+            shape.X.SetFirstValue(i);
+            return shape;
+        }).ToArray();
+        timeline.Items = timeline.Items.AddRange(shapes);
+        using var tracker = new KeyDependencyTracker(new Scene(timeline, scenes, []));
+        TimeSpan Returned(out bool keyed, out string reason)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            keyed = tracker.TryCapture(15, out var capture, out reason, settle: true, background: true);
+            capture?.Dispose();
+            return clock.Elapsed;
+        }
+        string Ready(out TimeSpan after)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            while (clock.Elapsed < TimeSpan.FromSeconds(60))
+            {
+                if (tracker.TryCapture(15, out var capture, out _, settle: true, background: true))
+                    using (capture!) { after = clock.Elapsed; return capture!.Key; }
+                Thread.Sleep(5);
+            }
+            throw new TimeoutException("The background description never finished");
+        }
+        var first = Returned(out bool keyed, out string reason);
+        Check(!keyed && tracker.Describing && reason.Contains("背景"), "A large project was described on the render thread: " + reason);
+        Check(first < TimeSpan.FromMilliseconds(250), $"Starting the background description took {first.TotalMilliseconds:F0} ms");
+        string before = Ready(out var ready);
+        shapes[5].X.SetFirstValue(-1);
+        Thread.Sleep(300); // settle
+        var edit = Returned(out keyed, out reason);
+        Check(!keyed && reason.Contains("背景"), "After an edit, a slow description ran on the render thread: " + reason);
+        Check(edit < TimeSpan.FromMilliseconds(250), $"Starting the description after an edit took {edit.TotalMilliseconds:F0} ms");
+        Check(Ready(out var again) != before, "The edited frame kept its key");
+        Console.WriteLine($"Background description (1000 items): first capture returned in {first.TotalMilliseconds:F1} ms, key after {ready.TotalMilliseconds:F0} ms; "
+            + $"after an edit, returned in {edit.TotalMilliseconds:F1} ms, key after {again.TotalMilliseconds:F0} ms");
     }
 
     // What per-frame keys save on every cached frame: a frame verifies only its own files (FileDependencyLease),

@@ -335,7 +335,7 @@ internal static class TimelineFrameCache
             if (!ValidContext(context)) return Bypass("描画コンテキストの状態が対象外のため、通常描画を使用します。");
             var state = sources.GetValue(__instance, _ => new SourceState(scene));
             state.Environment = KeyEnvironment(context);
-            if (!state.Tracker.TryCapture(FrameOf(time, scene), out capture, out var reason, settle: true)) return Bypass(reason);
+            if (!state.Tracker.TryCapture(FrameOf(time, scene), out capture, out var reason, settle: true, background: preview)) return Bypass(reason);
             var traits = modelTraits.GetValue(capture!.Model, static model => new ModelTraits(model));
             string usageKey = exporting ? usageName : PreviewUsage.KeyFor(usageName, traits.ShowOnlyPreview);
             PreviewViewport? viewport = preview && TryGetPreviewViewportForSource(__instance, out var currentViewport)

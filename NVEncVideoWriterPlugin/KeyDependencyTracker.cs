@@ -11,6 +11,14 @@ internal sealed class KeyDependencyTracker : IDisposable
     private const int FingerprintChunk = 128;
     private static readonly IReadOnlyDictionary<string, FileFingerprint> EmptyFingerprints = new Dictionary<string, FileFingerprint>();
     private const long SettleMilliseconds = 250;
+    // Describing the whole project again after an edit took 0.5 s for 100 items and 2.1 s for 1000 on the CI runner.
+    // The preview's render thread does it inline only while that stays short; otherwise in the background, rendering
+    // normally until it is done (the first time, by the number of items).
+    private static readonly long InlineDescribeTicks = System.Diagnostics.Stopwatch.Frequency / 20;
+    private const int InlineDescribeItems = 200;
+    private Task<Description?>? describeTask;
+    private long describeRevision = -1;
+    private long lastDescribeTicks = -1;
     private static readonly SemaphoreSlim FingerprintSlot = new(1, 1);
     private readonly Scene scene;
     private readonly object gate = new();
@@ -64,14 +72,18 @@ internal sealed class KeyDependencyTracker : IDisposable
 
     // settle: the render path passes true so that continuous edits (every one changes the whole-project key)
     // do not re-describe the model on every frame; it bypasses until edits have paused for a moment.
-    public bool TryCapture(out KeyCapture? capture, out string reason, bool settle) => Capture(null, out capture, out reason, settle);
+    public bool TryCapture(out KeyCapture? capture, out string reason, bool settle) => Capture(null, out capture, out reason, settle, false);
 
     // The key of one root-timeline frame: only what that frame depends on (FrameDependencyIndex), and only its
     // files are verified and leased, so a cost no longer grows with every file of the project.
-    public bool TryCapture(int frame, out KeyCapture? capture, out string reason, bool settle = false) =>
-        Capture(frame, out capture, out reason, settle);
+    // background: the caller must not wait for a long description of the project (the preview's render thread).
+    public bool TryCapture(int frame, out KeyCapture? capture, out string reason, bool settle = false, bool background = false) =>
+        Capture(frame, out capture, out reason, settle, background);
 
-    private bool Capture(int? frame, out KeyCapture? capture, out string reason, bool settle)
+    private sealed record Description(bool Eligible, string Model, string[] Paths, FrameDependencyIndex? Frames, string Reason,
+        Type[][] SourceReaders, long Ticks);
+
+    private bool Capture(int? frame, out KeyCapture? capture, out string reason, bool settle, bool background = false)
     {
         lock (gate)
         {
@@ -89,29 +101,26 @@ internal sealed class KeyDependencyTracker : IDisposable
                     reason = "編集中のため、通常描画を使用します。";
                     return false;
                 }
-                Type[][] sourceReaders;
-                try { sourceReaders = FrameCacheKey.CaptureSourceReaderTypes(); }
-                catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
-                { reason = "読み込みプラグインの状態を確認できません。"; return false; }
+                if (describeTask is { IsCompleted: true }) AdoptDescription(before);
+            }
+            if (cachedRevision != before)
+            {
+                const string describing = "編集後のプロジェクトを背景で検査しています。通常描画を使用します。";
+                if (describeTask is not null) { reason = describing; return false; }
                 RebuildSubscriptions();
-                bool eligible = FrameCacheKey.TryDescribe(scene, sourceReaders, out string model, out string[] paths,
-                    out var frames, out string createdReason);
-                if (before != Revision || !FrameCacheKey.SourceReadersMatch(sourceReaders))
+                if (background && !DescribeInline())
                 {
-                    if (before == Revision) Invalidate();
+                    describeRevision = before;
+                    describeTask = Task.Run(Describe);
+                    reason = describing;
+                    return false;
+                }
+                if (Describe() is not { } description) { reason = "読み込みプラグインの状態を確認できません。"; return false; }
+                if (!Apply(description, before))
+                {
                     reason = "検査中にプロジェクトまたは読み込みプラグインが変更されたため、通常描画を使用します。";
                     return false;
                 }
-                cachedKey = string.Empty;
-                cachedModel = model;
-                cachedPaths = paths;
-                cachedFrames = frames;
-                frameKeys.Clear();
-                cachedSourceReaders = sourceReaders;
-                cachedParents = scene.ParentScenes.ToArray();
-                cachedReason = createdReason;
-                cachedEligible = eligible && frames is not null;
-                cachedRevision = before;
             }
             reason = cachedReason;
             if (!cachedEligible) return false;
@@ -161,6 +170,53 @@ internal sealed class KeyDependencyTracker : IDisposable
         }
     }
 
+    // Off the gate (a background task, or inline): what the project currently is. Null if the readers are unknown.
+    private Description? Describe()
+    {
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        Type[][] sourceReaders;
+        try { sourceReaders = FrameCacheKey.CaptureSourceReaderTypes(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { return null; }
+        bool eligible = FrameCacheKey.TryDescribe(scene, sourceReaders, out string model, out string[] paths, out var frames, out string reason);
+        return new(eligible, model, paths, frames, reason, sourceReaders, System.Diagnostics.Stopwatch.GetTimestamp() - started);
+    }
+
+    // Under gate: adopts a description of revision `current` unless the project or the readers changed since.
+    private bool Apply(Description description, long current)
+    {
+        lastDescribeTicks = description.Ticks;
+        if (current != Revision || !FrameCacheKey.SourceReadersMatch(description.SourceReaders))
+        {
+            if (current == Revision) Invalidate();
+            return false;
+        }
+        cachedKey = string.Empty;
+        cachedModel = description.Model;
+        cachedPaths = description.Paths;
+        cachedFrames = description.Frames;
+        frameKeys.Clear();
+        cachedSourceReaders = description.SourceReaders;
+        cachedParents = scene.ParentScenes.ToArray();
+        cachedReason = description.Reason;
+        cachedEligible = description.Eligible && description.Frames is not null;
+        cachedRevision = current;
+        return true;
+    }
+
+    // Under gate, with a finished describeTask.
+    private void AdoptDescription(long current)
+    {
+        var task = describeTask!;
+        describeTask = null;
+        if (describeRevision == current && task.IsCompletedSuccessfully && task.Result is { } description) Apply(description, current);
+    }
+
+    private bool DescribeInline() => lastDescribeTicks >= 0 ? lastDescribeTicks <= InlineDescribeTicks
+        : scene.Scenes.Timelines.Append(scene.Timeline).Distinct().Sum(timeline => timeline.Items.Count) <= InlineDescribeItems;
+
+    // Tests: whether a background description is running.
+    internal bool Describing { get { lock (gate) return describeTask is { IsCompleted: false }; } }
+
     // For display only (cache status bars): the keys of these frames from the current description, without
     // verifying or leasing files. False while an edit is not described yet; null for frames with unhashed files.
     // Frames another tracker stored (the idle pre-renderer, export) can be ones this tracker never captured, so
@@ -170,6 +226,7 @@ internal sealed class KeyDependencyTracker : IDisposable
         lock (gate)
         {
             model = string.Empty;
+            if (!disposed && cachedRevision != Revision && describeTask is { IsCompleted: true }) AdoptDescription(Revision);
             if (disposed || cachedRevision != Revision || !cachedEligible || cachedFrames is null) return false;
             if (fingerprintTask is { IsCompleted: true }) AdoptFingerprints(cachedRevision);
             bool unverified = false;
