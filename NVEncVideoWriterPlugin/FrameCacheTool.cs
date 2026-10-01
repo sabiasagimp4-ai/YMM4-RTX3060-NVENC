@@ -63,6 +63,22 @@ public sealed class FrameCacheToolView : UserControl
         panel.Children.Add(new TextBlock { Text = "描画キャッシュ", FontSize = 18 });
         panel.Children.Add(enabled);
         panel.Children.Add(status);
+        panel.Children.Add(new TextBlock { Text = "キャッシュ状況（タイムライン全体）", Margin = new Thickness(0, 12, 0, 4) });
+        var bar = new CacheStatusBar(() => IdleFramePreRenderer.CurrentTimeline,
+            (timeline, width) => (0, width / Math.Max(1, timeline.Length))) { Height = 10 };
+        panel.Children.Add(new Border
+        {
+            Child = bar,
+            BorderThickness = new Thickness(1),
+            BorderBrush = SystemColors.ControlDarkBrush,
+            Background = SystemColors.ControlBrush,
+        });
+        var legend = new TextBlock { Margin = new Thickness(0, 4, 0, 0), TextWrapping = TextWrapping.Wrap };
+        legend.Inlines.Add(new System.Windows.Documents.Run("■") { Foreground = CacheStatusBar.RamBrush });
+        legend.Inlines.Add(" RAM　");
+        legend.Inlines.Add(new System.Windows.Documents.Run("■") { Foreground = CacheStatusBar.DiskBrush });
+        legend.Inlines.Add(" ディスク　（プレビューの現在の表示倍率・位置で保存されたフレーム。タイムラインの目盛りの下端にも表示します）");
+        panel.Children.Add(legend);
         panel.Children.Add(counts);
         panel.Children.Add(purge);
         panel.Children.Add(error);

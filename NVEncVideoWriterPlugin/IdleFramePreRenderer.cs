@@ -17,6 +17,8 @@ internal static class IdleFramePreRenderer
 {
     private const int IdleDelayMilliseconds = 1200;
     private const int MaximumFrames = 30;
+    // How far ahead of the playhead idle time is spent (shown by the cache status bars).
+    private const int HorizonSeconds = 10;
     private static readonly object gate = new();
     private static DispatcherTimer? timer;
     private static Session? session;
@@ -32,6 +34,9 @@ internal static class IdleFramePreRenderer
     }
 
     internal static string Status => Volatile.Read(ref status);
+
+    // The timeline of the attached timeline tool, if any.
+    internal static YukkuriMovieMaker.Project.Timeline? CurrentTimeline => Volatile.Read(ref session)?.Info.Timeline;
 
     internal static void SetTimelineToolInfo(TimelineToolInfo info) => OnUi(() => Attach(info));
 
@@ -154,11 +159,11 @@ internal static class IdleFramePreRenderer
         int fps = current.LiveScene.FPS;
         int frameCount = Math.Min(MaximumFrames, fps);
         int start = Math.Max(current.ObservedFrame + 1, Volatile.Read(ref current.NextFrame));
-        int horizonEnd = current.ObservedFrame + Math.Max(1, fps);
+        int horizonEnd = current.ObservedFrame + Math.Max(1, fps) * HorizonSeconds;
         int end = Math.Min(current.Info.Timeline.Length - 1, horizonEnd);
         if (fps <= 0 || frameCount <= 0 || start > end)
         {
-            SetStatus("先読み範囲（1秒分）に到達しました。");
+            SetStatus($"先読み範囲（{HorizonSeconds}秒分）に到達しました。");
             return;
         }
         end = Math.Min(end, start + frameCount - 1);

@@ -120,6 +120,28 @@ internal static class Program
         Check(!FrameRenderReadiness.TryInstall(update, partial, harmony, out var partialReason) && !FrameRenderReadiness.Installed,
             "Unpatchable decoder target must reject install");
         CheckOnlyCacheLikePatches(update, [decode], "mid-install rollback: " + partialReason);
+
+        // Harmony cannot rebuild a body with an exception filter that continues a loop (YMM4 4.56.1.0 DirectShow).
+        var filtered = typeof(FilterDecoder).GetMethod(nameof(FilterDecoder.Update))!;
+        var strict = new[]
+        {
+            new FrameRenderReadiness.DecoderCheck("FakeDecoder", decode, FakeDecoder.Holds),
+            new FrameRenderReadiness.DecoderCheck("FilterDecoder", filtered, (_, _) => false),
+        };
+        Check(!FrameRenderReadiness.TryInstall(update, strict, harmony, out var filterReason) && !FrameRenderReadiness.Installed,
+            "An unhookable source without another way to reject its frames must reject install");
+        CheckOnlyCacheLikePatches(update, [decode, filtered], "unhookable rollback: " + filterReason);
+        int demoted = 0;
+        var tolerated = new[]
+        {
+            new FrameRenderReadiness.DecoderCheck("FakeDecoder", decode, FakeDecoder.Holds),
+            new FrameRenderReadiness.DecoderCheck("FilterDecoder", filtered, (_, _) => false, () => demoted++),
+        };
+        Check(FrameRenderReadiness.TryInstall(update, tolerated, harmony, out var toleratedReason) && demoted == 1, toleratedReason);
+        Check(Harmony.GetPatchInfo(filtered) is null && Harmony.GetPatchInfo(decode)!.Finalizers.Count == 1,
+            "Only the hookable decoder may be patched");
+        FrameRenderReadiness.Uninstall(harmony);
+        CheckOnlyCacheLikePatches(update, [decode, filtered], "tolerated uninstall");
     }
 
     private static void CheckOnlyCacheLikePatches(MethodBase update, MethodBase[] decoders, string stage)
@@ -480,6 +502,28 @@ internal sealed class FakeDecoder
 
     internal static bool Holds(object decoder, TimeSpan time) => decoder is FakeDecoder fake && fake.SampleTime is { } start
         && start <= time && time < start + Program.Frame;
+}
+
+internal sealed class FilterDecoder
+{
+    private int attempts;
+
+    public void Update(TimeSpan time)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (true)
+        {
+            try { Probe(); }
+            catch (InvalidOperationException error) when (error.HResult == -2147220953 && clock.Elapsed < TimeSpan.FromSeconds(1))
+            {
+                Thread.Sleep(1);
+                continue;
+            }
+            break;
+        }
+    }
+
+    private void Probe() { if (attempts++ == 0) throw new InvalidOperationException { HResult = -2147220953 }; }
 }
 
 internal abstract class AbstractDecoder

@@ -10,6 +10,7 @@
     <Compile Include="../../NVEncVideoWriterPlugin/FrameTimeKey.cs" Link="FrameTimeKey.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/PreviewRects.cs" Link="PreviewRects.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameDependencyIndex.cs" Link="FrameDependencyIndex.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/CacheBarLayout.cs" Link="CacheBarLayout.cs" />
     <Compile Include="../CacheChecks/StoreChecks.cs" Link="StoreChecks.cs" />
   </ItemGroup>
 </Project>

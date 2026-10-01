@@ -18,6 +18,7 @@ internal sealed class FrameCacheStore : IDisposable
     private const long MaxQueuedWriteBytes = MaxFrameBytes;
     private static ReadOnlySpan<byte> Magic => "YMMFRM01"u8;
     private readonly object _gate = new();
+    private long _version;
     private readonly object _clearGate = new();
     private readonly long _ramBudget;
     private readonly long _diskBudget;
@@ -50,6 +51,21 @@ internal sealed class FrameCacheStore : IDisposable
         if (_diskBudget == 0) return;
         _diskWorker = new Thread(DiskWorker) { IsBackground = true, Name = "YMM frame cache disk" };
         _diskWorker.Start();
+    }
+
+    // Changes whenever a frame enters or leaves RAM or disk (for the cache status bars).
+    internal long Version => Interlocked.Read(ref _version);
+
+    // 2: in RAM, 1: on disk only, 0: not stored. Never waits for I/O.
+    internal void GetResidency(IReadOnlyList<string?> keys, Span<byte> residency)
+    {
+        lock (_gate)
+            for (int i = 0; i < keys.Count; i++)
+            {
+                string? key = keys[i];
+                residency[i] = _disposed || key is null || !ValidKey(key) ? (byte)0
+                    : _ram.ContainsKey(key.ToLowerInvariant()) ? (byte)2 : _disk.ContainsKey(key.ToLowerInvariant()) ? (byte)1 : (byte)0;
+            }
     }
 
     internal long RamBytes { get { lock (_gate) return _ramBytes; } }
@@ -95,6 +111,7 @@ internal sealed class FrameCacheStore : IDisposable
             {
                 if (_ram.Remove(key, out var previous))
                 {
+                    Interlocked.Increment(ref _version);
                     _ramBytes -= previous.Pixels.LongLength;
                     _ramLru.Remove(previous.Node);
                 }
@@ -119,6 +136,7 @@ internal sealed class FrameCacheStore : IDisposable
             lock (_gate)
             {
                 _ram.Clear();
+                Interlocked.Increment(ref _version);
                 _ramLru.Clear();
                 _ramBytes = 0;
                 if (_disposed || _diskWorker is null) return;
@@ -161,6 +179,7 @@ internal sealed class FrameCacheStore : IDisposable
         lock (_gate)
         {
             _ram.Clear();
+            Interlocked.Increment(ref _version);
             _ramLru.Clear();
             _ramBytes = _queuedWriteBytes = 0;
             _pendingReads.Clear();
@@ -213,6 +232,7 @@ internal sealed class FrameCacheStore : IDisposable
             {
                 Volatile.Write(ref _diskBlocked, true);
                 _disk.Clear();
+                Interlocked.Increment(ref _version);
                 _diskLru.Clear();
                 Interlocked.Exchange(ref _diskBytes, 0);
             }
@@ -366,6 +386,7 @@ internal sealed class FrameCacheStore : IDisposable
             }
             File.Move(temp, RecordPath(operation.Key), true);
             _disk.Add(operation.Key, (bytes, _diskLru.AddLast(operation.Key)));
+            Interlocked.Increment(ref _version);
             Interlocked.Add(ref _diskBytes, bytes);
         }
         catch (Exception error) when (IsFileFailure(error)) { }
@@ -376,6 +397,7 @@ internal sealed class FrameCacheStore : IDisposable
     {
         if (_owner is null) throw new IOException("The frame cache has no persistent owner.");
         _disk.Clear();
+        Interlocked.Increment(ref _version);
         _diskLru.Clear();
         try
         {
@@ -411,6 +433,7 @@ internal sealed class FrameCacheStore : IDisposable
     {
         if (_ram.Remove(key, out var previous))
         {
+            Interlocked.Increment(ref _version);
             _ramBytes -= previous.Pixels.LongLength;
             _ramLru.Remove(previous.Node);
         }
@@ -420,15 +443,18 @@ internal sealed class FrameCacheStore : IDisposable
             string oldest = _ramLru.First.Value;
             _ramBytes -= _ram[oldest].Pixels.LongLength;
             _ram.Remove(oldest);
+            Interlocked.Increment(ref _version);
             _ramLru.RemoveFirst();
         }
         _ram.Add(key, (pixels, _ramLru.AddLast(key)));
+        Interlocked.Increment(ref _version);
         _ramBytes += pixels.LongLength;
     }
 
     private void LoadDiskIndex()
     {
         _disk.Clear();
+        Interlocked.Increment(ref _version);
         _diskLru.Clear();
         Interlocked.Exchange(ref _diskBytes, 0);
         Volatile.Write(ref _diskBlocked, false);
@@ -470,6 +496,7 @@ internal sealed class FrameCacheStore : IDisposable
                     continue;
                 }
                 _disk.Add(key, (file.Length, _diskLru.AddLast(key)));
+                Interlocked.Increment(ref _version);
                 Interlocked.Add(ref _diskBytes, file.Length);
             }
             catch (Exception error) when (IsFileFailure(error)) { DeleteOrAccount(path); }
@@ -524,6 +551,7 @@ internal sealed class FrameCacheStore : IDisposable
         if (!_disk.TryGetValue(key, out var entry)) return true;
         if (!TryDelete(RecordPath(key))) return false;
         _disk.Remove(key);
+        Interlocked.Increment(ref _version);
         _diskLru.Remove(entry.Node);
         Interlocked.Add(ref _diskBytes, -entry.Bytes);
         return true;

@@ -23,7 +23,8 @@ internal static class PreviewRectChecks
         CheckKeepRestoreAndEdit(host, context);
         CheckShowOnlyPreviewKeepsUsagesApart(host, context);
         CheckDeferredRectsAreRefreshed(host, context);
-        Console.WriteLine("Preview item rects: kept/restored on cached paused and playing frames, dropped on edit, ShowOnlyPreviewEffect separates usages, deferred paused rects re-rendered once OK");
+        CheckPreviewResidency(host, context);
+        Console.WriteLine("Preview item rects: kept/restored on cached paused and playing frames, dropped on edit, ShowOnlyPreviewEffect separates usages, deferred paused rects re-rendered once, cache bar residency OK");
     }
 
     private static void CheckKeepRestoreAndEdit(Assembly host, IGraphicsDevicesAndContext context)
@@ -141,6 +142,32 @@ internal static class PreviewRectChecks
             Update(source, playback, TimelineSourceUsage.Playing, needRects: true);
             Check(TimelineFrameCache.Hits == hits && rects.Count == 1, "Playback reused a frame without rects under the pointer");
             Check(!RefreshRequested(), "Nothing is missing, yet a refresh was requested");
+        }
+    }
+
+    // What the cache bars read: a primed preview frame is reported in RAM, its neighbours are not stored.
+    private static void CheckPreviewResidency(Assembly host, IGraphicsDevicesAndContext context)
+    {
+        var (timeline, _, source) = Create(host, context, null);
+        using (source)
+        {
+            TimelineFrameCache.Clear();
+            var time = timeline.VideoInfo.GetTimeFrom(3);
+            source.Update(time, TimelineSourceUsage.Playing);
+            var viewport = new TimelineFrameCache.PreviewViewport(321, 181, Matrix3x2.Identity, new Vector2(160.5f, 90.5f), 96, 96,
+                new Vortice.DCommon.PixelFormat(Vortice.DXGI.Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),
+                context.DeviceContext.AntialiasMode, context.DeviceContext.TextAntialiasMode, context.DeviceContext.PrimitiveBlend,
+                context.DeviceContext.UnitMode, ((Scene)source.GetType().GetField("scene", Instance)!.GetValue(source)!).ID, timeline.ID,
+                System.Diagnostics.Stopwatch.GetTimestamp(), false);
+            Check(TimelineFrameCache.TryPrimePreview(source, time, TimelineSourceUsage.Playing, viewport), "Could not prime a preview frame: " + TimelineFrameCache.Status);
+            var residency = new byte[3];
+            Check(TimelineFrameCache.TryGetPreviewResidency(source, viewport, [3, 4, 2], residency), "Residency was not available");
+            Check(residency.SequenceEqual(new byte[] { 2, 0, 0 }), $"Unexpected residency {string.Join(",", residency)}");
+            Check(TimelineFrameCache.TryGetPreviewResidency(source, viewport with { Width = 320 }, [3], residency.AsSpan(0, 1)) && residency[0] == 0,
+                "Another view must not report the primed frame");
+            TimelineFrameCache.Clear();
+            Check(TimelineFrameCache.TryGetPreviewResidency(source, viewport, [3], residency.AsSpan(0, 1)) && residency[0] == 0,
+                "Clear must empty the bars");
         }
     }
 

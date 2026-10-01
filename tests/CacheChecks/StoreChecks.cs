@@ -24,6 +24,9 @@ internal static class StoreChecks
             Check(cache.RamBytes <= 32 && cache.DiskBytes <= 128, "byte budgets");
             Check(!cache.TryGet(Key(1), out _), "oldest RAM and disk entry evicted");
             Check(cache.TryGet(Key(2), out _) && cache.TryGet(Key(3), out _), "recent entries retained");
+            byte[] residency = new byte[3];
+            cache.GetResidency([Key(1), Key(3), null], residency);
+            Check(residency.SequenceEqual(new byte[] { 0, 2, 0 }), "residency reports RAM frames and nothing for evicted or missing keys");
             cache.Put("../../not-a-cache-key", frame);
             Check(!cache.TryGet("invalid", out _), "invalid keys are misses");
             using var secondOwner = new FrameCacheStore(root, 16, 128);
@@ -31,9 +34,14 @@ internal static class StoreChecks
         }
         using (var cache = new FrameCacheStore(root, 32, 128))
         {
+            byte[] onDisk = new byte[1];
+            WaitFor(() => { cache.GetResidency([Key(2)], onDisk); return onDisk[0] == 1; }, "residency reports disk-only frames after restart");
+            long version = cache.Version;
             Check(!cache.TryGet(Key(2), out _), "first disk miss is nonblocking");
             ReadOnlyMemory<byte> restored = default;
             WaitFor(() => cache.TryGet(Key(2), out restored), "background disk read warms RAM");
+            cache.GetResidency([Key(2)], onDisk);
+            Check(onDisk[0] == 2 && cache.Version > version, "a warmed frame reports RAM and changes the store version");
             Check(restored.Span.SequenceEqual(frame), "restart disk reuse");
             Check(cache.TryGet(Key(2), out restored) && restored.Span.SequenceEqual(frame), "disk promotion keeps the verified pixels");
         }

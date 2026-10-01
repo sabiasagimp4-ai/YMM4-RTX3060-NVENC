@@ -182,6 +182,10 @@ internal static class TimelineFrameCache
         // The key and project revision of the item rects currently in TimelineItemRects (null: none or unknown).
         internal string? RectsKey;
         internal long RectsRevision;
+        // KeyEnvironment of the last preview/export update, for status queries off the render thread.
+        internal volatile string? Environment;
+        internal readonly Dictionary<(string FrameKey, int Frame), string> StatusKeys = [];
+        internal string StatusStamp = string.Empty;
         internal long Bytes;
         internal long Generation;
         internal void Released()
@@ -248,6 +252,7 @@ internal static class TimelineFrameCache
             var context = devices.DeviceContext;
             if (!ValidContext(context)) return Bypass("描画コンテキストの状態が対象外のため、通常描画を使用します。");
             var state = sources.GetValue(__instance, _ => new SourceState(scene));
+            state.Environment = KeyEnvironment(context);
             if (!state.Tracker.TryCapture(FrameOf(time, scene), out capture, out var reason, settle: true)) return Bypass(reason);
             var traits = modelTraits.GetValue(capture!.Model, static model => new ModelTraits(model));
             string usageKey = exporting ? usageName : PreviewUsage.KeyFor(usageName, traits.ShowOnlyPreview);
@@ -360,9 +365,16 @@ internal static class TimelineFrameCache
         && (value.Viewport is null || value.CacheKey == MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.UsageKey, value.Devices.DeviceContext, value.Viewport.Value));
 
     // usage: "Exporting", or the preview key from PreviewUsage.KeyFor ("Preview" unless ShowOnlyPreviewEffect is used).
-    private static string MakeKey(string model, TimeSpan time, int fps, string usage, ID2D1DeviceContext context, PreviewViewport? viewport)
+    private static string MakeKey(string model, TimeSpan time, int fps, string usage, ID2D1DeviceContext context, PreviewViewport? viewport) =>
+        ComposeKey(model, time, fps, usage, KeyEnvironment(context), viewport);
+
+    // The render-thread state a key depends on; read only on the thread that owns the context.
+    private static string KeyEnvironment(ID2D1DeviceContext context) =>
+        $"{RenderEnvironment(context)}|{context.AntialiasMode}|{context.TextAntialiasMode}|{context.PrimitiveBlend}";
+
+    private static string ComposeKey(string model, TimeSpan time, int fps, string usage, string environment, PreviewViewport? viewport)
     {
-        string value = $"pixels-v5|{RenderEnvironment(context)}|{model}|{FrameTimeKey.For(time, fps)}|{usage}|{context.AntialiasMode}|{context.TextAntialiasMode}|{context.PrimitiveBlend}";
+        string value = $"pixels-v6|{environment}|{model}|{FrameTimeKey.For(time, fps)}|{usage}";
         if (viewport is { } view)
             value += $"|{view.SceneId:N}|{view.TimelineId:N}|{view.Width}|{view.Height}|{Bits(view.Transform.M11)}|{Bits(view.Transform.M12)}|{Bits(view.Transform.M21)}|{Bits(view.Transform.M22)}|{Bits(view.Transform.M31)}|{Bits(view.Transform.M32)}|{Bits(view.TargetOffset.X)}|{Bits(view.TargetOffset.Y)}|{Bits(view.DpiX)}|{Bits(view.DpiY)}|{view.BackBufferFormat.Format}|{view.BackBufferFormat.AlphaMode}|{view.AntialiasMode}|{view.TextAntialiasMode}|{view.PrimitiveBlend}|{view.UnitMode}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
@@ -405,6 +417,57 @@ internal static class TimelineFrameCache
             viewport = latest.Viewport;
             return IsValidViewport(viewport, int.MaxValue);
         }
+    }
+
+    // For the cache status bars: per frame 2 = in RAM, 1 = on disk, 0 = not stored, for the preview of the
+    // timeline shown in the player at its current view. False while the player, its view or the state is unknown.
+    internal static bool TryGetPreviewResidency(Timeline timeline, IReadOnlyList<int> frames, Span<byte> residency)
+    {
+        residency.Clear();
+        object? source;
+        PreviewViewport viewport;
+        lock (cacheGate)
+        {
+            if (!latestViewports.TryGetValue(timeline, out var latest) || latest.Source is null
+                || !latest.Source.TryGetTarget(out source)) return false;
+            viewport = latest.Viewport;
+        }
+        return TryGetPreviewResidency(source, viewport, frames, residency);
+    }
+
+    internal static bool TryGetPreviewResidency(object source, PreviewViewport viewport, IReadOnlyList<int> frames, Span<byte> residency)
+    {
+        residency.Clear();
+        if (!Enabled || !sources.TryGetValue(source, out var state) || state.Environment is not { } environment) return false;
+        var scene = (Scene)sceneField.GetValue(source)!;
+        var frameKeys = new string?[frames.Count];
+        if (!state.Tracker.TryPeekFrameKeys(frames, frameKeys, out string model)) return false;
+        // Idle pre-rendering stores playback frames; they serve pauses too unless ShowOnlyPreviewEffect is used.
+        string usage = PreviewUsage.KeyFor("Playing", modelTraits.GetValue(model, static value => new ModelTraits(value)).ShowOnlyPreview);
+        var view = viewport with { LastDrawTimestamp = 0, IsPlaying = false };
+        var keys = new string?[frames.Count];
+        lock (state.StatusKeys)
+        {
+            string stamp = $"{environment}|{usage}|{scene.FPS}|{view}";
+            if (state.StatusStamp != stamp)
+            {
+                state.StatusKeys.Clear();
+                state.StatusStamp = stamp;
+            }
+            for (int i = 0; i < frames.Count; i++)
+            {
+                if (frameKeys[i] is not { } frameKey) continue;
+                if (!state.StatusKeys.TryGetValue((frameKey, frames[i]), out var key))
+                {
+                    key = ComposeKey(frameKey, scene.Timeline.VideoInfo.GetTimeFrom(frames[i]), scene.FPS, usage, environment, viewport);
+                    if (state.StatusKeys.Count >= 65536) state.StatusKeys.Clear();
+                    state.StatusKeys[(frameKey, frames[i])] = key;
+                }
+                keys[i] = key;
+            }
+        }
+        store.Value.GetResidency(keys, residency);
+        return true;
     }
 
     internal static bool TryPrime(object timelineSource, TimeSpan time, object usage) =>

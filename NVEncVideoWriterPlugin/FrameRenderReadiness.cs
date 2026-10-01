@@ -28,7 +28,9 @@ internal static class FrameRenderReadiness
     private static int bindEpoch;
 
     // Returns whether the decoded frame the decoder now holds covers the requested time.
-    internal sealed record DecoderCheck(string Name, MethodBase Update, Func<object, TimeSpan, bool> HoldsFrame);
+    // Unhookable: when Harmony cannot rebuild Update, called instead of failing the install if (and only if)
+    // frames using the source are rejected another way; it must make sure they are.
+    internal sealed record DecoderCheck(string Name, MethodBase Update, Func<object, TimeSpan, bool> HoldsFrame, Action? Unhookable = null);
 
     private sealed class Scope(object source, TimeSpan time, Scope? parent, int epoch)
     {
@@ -42,8 +44,11 @@ internal static class FrameRenderReadiness
 
     private sealed record UpdateResult(bool Ready, TimeSpan Time);
 
-    private sealed class HostBinding(Harmony harmony, Type videoSource, MethodInfo interfaceUpdate, string hostDirectory)
+    private sealed class HostBinding(Harmony harmony, Type videoSource, MethodInfo interfaceUpdate, string hostDirectory, bool sourcesAlwaysWrapped)
     {
+        // The host creates every rendered video source through VideoFileSourceFactory, which wraps it in
+        // CachedVideoFileSource (read in YMM4 4.56.1.0), so the wrapper's hook sees every decode.
+        internal readonly bool SourcesAlwaysWrapped = sourcesAlwaysWrapped;
         internal readonly object Gate = new();
         internal readonly Harmony Harmony = harmony;
         internal readonly Type VideoSource = videoSource;
@@ -155,10 +160,7 @@ internal static class FrameRenderReadiness
             added.Add((timelineUpdate, finalizer));
             var decoderFinalizer = Method(nameof(DecoderFinalizer));
             foreach (var check in checks)
-            {
-                harmony.Patch(check.Update, finalizer: new HarmonyMethod(decoderFinalizer, Priority.Last));
-                added.Add((check.Update, decoderFinalizer));
-            }
+                if (TryPatchDecoder(harmony, check, decoderFinalizer)) added.Add((check.Update, decoderFinalizer));
             lock (patchGate) installedPatches = [.. added];
             Volatile.Write(ref installed, 1);
             reason = string.Empty;
@@ -170,6 +172,22 @@ internal static class FrameRenderReadiness
                 try { harmony.Unpatch(added[i].Target, added[i].Patch); } catch { }
             Volatile.Write(ref decoders, []);
             reason = "動画の完成判定を接続できません: " + error.GetBaseException().Message;
+            return false;
+        }
+    }
+
+    // Harmony 2.4.2 cannot rebuild some method bodies at all (an exception filter that continues a loop, as in
+    // the DirectShow reader of YMM4 4.56.1.0, fails with "Incorrect code generation for exception block").
+    private static bool TryPatchDecoder(Harmony harmony, DecoderCheck check, MethodInfo finalizer)
+    {
+        try
+        {
+            harmony.Patch(check.Update, finalizer: new HarmonyMethod(finalizer, Priority.Last));
+            return true;
+        }
+        catch (Exception error) when (check.Unhookable is { } fallback && error is not OutOfMemoryException)
+        {
+            fallback();
             return false;
         }
     }
@@ -283,8 +301,8 @@ internal static class FrameRenderReadiness
                     {
                         [check.Update.MethodHandle] = check,
                     });
-                    hostBinding.Harmony.Patch(check.Update, finalizer: new HarmonyMethod(patch, Priority.Last));
-                    lock (patchGate) installedPatches = [.. installedPatches, (check.Update, patch)];
+                    if (TryPatchDecoder(hostBinding.Harmony, check, patch))
+                        lock (patchGate) installedPatches = [.. installedPatches, (check.Update, patch)];
                 }
             }
             catch (Exception error) when (error is not OutOfMemoryException)
@@ -308,7 +326,8 @@ internal static class FrameRenderReadiness
         var videoSource = interfaces[0];
         var interfaceUpdate = new[] { videoSource }.Concat(videoSource.GetInterfaces()).SelectMany(i => i.GetMethods())
             .Single(m => m.Name == "Update" && m.ReturnType == typeof(void) && m.GetParameters() is [{ ParameterType: var p }] && p == typeof(TimeSpan));
-        var hostBinding = new HostBinding(harmony, videoSource, interfaceUpdate, hostDirectory);
+        var hostBinding = new HostBinding(harmony, videoSource, interfaceUpdate, hostDirectory,
+            host.ManifestModule.ModuleVersionId == SourcesAlwaysWrappedHost);
         foreach (var assembly in assemblies) hostBinding.Assemblies.Add(assembly.FullName ?? string.Empty);
         implementations = Implementations(videoSource, types);
         return hostBinding;
@@ -349,10 +368,28 @@ internal static class FrameRenderReadiness
         hostBinding.Coverage.AddRange(types.Select(type => $"{type.FullName}: {names[type]}"));
         Volatile.Write(ref coverage, hostBinding.Coverage.ToArray());
         var hooked = Volatile.Read(ref decoders);
+        bool wrapped = hostBinding.SourcesAlwaysWrapped && hostBinding.Classifiers.Keys.Any(type => type.FullName == WrapperTypeName);
         return types.GroupBy(type => targets[type], MethodHandleComparer.Instance)
             .Where(group => !hooked.ContainsKey(group.Key.MethodHandle))
-            .Select(group => new DecoderCheck(string.Join(", ", group.Select(type => type.FullName)), group.Key, hostBinding.HoldsFrame))
+            .Select(group => new DecoderCheck(string.Join(", ", group.Select(type => type.FullName)), group.Key, hostBinding.HoldsFrame,
+                // The wrapper itself must always be hooked; any other source it holds is then rejected by it.
+                wrapped && group.All(type => type.FullName != WrapperTypeName) ? () => Demote(hostBinding, group) : null))
             .ToList();
+    }
+
+    // The source's own hook could not be applied: the wrapper rejects it from now on.
+    private static void Demote(HostBinding hostBinding, IEnumerable<Type> types)
+    {
+        lock (hostBinding.Gate)
+            foreach (var type in types)
+            {
+                hostBinding.Verified.TryRemove(type, out _);
+                hostBinding.Classifiers[type] = static (_, _) => false;
+                int line = hostBinding.Coverage.FindIndex(entry => entry.StartsWith(type.FullName + ": ", StringComparison.Ordinal));
+                string text = $"{type.FullName}: unverified (its Update cannot be hooked; CachedVideoFileSource never accepts it)";
+                if (line >= 0) hostBinding.Coverage[line] = text; else hostBinding.Coverage.Add(text);
+            }
+        Volatile.Write(ref coverage, hostBinding.Coverage.ToArray());
     }
 
     private static bool IsBuiltInAssembly(Assembly assembly, string hostDirectory)
@@ -419,6 +456,7 @@ internal static class FrameRenderReadiness
     internal const string FFmpegTypeName = "YukkuriMovieMaker.Plugin.FileSource.FFmpeg.FFmpegVideoFileSource";
     internal const string WicGifTypeName = "YukkuriMovieMaker.Plugin.FileSource.WIC.WICGifVideoSource";
     internal const string WicWebpTypeName = "YukkuriMovieMaker.Plugin.FileSource.WIC.WICWebpVideoSource";
+    private static readonly Guid SourcesAlwaysWrappedHost = Guid.Parse("23e5b5b5-adcf-43b7-b976-b6b63f8dadea");
     internal const string WrapperTypeName = "YukkuriMovieMaker.Plugin.CachedVideoFileSource";
 
     private static (string Name, Func<object, TimeSpan, bool> Holds)? DescribeVerified(Type type) => type.FullName switch

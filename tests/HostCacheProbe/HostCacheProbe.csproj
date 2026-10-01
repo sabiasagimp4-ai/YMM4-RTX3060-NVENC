@@ -15,6 +15,8 @@
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameRenderReadiness.cs" Link="FrameRenderReadiness.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameTimeKey.cs" Link="FrameTimeKey.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\PreviewRects.cs" Link="PreviewRects.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\CacheStatusBar.cs" Link="CacheStatusBar.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\CacheBarLayout.cs" Link="CacheBarLayout.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameCacheStore.cs" Link="FrameCacheStore.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameCacheKey.cs" Link="FrameCacheKey.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\KeyDependencyTracker.cs" Link="KeyDependencyTracker.cs" />

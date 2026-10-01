@@ -177,6 +177,25 @@ internal sealed class KeyDependencyTracker : IDisposable
         }
     }
 
+    // For display only (cache status bars): the keys of these frames from the current description, without
+    // verifying or leasing files. False while an edit is not described yet; null for frames with unhashed files.
+    internal bool TryPeekFrameKeys(IReadOnlyList<int> frames, string?[] keys, out string model)
+    {
+        lock (gate)
+        {
+            model = string.Empty;
+            if (disposed || cachedRevision != Revision || !cachedEligible || cachedFrames is null) return false;
+            for (int i = 0; i < frames.Count; i++)
+            {
+                var dependencies = cachedFrames.For(frames[i]);
+                keys[i] = dependencies.Files.Length == 0 || (fingerprints is not null && dependencies.Files.All(fingerprints.ContainsKey))
+                    ? KeyFor(dependencies, dependencies.Files) : null;
+            }
+            model = cachedModel;
+            return true;
+        }
+    }
+
     // Called under gate with verified fingerprints for `files`.
     private string KeyFor(FrameDependencyIndex.Dependencies? dependencies, string[] files)
     {

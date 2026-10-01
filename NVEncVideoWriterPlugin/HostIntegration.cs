@@ -41,6 +41,7 @@ internal static class HostIntegration
                 installed = true;
                 cacheAvailable = TimelineFrameCache.TryInstall(host, cacheHarmony, out reason);
                 if (!cacheAvailable) cacheHarmony.UnpatchAll(cacheHarmony.Id);
+                else TimelineCacheBars.TryInstall(host, out _);
                 status = cacheAvailable
                     ? $"YMM4 {version}: 取消保護・自動キャッシュの接続を確認しました。"
                     : "取消保護は有効です。自動キャッシュは利用できません: " + reason;
