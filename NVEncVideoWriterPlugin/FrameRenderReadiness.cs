@@ -466,7 +466,7 @@ internal static class FrameRenderReadiness
     private static bool Covers(TimeSpan start, TimeSpan duration, TimeSpan time) =>
         duration > TimeSpan.Zero && start <= time && time < start + duration;
 
-    // Pinned to host types whose Update was read (ILSpy, YMM4 4.56.1.0; see CLAUDE_HANDOFF.md). A pinned
+    // Pinned to host types whose Update was read (ILSpy, YMM4 4.56.1.0; see docs/HOST_CONTRACTS.md). A pinned
     // type whose fields no longer match, and every other implementation, is unverified.
     internal const string Mf2TypeName = "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.Source2.MFVideoFileSource2";
     internal const string MfLegacyTypeName = "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.MFVideoFileSource";

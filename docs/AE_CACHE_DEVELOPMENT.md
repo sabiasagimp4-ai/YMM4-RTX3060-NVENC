@@ -1,85 +1,69 @@
 # AEキャッシュに近づける開発方針
 
-2026-10-01。目標は、After Effectsに近いキャッシュの挙動をYMM4の標準プレビューへ組み込むこと。
-今回の土台は `codex/preview-scheduler` の `e60c455217179b49f567cd79e5a677d1692f7aa8`。
+2026-10-01更新。目的はYMM4の標準プレビューと動画出力で、完成フレームを蓄積・供給し、編集・Undo・素材更新・取消後も正しい画像を表示すること。AEの公開された挙動とSDK契約を参考にする。内部実装の完全一致は確認できていない。
 
-## 調べたブランチ
+## 現在の基準
 
-| ブランチ | 確認時点 | 役割 |
-|---|---|---|
-| main | 37c60524 | NVENCと初期キャッシュ。Readinessの完成版は開発ブランチにある |
-| claude/frame-render-readiness | 56e94419 | mainから94コミット。デコード完成判定、フレーム単位キー、編集/Undo、通常プレビュー保存、RAM/ディスク供給、帯、ホスト版の照合 |
-| codex/preview-scheduler | e60c4552 | 上記から1コミット。Update/Draw/readback等の分解計測とRTX3060のsource-only測定、scheduler引継ぎ |
+全4ブランチの内容を `main` へ統合済み。PR #1・#2はマージ済みで、旧開発ブランチ固有の未統合コミットはない。以後の作業はmainから始める。古い引継ぎ資料と統合前の作業指示は削除し、現行仕様を [CACHE_BEHAVIOR.md](CACHE_BEHAVIOR.md) に集約した。
 
-既存PR #1はdraft。独立した今回のPRは `codex/preview-scheduler` に対する差分にする。
-NVENCのエンコード並列処理と、YMM4の描画並列処理は別物。MFRが実装済みという扱いにはしない。
+統合実装の [main CI](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/36878854622) は成功（`970debc7da66b537871035cb3088e657b5fa792d`）。`cache-development` はmainへのpush・対象ファイルのPR・手動実行で動作する。YMM4バイナリはコミットしない。
 
-## 今回の変更
+## 実装済みの範囲
 
-- RAMの固定256MiBを可変化。既定の設定上限は2048MiB、自動配分は有効。64〜16384MiBで上限を変更でき、手動固定も選べる。
-- 自動配分はレンダースレッド外で1秒ごとにOSの空き物理メモリ、プロセスprivate bytes、managed heap、GC上限を読む。OSに最大(1GiB, 物理RAMの1/8)を残し、書き込みキューと最大1フレーム分の余裕も確保する。
-- キャッシュの上限は設定値と物理RAMの1/4以下。プロセス全体は物理RAMの1/2を目安に制限する。圧力時は直ちに縮小し、回復時は健康なサンプルが3回続いた後に128MiBずつ増やす。取得失敗では増やさない。これらは本プラグインの方針であり、AEの内部アルゴリズムを複製したものではない。
-- LRU退避は参照を外すだけで借用中の画素を変更しない。RAM上限の縮小で、ディスク上の有効なレコードを削除しない。ディスク読み込み前とRAMへの昇格時に最新予算を確認する。
-- 停止中キャッシュの10秒先・2分経過の打ち切りを削除。30フレームずつ、現在位置から末尾→先頭、現在位置の前後、先頭からの3順序でタイムライン全体を巡回する。既定の待ち時間はAEの公開仕様に合わせて8秒、変更可能。停止中キャッシュだけを無効にできる。
-- 保存済み・通常描画が必要なフレームを飛ばす。入力、編集、シーク、再生、ビュー変更、消去で中断/再開する。古いworkerが編集後の巡回位置を上書きしない。
-- アイドル保存の直前に中断と世代を再検査し、GPU capture中の消去や取消で保存しない。保存拒否を成功として数えない。
-- ツールにRAMの現在の予算、設定上限、書き込み待ちの保持量を表示する。
+| 領域 | 現状 |
+| --- | --- |
+| 保存・供給 | 通常プレビュー／出力の完成画素をRAM・ディスクへ保存。再生read-aheadと停止時の読込待機 |
+| 完成判定 | 動画ソースの実状態と要求時刻を照合し、未完成decodeを保存しない |
+| 依存キー | 正確なticks、フレーム単位のアイテム・素材、編集／Undo、usage／viewport／描画環境 |
+| RAM | 背景samplingで予算を調整。縮小・回復・LRU・借用寿命・ディスク維持 |
+| idle | 既定8秒後、全タイムラインを3順序で巡回。操作・変更・purgeで取消 |
+| GPU保持 | 復元した不変画像を保持し、反復時の再転送を省く。boundedな利用頻度履歴で追加を判断 |
+| 外部処理 | アイテム単位のbypass、固定MVIDのCommunity監査、個別の信頼設定 |
+| 観測 | Processor／Sourceの実装を動的に発見し、後読み込みに追従。経路・内訳・親子・因果ID・欠落を記録 |
+| ホスト互換性 | 実バイナリの前提コードを機能ごとに照合。新しい版を定期CIで確認 |
 
-256MiBは1920×1080 BGRAの約32フレーム、2GiBは約258フレーム（30fpsなら約8.6秒）に相当する。
-これはRAM画素ストアだけの概算。GPU、借用中の配列、書き込みキュー、YMM4本体、デコーダの使用量は別に存在する。
-縮小直後にプロセスの使用量が即座に下がることは保証しない。GCの強制実行はしない。
-ディスクは現状4GiB。全範囲を巡回できることと、全フレームが同時に容量内に収まることは別で、LRU退避は続く。
-デコード未完了などで保存できなかったフレームの無期限再試行は行わず、変更・シーク等で次の巡回が始まる。
+動的な観測・メモリ配分・利用履歴への追従と、未知の処理の安全性判定を混同しない。観測したという理由だけでキャッシュ可能へ昇格しない。詳細は [診断](CACHE_DIAGNOSTICS.md)・[ホスト契約](HOST_CONTRACTS.md)。
 
-## 検証
+## 次の課題
 
-LinuxでStoreChecksHarnessとReadinessChecksを実行。既存のストア/時刻/キー/選択枠/帯/契約テストに加えて、
-RAM縮小・復元・借用中の画素、ディスク維持と再起動、縮小後の破損検査、並行read/write/resize、
-メモリ不足と回復、全順序の境界と重複なしを検査する。
-FileLeaseChecksはWindowsのファイルIDを使うため、Windowsで実行する。
+| 順序 | 課題 | 実装前の条件・完了判断 |
+| --- | --- | --- |
+| 1 | GPU hitでも残る依存検証・キー生成を軽くする | ファイル／ディレクトリ同一性、lease、採用直前検証を維持し、費用を分解して比較する |
+| 2 | 初回renderのreadbackを抑える | 焼き込み画像の安全な取得位置、device／context、GPU完了、予算、寿命を実証する |
+| 3 | 音声と同期したレンダー待機・Cache Before Playback | 映像だけ止めず音声時計も調停。停止・seek・編集・repeat・末尾・disposeで取消可能にする |
+| 4 | whole-project JSONの差分記述 | item、animation、effect list、nested parameter、character、reader／global設定の変更を漏らさず、移行中は旧方式と照合する |
+| 5 | SingleFlight | 完全な出力キーとcontext互換条件が同じ計算だけ共有。consumer取消とjob取消を分け、idle／live／exportの重複と待機残留を検証する |
+| 6 | 無損失ディスク圧縮 | 実素材で圧縮率・読込速度・CPU費用を比較。RAM超過／再起動後の供給も検証する |
+| 7 | canonical raster・item／effect段の再利用 | viewport前の取得位置、補間・pixel位相・clip・透明度・text AA・formatの画素一致を検証する |
+| 8 | 履歴依存処理・MFR | 依存グラフ、開始状態／checkpoint、編集の伝搬、独立device／contextとホスト契約が必要 |
 
-`.github/workflows/cache-development.yml` はこのブランチへのpushとPRで動作する。
-公式更新手順とハッシュ照合で4.56.1.0を取得し、Windowsでビルド、native invariants、ストア、readiness、
-file lease、実ホストの依存キー、WARPの画素一致とディスク供給を検査する。
-RAMをゼロまで縮小→復元したプレビューのディスク供給、古い静止ビューのprime、capture中の取消/消去も含む。
-YMM4のバイナリはコミットしない。実機RTX3060の速度と実GUI操作はこのCIでは検証しない。
+`TimelineAudioPlayer.Position` が再生時計。`StopAsync()` はゼロへseekし、`EndAudioTask()` はrepeat時に開始位置へ戻すため、そのままbuffer待機へ流用しない。UI／render workerでasync toggleを同期Waitしない。
 
-実行結果: [YMM4-dlls Windows検証](https://github.com/sabiasagimp4-ai/YMM4-dlls/actions/runs/36854490341) は成功。
-固定release 0.1でnative invariants、プラグインのビルド、StoreChecksHarness、ReadinessChecks、
-FileLeaseChecks、CacheChecks、HostCacheProbe --integration/--gpu（WARP、動画fixture付き）を通過した。
-Linuxでも4.56.1.0の実DLLに対してプラグインとHostCacheProbeをクロスビルドし、警告・エラー0。
-RAM回復時にホストを再描画せずディスク画素を供給すること、古い静止ビューのprime、capture中の取消/消去も成功した。
+D2D `Map(Read)` にDoNotWaitはなく、1フレーム遅延やreadbackリングだけで非ブロックとは言えない。D3D11 query等を使う場合もD2D flushとの順序とdevice一致を確認する。現在のGPU保持は復元画像が対象であり、cold renderのreadbackは残る。
 
-## 次に埋める差
+SingleFlightではidleが不要になってもlive／exportのjobを巻き添えにしない。保存価値と画像の有効性を分け、容量不足だけで要求された有効結果を捨てない。採用直前の依存・取消・世代・予算確認から公開まで既存guardを使う。同じTimelineSourceや描画contextを複数Taskから同時UpdateするだけのMFRは行わない。
 
-| AEの挙動 | 現状と次の作業 |
-|---|---|
-| 重い未保存フレームを待ち、音声も同期する | 未実装。音声時計を含む取消可能なbuffering stateを設計。StopAsyncで0へseekする既存APIをそのまま流用しない |
-| Cache Before Playback | 未実装。上記schedulerで連続区間を確保してから再生する |
-| 再生中の保存コストを抑える | 復元済み画像のGPU保持を追加（GPU_FRAME_RETENTION.md）。cold renderのCPU readbackは残る。既存の焼き込みtarget保持と遅延降格を次に検証する |
-| 無損失圧縮ディスクキャッシュ | 未実装。読込速度と圧縮率を実素材で測ってから採用する |
-| 素材・レイヤー・エフェクト段の再利用 | 合成済みフレーム中心。receipt/dependency graphと段単位キャッシュは後段 |
-| MFR | 未実装。所有device/contextを共有しない描画workerとホスト互換契約が必要 |
+## 検証の基準
 
-## AEの一次資料
+同じ要求条件の画素一致を先に守り、OFF／cold／RAM／disk／GPU／live／bypassを分ける。編集→Undo、素材置換、viewport、選択枠、decoder失敗、purge、退避中のborrow、破棄後の資源返却を確認する。計算共有を追加した場合は実render数・join・取消も測る。
 
-ユーザー指定の `sabiasagimp4-ai/aesdk` の main (`390a34d0`) にある
-`AE_ComputeCacheSuite.h` と `AE_CacheOnLoadSuite.h` を確認した。
-Compute Cacheは入力の状態をキーに含め、計算済み値のcheckout/checkinで寿命を管理し、
-計算中は呼び出し側が待機か即時missを選ぶ契約。RAM退避後も借用配列を変更しない今回の処理は
-この寿命の要件に沿う。ただし計算のsingle-flightや段単位のreceiptは未実装で、
-SDKの仕組みだけではAE本体の再生・音声時計を再現できない。
-Cache On Loadはプラグインの起動時ロードに関するAPIであり、フレームのディスク供給APIではない。
-SDKのコードは転載せず、契約の確認に利用した。
+性能は対象commit、素材、解像度、adapter、warmup、pass順序、サンプル数、p50／p95、drop／coverageを記録する。親子spanを加算せず、Update／DrawのCPU経過時間をPresent・音声・GPU実行時間や全体FPSとして扱わない。詳細traceのON／OFF比較も別に行う。
 
-`sabiasagimp4-ai/YMM4-dlls` の main/ci/nvenc-verify/ci/gui-smoke/ci/host-versions/ci/ymm4-watch を確認。
-実ホスト検証は同リポジトリのrelease 0.1と既存verify手順も利用する。
-`tools/ci/cache-development-release.yml` を独立した `ci/ae-cache-continuation` へソースと共にミラーし、
-既存CIブランチを上書きせずWindowsで検査する。zipのSHA256は
-`49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a` に固定する。
+- [実ホストprobeと実行コマンド](../tests/HostCacheProbe/README.md)
+- [動的計測の実測と生ログ](CACHE_TRACE_RESULTS_2026-10-01.md)
+- [GPU保持の実測と生ログ](GPU_FRAME_RETENTION_RESULTS_2026-10-01.md)
+- [統合前のRTX 3060 source-only測定](preview-performance-rtx3060.json): `e60c4552` 時点、100フレーム、1080p、shape＋Arial、disk無効。GUI／audio／Present／pacingを含まない歴史的データ
 
-- [Previewing](https://helpx.adobe.com/after-effects/desktop/view-and-preview/preview-video-and-audio/previewing.html): Cache Before Playback、Preview from Disk Cache。
-- [Multi-Frame Rendering](https://helpx.adobe.com/after-effects/desktop/render-and-export/multi-frame-rendering/multi-frame-rendering.html): 停止中の自動レンダリング、8秒の既定待ち時間、CTIに対する順序と対象範囲。
-- [Lossless Compressed Playback](https://helpx.adobe.com/after-effects/desktop/view-and-preview/preview-video-and-audio/lossless-compressed-playback.html): 現行の無損失圧縮ディスクキャッシュ。
+ユーザーのRTX 3060上の最新ビルドでのGUI・実プロジェクト速度・長時間NVENC出力は未確認。VFR、実device loss、実disk full、UI操作から表示までのp50／p95・frame dropの検証も残る。CI成功や過去のNVENC smokeをこれらの代用にしない。
 
-AEは公開された利用者向け挙動を目標にする。内部実装の完全な一致や、機能全体の完成はこの変更では主張しない。
+## AEの参照
+
+`sabiasagimp4-ai/aesdk` の [固定版AE_ComputeCacheSuite.h](https://github.com/sabiasagimp4-ai/aesdk/blob/390a34d0cedba002814bd1879ec4c604bff46bc2/AfterEffectsSDK_26.5_win/Examples/Headers/AE_ComputeCacheSuite.h) を確認した。入力状態をキーに含め、checkout／checkinで借用寿命を管理し、計算中は待機または即時missを選ぶ契約を参考にする。段単位receipt・計算single-flightはまだ実装していない。
+
+`AE_CacheOnLoadSuite.h` は起動時のプラグインロードのAPIで、フレームのディスク供給APIではない。SDKは契約確認に使い、コードを転載しない。SDKだけではAE本体の再生・音声時計を再現できない。
+
+- [Previewing](https://helpx.adobe.com/after-effects/desktop/view-and-preview/preview-video-and-audio/previewing.html)
+- [Multi-Frame Rendering](https://helpx.adobe.com/after-effects/desktop/render-and-export/multi-frame-rendering/multi-frame-rendering.html)
+- [Lossless Compressed Playback](https://helpx.adobe.com/after-effects/desktop/view-and-preview/preview-video-and-audio/lossless-compressed-playback.html)
+
+`YMM4-dlls` は実ホスト・GUI検証用。`tools/ci/cache-development-release.yml` と `cache-diagnostics-gui.yml` は同リポジトリへミラーするCIテンプレートで、ソースrepoのactive workflowとは区別する。

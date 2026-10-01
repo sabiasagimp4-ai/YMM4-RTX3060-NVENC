@@ -13,7 +13,7 @@ internal sealed class KnownCode
 {
     internal const string CommunityAssembly = "YukkuriMovieMaker.Plugin.Community";
 
-    // The Community assembly of YMM4 4.56.1.0 whose code was read (CLAUDE_HANDOFF.md 追記10).
+    // The Community assembly of YMM4 4.56.1.0 whose code was read (docs/HOST_CONTRACTS.md).
     private static readonly Guid AuditedCommunity = new("ac765de8-d44f-44f1-a094-961becf4d22e");
 
     // Namespaces (after "YukkuriMovieMaker.Plugin.Community.") that draw only their own item from its parameters and

@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace NVEncVideoWriterPlugin;
 
-// The parts of YMM4's code each cache feature relies on, as read in YMM4 4.56.1.0 (CLAUDE_HANDOFF.md). On a YMM4
+// The parts of YMM4's code each cache feature relies on, as read in YMM4 4.56.1.0 (docs/HOST_CONTRACTS.md). On a YMM4
 // build that is not one of the read builds, a feature is used only when every one of its parts has the same
 // fingerprint (HostFingerprint) as in a read build. Besides the hooked types, a part list contains "witnesses":
 // every type whose code uses what the feature's rules are about (all code that reads other scenes, depends on

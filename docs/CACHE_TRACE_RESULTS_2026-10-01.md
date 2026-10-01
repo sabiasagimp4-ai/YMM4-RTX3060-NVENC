@@ -1,5 +1,8 @@
 # 実YMM4の観測結果と次の実装判断
 
+GPU保持の導入前に取得した観測記録。対象commitと測定値は当時のものを保持する。
+この測定から派生したGPU保持は実装済みで、現在の結果は [GPU_FRAME_RETENTION_RESULTS_2026-10-01.md](GPU_FRAME_RETENTION_RESULTS_2026-10-01.md)、残る課題は [AE_CACHE_DEVELOPMENT.md](AE_CACHE_DEVELOPMENT.md) を参照。
+
 ## 測定条件と保存先
 
 YMM4 4.56.1.0、Windows 2022 GitHub-hosted runner、Microsoft Basic Render Driver/WARP。

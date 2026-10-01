@@ -2,7 +2,7 @@
 
 2026-10-01。ユーザー提案の「実YMM4を操作して詳細ログを取り、挙動に合わせて派生する」を開発の土台にする。
 プラグイン名の一覧を増やすだけでは、新規・更新・後読み込みの処理に追従しない。
-今回追加するものは動的な**観測**。未検証の処理をキャッシュ可能へ自動昇格するものではない。
+動的な**観測**を実装している。未検証の処理をキャッシュ可能へ自動昇格するものではない。
 
 ## 採取
 
@@ -23,13 +23,15 @@
 
 - セッション: UTCとStopwatchの原点、実際の周波数、OS/runtime、process ID、論理CPU数。
 - 各span: 生の開始/終了ticks、span ID、親ID、operation ID、managed thread ID、frame time ticks、Playing/Paused/Exporting、stage/category/component、outcome。
-- Update経路: render/live/RAM/disk/bypass/exception。対象外の理由、decoderのready/not-readyも別イベント。
+- Update経路: render/live/GPU/RAM/disk/bypass/exception。対象外の理由、decoderのready/not-readyも別イベント。
 - キー生成、CacheRead（RAM/ディスク検索）、CacheRestore（状態検証を含む画像復元）、lookup全体、ホストUpdate、Draw、GPUコピー提出、配列確保、Map待ち、memcpy、RAM登録、ディスク投入。
 - 復元内訳: `cache-state-validation` の下に `capture-dependency-validation`（モデルrevision、親、ファイルlease検証）と
   `render-environment-key-validation`（現在の描画環境・viewportのキー再検証）。復元前と出力差し替え直前の双方を測る。
   `restore-bitmap-allocation`、`restore-copy-from-memory`、`restore-command-recording`、`cache-output-lock-wait`、
   `cache-output-commit`（出力差し替え・旧出力破棄・状態登録）を別spanとして記録する。
   CopyFromMemory/command recordingはネイティブ呼出しのCPU wall time。GPU完了を意味しない。
+- GPU保持のhitでは転送・bitmap確保・RAM検索を省略する。経路を混ぜず、実行されたspanだけを集計する。
+  設計と最新の測定は [GPU_FRAME_RETENTION.md](GPU_FRAME_RETENTION.md)・[GPU_FRAME_RETENTION_RESULTS_2026-10-01.md](GPU_FRAME_RETENTION_RESULTS_2026-10-01.md)。
 - ディスクworker: 読み書き処理のwall timeとqueue滞在時間。投入元のoperation IDで関連づける。
 - 遅延readback: 次のフレームで完了しても、元のframe time/operation IDに帰属させる。
 - Processor/SourceインターフェースのUpdate/Draw/Read/GetFrame/GetFrameAsyncを実装するクラスをロード済みアセンブリから動的に発見する。

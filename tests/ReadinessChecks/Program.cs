@@ -15,7 +15,7 @@ using YukkuriMovieMaker.Plugin.FileSource.WIC;
 // TimelineSource.Update fans decoder updates (and nested scenes) out through Parallel.ForEach, swallows
 // decoder failures the way the host renders them as transparent output, and returns normally.
 // The video source fakes carry the host type names and reproduce the state transitions read from the
-// YMM4 4.56.1.0 sources (see CLAUDE_HANDOFF.md); they are not host code.
+// YMM4 4.56.1.0 sources (see docs/HOST_CONTRACTS.md); they are not host code.
 internal static class Program
 {
     private const string Owner = "ymm.tests.readiness";

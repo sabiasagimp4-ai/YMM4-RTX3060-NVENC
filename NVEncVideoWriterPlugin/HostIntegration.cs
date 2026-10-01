@@ -144,7 +144,7 @@ internal static class HostIntegration
     private sealed record KnownHost(string Version, KnownBinary Host, KnownBinary Plugin, KnownBinary Settings);
 
     // Exact host builds whose hooked internals were inspected. 4.56.1.0 was read with ILSpy from the official
-    // Lite zip (see CLAUDE_HANDOFF.md); on any other build only the export hook is installed.
+    // Lite zip (see docs/HOST_CONTRACTS.md); other builds use per-feature contract evaluation for optional cache support.
     private static readonly KnownHost[] KnownHosts =
     [
         new("4.55.1.1",

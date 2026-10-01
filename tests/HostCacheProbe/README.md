@@ -1,18 +1,35 @@
-# Host cache hook probe
+# 実ホストのキャッシュ検証
 
-Test-only .NET 10 console probe; no host binary is modified or copied. Harmony is
-loaded only by this project. Supply your installed YMM4 directory:
+.NET 10のWindows用probe。指定したYMM4のDLLをその場所から読み、実行中だけHarmony 2.4.2で接続する。ホストのバイナリは変更しない。基準はYMM4 Lite 4.56.1.0。
+
+使用するホストをビルド時と実行時の両方へ指定する。
 
 ```powershell
-dotnet run --project tests/HostCacheProbe -c Release -- 'D:\YukkuriMovieMaker_v4_Lite' --gpu
+$hostPath = 'D:\YukkuriMovieMaker_v4_Lite\'
+dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$hostPath" -- $hostPath --integration
+dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$hostPath" -- $hostPath --gpu
+dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$hostPath" --no-launch-profile -- $hostPath --preview-performance
 ```
 
-The probe checks internal `TimelineSource.Update` and `Dispose(bool)` signatures,
-patches both with Harmony 2.4.2, executes their prefix/postfix/skip paths, and
-verifies unpatch restores original execution. `--gpu` additionally constructs
-host graphics devices and an empty scene, executes the real renderer, substitutes
-the source-owned closed command list, and checks `Output` and normal GPU cleanup.
+| オプション | 検査するもの |
+| --- | --- |
+| --integration | 出力scope、ホスト機能の判断、詳細traceの基本契約 |
+| --gpu | WARP／host graphicsによる画素一致、preview／export供給、選択枠、編集・素材・世代無効化、idle複製、資源所有権 |
+| --video <path> | --gpuに追加して実動画デコード失敗の非保存と復旧を検査 |
+| --preview-performance | OFF／cold／RAM比較、8枚反復のRAM／GPU各3pass、GPU保持・退避borrow・無効化・解放・traceを検証 |
+| --trace-output <path> | ホスト試験のJSONLログを新しいファイルへ採取 |
+| --unread | 読み取り済み版とのcontracts照合で有効な機能だけを検証 |
 
-Passing this proves the hook mechanism for the tested installation, not cache
-pixel parity, arbitrary effects, UI geometry, asset invalidation or host GUI
-integration. Unknown host versions must not silently assume this contract.
+性能fixtureの結果は `dist/preview-performance.json`、RAM／GPUのtraceは同じdistへ出力する。比較のwarmupと画素検査は測定外。軽いfixtureでcache OFFが速い場合もあり、測定値をGUIのFPSへ置き換えない。
+
+mainの `cache-development` CIではportable、native、file lease、依存キー、--integration／--gpu／--preview-performanceを実行する。`YMM4-dlls` のCIテンプレートでは動画fixtureと実GUI試験も実行する。CIのWARP検証とRTX 3060上のNVENC smokeは別。GPU計測はCPU wall timeで、GPU実行時間を測っていない。
+
+portableな検査はホストなしで実行できる。
+
+```sh
+python -m unittest discover -s tests/tools -v
+dotnet run --project tests/StoreChecksHarness/StoreChecks.csproj -c Release
+dotnet run --project tests/ReadinessChecks/ReadinessChecks.csproj -c Release
+```
+
+試験の条件・結果は [開発方針](../../docs/AE_CACHE_DEVELOPMENT.md)、計測の意味は [診断](../../docs/CACHE_DIAGNOSTICS.md)、ホスト更新は [契約](../../docs/HOST_CONTRACTS.md) を参照。
