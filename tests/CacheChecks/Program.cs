@@ -172,7 +172,7 @@ internal static class Program
         CheckBackgroundDescribe();
 
         timeline.Items = timeline.Items.Add(new TachieItem());
-        Check(!FrameCacheKey.TryCreate(scene, out _, out string reason) && reason.Contains("非同期"), "Transient lip-sync was cached in the whole-project key");
+        Check(!FrameCacheKey.TryCreate(scene, out _, out string reason) && reason.Contains("立ち絵"), "Transient lip-sync was cached in the whole-project key: " + reason);
         tracker.Dispose();
         Check(!tracker.ValidateRevision(tracker.CaptureRevision()) && !tracker.TryGetKey(out _, out _), "Disposed tracker remained usable");
         Console.WriteLine("Cache drawing keys and tracker: empty/text/shape, seek/selection, edit/restore/undo/redo, nested scene, parent context, same-metadata file replacement, missing input, transient lip-sync bypass, revision capture/validation and disposal OK");
