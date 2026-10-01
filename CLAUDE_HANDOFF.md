@@ -1,8 +1,22 @@
 # Claude 引継ぎ — YMM4 RTX3060 NVENC / AE風キャッシュ
 
-更新日: 2026-10-01（追記7まで）。これは **未完成の作業保存（WIP checkpoint）** です。製品完成・配布可能・AE完全再現を意味しません。
+更新日: 2026-10-01（追記8まで）。これは **未完成の作業保存（WIP checkpoint）** です。製品完成・配布可能・AE完全再現を意味しません。
 
 ## 最初に読むこと
+
+### 2026-10-01 追記（8）— 外部プラグイン・図形・フォントによる bypass をアイテム単位に
+
+ユーザー:「外部プラグイン、外部図形、外部フォントが広い範囲でbypassされてしまう問題も修正しておいて」。1df5203。
+- 以前: 外部の `$type` が 1 つ、外部アイテム型・外部図形・`ve://`/`ae://`/`plugin://` の resource（ユーザーの音声合成プラグインを含む）が 1 つでもあると、プロジェクト全体を通常描画。カスタム読み込みプラグインが有効で素材ファイルが 1 つでもあっても全体。フォントは WPF の `FontFamily(名前).GetTypefaces()` で探し、YMM4 の表示名（例「Arial Bold」や和名）が WPF のファミリー名と一致しないと解決できずそのアイテムが bypass。
+- `FrameModelSplit`: `classify(type, path)` が `Known` / `AudioOnly` / `Foreign` を返し、`Foreign` は読み取り中の所有者（root アイテム i、他タイムライン、キャラクター j）に帰属。どれにも属さない（プロジェクト全体の設定、タイムラインの映像設定など）ときだけ model を拒否。モデル直下とタイムライン直下の `$type` も検査するようにした（以前は素通り。実際の snapshot には無い）。
+- `FrameCacheKey.ClassifyType`: 本体と Plugin API 以外の型は Foreign。ただし `VoiceParameter`（音声ファイルを作るだけで、映像の描画コードは読まない: TimelineSource・JimakuSource、4.56.1.0）と `Tachie*Parameter`（立ち絵のフレームはキャッシュしない）配下は Known、`AudioEffects` 配下は AudioOnly（音声を読む wide フレームだけ）。同梱 Community のエフェクト・図形（OpenFx、VST3、音量連動など中身を確認していないもの）は Foreign のまま＝そのアイテムのフレームだけ通常描画。
+- `ClassifyResource`: `ve://`・`plugin://` はユーザープラグインだけに付く（`TimelineResource.TryCreateFrom*`）。音声合成・立ち絵プラグインは Known、`ae://` は AudioOnly、ほかは Foreign。
+- アイテム: 外部アイテム型・外部図形（`ShapeType2`）・Foreign resource・Foreign キャラクター・カスタム読み込みでの素材ファイル（フォントは除く）・列挙の例外 → そのアイテムだけ uncacheable（`FrameDependencyIndex` が映るフレームとトランジション・wide を追う）。他タイムラインなら `nestedUncacheable`。キャラクター: 例外・Foreign resource・カスタム読み込みでの素材ファイル → そのキャラクターのアイテムだけ。
+- フォント（`ResolveFont`）: YMM4 と同じく `SystemFonts.Concat(CustomFonts)` から `FontName` 一致の最初、無ければ `new Font()`（Arial / 400 / Normal / Normal）。その `CanonicalFontName` を DirectWrite のシステムコレクションで `FindFamilyName`、ファミリーの全フォントの `CreateFontFace().GetFiles()` を `IDWriteLocalFontFileLoader` でパスにする（太字・斜体は同じファミリーの別 face を選ぶため全ファイル）。resource に `fontface://名前\nファミリー|太さ|スタイル|幅` を追加（他タイムラインの resource も nested hash に入れるようにした）。ファミリー単位で 30 秒保持。DirectWrite に無いファミリーと、ローカルでないフォントファイルは NotSupported → そのアイテムだけ。`KeyDependencyTracker` は `FontSettings`・`CustomFonts`・各カスタムフォントを購読。
+- 追跡しないもの（README に記載）: 文字装飾タグのフォント（名前だけキーに入る）、DirectWrite の代替フォント、YMM4 がフォント一覧を再読込せずにファミリーへ face が追加された場合（次の記述まで）。
+- 試験: StoreChecksHarness の model split（400 モデル、各 `$type` の所有者を parse した木から求めたものと一致。タイムライン設定を items の前後に置く。変異 4 件で検出）。CacheChecks（外部エフェクトの派生型・外部アイテム型でそのフレームだけ bypass、他タイムラインの外部エフェクトはシーンアイテムのフレームだけ、カスタム読み込みは素材のあるフレームだけ、未知のフォント名は Arial として key、カスタムフォントの追加・太さ変更で key が変わる、DirectWrite に無いファミリーはそのフレームだけ）。
+- あわせて（14f71ad）: idle 先読みが、常に通常描画になるフレーム（立ち絵・外部コード・確認できない素材）で止まり、次の idle でも同じフレームから始めて先へ進まなかった。`KeyDependencyTracker.RendersNormally(frame)`（現在の記述でそのフレームが uncacheable。編集で false に戻る）で、そのフレームを飛ばして続ける（素材の確認待ちなど一時的な理由では従来どおり止まる）。範囲がすべてそうなら `NextFrame` を範囲の後へ進める。CacheChecks で判定を確認。RenderBatch 全体の動作は GUI では未確認。
+- あわせて: verify run 19（8a8a1b5）の失敗は試験側の誤り（出力フレームは前の試験で保存済みで、出力キャッシュのみ有効時に 2 回とも hit）。各計測を空のキャッシュから始めるよう修正（8b6b871）。
 
 ### 2026-10-01 追記（7）— NVENC 出力とキャッシュの設定を分けた
 
