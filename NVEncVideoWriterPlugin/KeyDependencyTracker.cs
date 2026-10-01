@@ -406,6 +406,8 @@ internal sealed class KeyDependencyTracker : IDisposable
         Subscribe(fonts);
         Subscribe(fonts.CustomFonts);
         foreach (var font in fonts.CustomFonts) Subscribe(font);
+        // The asterisk word sets rewrite the text of text items and subtitles (FrameCacheKey.AsteriskWordSets).
+        foreach (var source in FrameCacheKey.AsteriskSources()) Subscribe(source);
         var timelines = scene.Scenes.Timelines.Append(scene.Timeline).Distinct().ToArray();
         foreach (var timeline in timelines)
         {

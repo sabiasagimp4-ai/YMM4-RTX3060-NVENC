@@ -1,10 +1,14 @@
 using System.ComponentModel;
+using System.Collections.Immutable;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using SharpGen.Runtime;
 using Vortice.DirectWrite;
+using YukkuriMovieMaker.Commons;
+using YukkuriMovieMaker.KanjiToYomi;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
@@ -95,6 +99,8 @@ internal static class FrameCacheKey
             // read, the items that read files are rendered normally.
             bool customReaders = sourceReaders.SelectMany(readers => readers).Any(type => !IsBuiltInSourceReader(type));
 
+            var asterisk = AsteriskWordSets();
+
             // Characters first: what in a character is a plugin's or cannot be resolved disables the items using it.
             var characterPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             var characterResources = new SortedSet<string>(StringComparer.Ordinal);
@@ -160,6 +166,15 @@ internal static class FrameCacheKey
                         {
                             uncacheable |= Note(ClassifyResource(resource.Key), ref audioForeign);
                             AddResource(resource, tachie ? Unused() : itemPaths, itemResources, itemFonts);
+                        }
+                        if (item is TextItem or VoiceItem)
+                        {
+                            if (asterisk is not { } words) uncacheable = true;
+                            else
+                            {
+                                if (words.Resource is not null) itemResources.Add(words.Resource);
+                                foreach (string font in DecorationFonts(item, words.Replacements)) AddFont(font, itemPaths, itemResources, itemFonts);
+                            }
                         }
                     }
                     catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
@@ -406,17 +421,20 @@ internal static class FrameCacheKey
         if (Uri.TryCreate(resource.Key, UriKind.Absolute, out var uri) && uri.IsFile)
             AddPath(uri.LocalPath, paths);
         else if (resource.ResourceType == TimelineResourceType.Font)
-        {
-            var (face, files) = ResolveFont(resource.Key["font://".Length..]);
-            resources.Add(face);
-            foreach (string file in files)
-            {
-                AddPath(file, paths);
-                fonts?.Add(Path.GetFullPath(file));
-            }
-        }
+            AddFont(resource.Key["font://".Length..], paths, resources, fonts);
         else if (resource.ResourceType is TimelineResourceType.Video or TimelineResourceType.Image or TimelineResourceType.Audio or TimelineResourceType.CustomVoice or TimelineResourceType.Tachie)
             AddPath(resource.Key, paths);
+    }
+
+    private static void AddFont(string name, ISet<string> paths, ISet<string> resources, ISet<string>? fonts)
+    {
+        var (face, files) = ResolveFont(name);
+        resources.Add(face);
+        foreach (string file in files)
+        {
+            AddPath(file, paths);
+            fonts?.Add(Path.GetFullPath(file));
+        }
     }
 
     // YMM4 draws a font name through its font settings (TextFormatDescription, TextSource, JimakuSource, 4.56.1.0):
@@ -432,6 +450,60 @@ internal static class FrameCacheKey
         string face = $"fontface://{name}\n{family}|{(int)font.CanonicalFontWeight}|{(int)font.CanonicalFontStyle}|{(int)font.CanonicalFontStretch}";
         return (face, FamilyFiles(family));
     }
+
+    // Fonts named by an item's text decorations and control tags (TextSource, JimakuSource, 4.56.1.0), including tags
+    // that the asterisk word sets write. A name the font settings do not have is drawn in the item's font (already a
+    // resource), so only names they have are returned.
+    private static IEnumerable<string> DecorationFonts(IItem item, string[] replacements)
+    {
+        var (text, decorations, font) = item switch
+        {
+            TextItem textItem => (textItem.Text, textItem.Decorations, textItem.Font),
+            VoiceItem voice => (voice.Serif, voice.Decorations, voice.JimakuVisibility == JimakuVisibility.Custom ? voice.Font : voice.Character?.Font),
+            _ => (null, null, null),
+        };
+        if (string.IsNullOrEmpty(text)) return [];
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var decoration in decorations ?? ImmutableList<TextDecoration>.Empty)
+            if (decoration?.Font is { Length: > 0 } name) names.Add(name);
+        foreach (string source in replacements.Prepend(text))
+            foreach (var decoration in ControlTagParser.Parse(source, ImmutableList<TextDecoration>.Empty, 1.0, font ?? string.Empty, false, false).decorations)
+                if (decoration.Font is { Length: > 0 } name) names.Add(name);
+        names.Remove(font ?? string.Empty);
+        if (names.Count == 0) return [];
+        var settings = SettingsBase<FontSettings>.Default;
+        var known = settings.SystemFonts.Concat(settings.CustomFonts).Select(entry => entry.FontName).ToHashSet(StringComparer.Ordinal);
+        return names.Where(known.Contains).Order(StringComparer.Ordinal).ToArray();
+    }
+
+    // The user dictionary's asterisk word sets rewrite the text that text items and subtitles draw
+    // (TextHelper.ApplyAsterisk, 4.56.1.0): a resource of those items (null when none is enabled), and the texts they
+    // write (which can hold control tags). Null when the dictionary cannot be read (UserDictionary is internal).
+    internal static (string? Resource, string[] Replacements)? AsteriskWordSets()
+    {
+        if (UserDictionary() is not { } dictionary
+            || dictionary.GetType().GetProperty("AsteriskWordSets", BindingFlags.Public | BindingFlags.Instance) is not { } property)
+            return null;
+        var sets = (property.GetValue(dictionary) as IEnumerable<WordSet> ?? [])
+            .Where(set => set is { IsEnabled: true } && !string.IsNullOrEmpty(set.From)).ToArray();
+        if (sets.Length == 0) return (null, []);
+        string identity = string.Join("\n", sets.Select(set =>
+            $"{set.IsRegex}|{set.IgnoreCase}|{set.From.Length}|{set.From}|{(set.To ?? string.Empty).Length}|{set.To}"));
+        return ("asterisk://" + FrameDependencyIndex.Hash(identity), sets.Select(set => set.To ?? string.Empty).ToArray());
+    }
+
+    // What the tracker follows for AsteriskWordSets: the dictionary and its word sets.
+    internal static IEnumerable<object> AsteriskSources()
+    {
+        if (UserDictionary() is not { } dictionary) return [];
+        var sets = dictionary.GetType().GetProperty("AsteriskWordSets", BindingFlags.Public | BindingFlags.Instance)?.GetValue(dictionary) as IEnumerable<WordSet>;
+        return new object[] { dictionary }.Concat((sets ?? []).OfType<object>()).ToArray();
+    }
+
+    private static object? UserDictionary() =>
+        typeof(Scene).Assembly.GetType("YukkuriMovieMaker.KanjiToYomi.UserDictionary") is { } type
+            ? typeof(SettingsBase<>).MakeGenericType(type).GetProperty("Default", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)?.GetValue(null)
+            : null;
 
     // The files only change when fonts are installed or removed, so a family's are kept for a short time; a font
     // file whose content changes is still caught by its fingerprint.

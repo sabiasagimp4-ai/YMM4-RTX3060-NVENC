@@ -511,6 +511,35 @@ internal static class Program
         Check(WaitForFrameKey(tracker, 305) == unknownFrame, "Removing the font settings entry did not restore the frames");
         timeline.Items = timeline.Items.Remove(fontText);
 
+        // A font named by a control tag is resolved like the item's font, and the user dictionary's asterisk word sets
+        // rewrite the drawn text: both are part of the text frames' keys and of no other frame's.
+        var tagged = new TextItem { Frame = 300, Length = 10, Layer = 4, Text = "a<@ymm-cache-tag>b<@> ymm", Font = "Arial" };
+        timeline.Items = timeline.Items.Add(tagged);
+        string taggedFrame = WaitForFrameKey(tracker, 305);
+        var tagFont = new YukkuriMovieMaker.Settings.Font { FontName = "ymm-cache-tag", CanonicalFontName = "Arial", CanonicalFontWeight = YukkuriMovieMaker.Settings.FontWeight.Bold };
+        fontSettings.CustomFonts.Add(tagFont);
+        try { Check(WaitForFrameKey(tracker, 305) != taggedFrame, "Mapping a font named by a control tag did not change its frames"); }
+        finally { fontSettings.CustomFonts.Remove(tagFont); }
+        Check(WaitForFrameKey(tracker, 305) == taggedFrame, "Removing the control tag's font entry did not restore the frames");
+        var dictionaryType = typeof(Scene).Assembly.GetType("YukkuriMovieMaker.KanjiToYomi.UserDictionary", true)!;
+        var dictionary = typeof(YukkuriMovieMaker.Plugin.SettingsBase<>).MakeGenericType(dictionaryType)
+            .GetProperty("Default", BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy)!.GetValue(null)!;
+        var setsProperty = dictionaryType.GetProperty("AsteriskWordSets")!;
+        var originalSets = (System.Collections.Immutable.ImmutableList<YukkuriMovieMaker.KanjiToYomi.WordSet>)setsProperty.GetValue(dictionary)!;
+        var word = new YukkuriMovieMaker.KanjiToYomi.WordSet("ymm", "YMM");
+        setsProperty.SetValue(dictionary, originalSets.Add(word));
+        try
+        {
+            string rewritten = WaitForFrameKey(tracker, 305);
+            Check(rewritten != taggedFrame, "Adding an asterisk word set did not change the text frames");
+            Check(WaitForFrameKey(tracker, 10) == at10, "An asterisk word set changed frames without text");
+            word.To = "YMM4";
+            Check(WaitForFrameKey(tracker, 305) != rewritten, "Editing an asterisk word set did not change the text frames");
+        }
+        finally { setsProperty.SetValue(dictionary, originalSets); }
+        Check(WaitForFrameKey(tracker, 305) == taggedFrame, "Removing the asterisk word set did not restore the text frames");
+        timeline.Items = timeline.Items.Remove(tagged);
+
         var scene = new SceneItem { Frame = 200, Length = 10, Layer = 3 };
         timeline.Items = timeline.Items.Add(scene);
         string sceneFrame = WaitForFrameKey(tracker, 205);
