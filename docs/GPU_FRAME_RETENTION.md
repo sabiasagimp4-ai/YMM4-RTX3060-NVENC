@@ -10,7 +10,9 @@ RAM/ディスクから初めて復元したプレビュー画像だけをGPU側�
   ホストの可変effect graphは保持しない。
 - cacheと表示中のsourceはQueryInterfaceで別のCOM参照を持つ。
   LRUで追い出しても表示中のborrowを破棄しない。最後のowner解放で画像予算を返す。
-- グローバルLRUは既定128MiB、最大64 entry。これは画素payloadの予算で、driverが確保する実VRAM全量ではない。
+- 退避対象はグローバルLRUから選び、追加は利用頻度で判断する。頻度が同じなら既存entryを残す。
+  sourceごとの履歴は256キーに制限し、512観測ごとに頻度を半減して新しい範囲へ追従する。
+  保持は既定128MiB、最大64 entry。これは画素payloadの予算で、driverが確保する実VRAM全量ではない。
   既存の384MiB総画像予算に一度だけ計上し、同じbitmapのaliasは二重計上しない。
 - contextの同一性、generation、既存の完全なcache key（frame・usage・viewport・DPI・変換・描画状態等）を照合する。
   モデル/ファイル依存検証を維持し、borrow前と出力差替え前に再検証する。
@@ -36,3 +38,6 @@ GPU hit 100件のtraceにCopyFromMemoryが一度もないことを検証する�
 はbitmapを参照で保持する。従ってホストgraphを参照ごと保存するだけでは不変なcacheにならない。
 [QueryInterface](https://learn.microsoft.com/en-us/windows/win32/api/unknwn/nf-unknwn-iunknown-queryinterface%28refiid_void%29)
 で取得した参照は独立してReleaseする必要がある。
+
+予算36フレームで90フレームを4周するportable試験では、通常LRUのhit=0に対し、
+頻度に基づく追加でhit=108。これはポリシーのシミュレーションで、実GPUの速度測定ではない。

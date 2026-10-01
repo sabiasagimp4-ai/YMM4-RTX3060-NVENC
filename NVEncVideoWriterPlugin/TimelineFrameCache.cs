@@ -269,6 +269,7 @@ internal static class TimelineFrameCache
         internal long Bytes;
         internal GpuFrame? ActiveGpuFrame;
         internal readonly Dictionary<string, GpuFrame> GpuFrames = [];
+        internal readonly FrameAdmissionHistory GpuAdmission = new();
         internal long Generation;
         // A rendered preview frame whose GPU readback is still running; finished on this source's render thread.
         internal DeferredStore? Deferred;
@@ -430,6 +431,7 @@ internal static class TimelineFrameCache
             }
             lock (cacheGate)
             {
+                if (gpuRetentionEnabled && viewport is not null && cacheKey is not null) state.GpuAdmission.Observe(cacheKey);
                 if (currentGeneration == Interlocked.Read(ref generation) && state.Generation == currentGeneration
                     && state.LastKey == liveKey && (state.LastViewportKey is null || state.LastViewportKey == cacheKey)
                     && state.LastOutput is { NativePointer: not 0 }
@@ -1261,6 +1263,17 @@ internal static class TimelineFrameCache
     private static void RetainUploaded(Pending pending, ID2D1CommandList command, long bytes)
     {
         if (!gpuRetentionEnabled || bytes > gpuRetentionBudget || pending.CacheKey is null) return;
+        // Check every LRU victim required to make room. A one-use scan cannot displace equally
+        // frequent residents; repeated requests can. Count aging lets a new working set take over.
+        long remainingBytes = gpuRetainedBytes;
+        int remainingCount = gpuLru.Count;
+        int frequency = pending.State.GpuAdmission.Frequency(pending.CacheKey);
+        for (var node = gpuLru.First; node is not null && (remainingBytes + bytes > gpuRetentionBudget || remainingCount >= 64); node = node.Next)
+        {
+            int residentFrequency = node.Value.Owner.TryGetTarget(out var owner) ? owner.GpuAdmission.Frequency(node.Value.Key) : 0;
+            if (frequency <= residentFrequency) return;
+            remainingBytes -= node.Value.Bytes; remainingCount--;
+        }
         ID2D1CommandList? retained = null;
         try
         {

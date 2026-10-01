@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../NVEncVideoWriterPlugin/FrameAdmissionHistory.cs" Link="FrameAdmissionHistory.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameCacheStore.cs" Link="FrameCacheStore.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/PreviewPerformance.cs" Link="PreviewPerformance.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/CacheMemoryPolicy.cs" Link="CacheMemoryPolicy.cs" />
