@@ -11,9 +11,9 @@ internal sealed class KeyDependencyTracker : IDisposable
     private const int FingerprintChunk = 128;
     private static readonly IReadOnlyDictionary<string, FileFingerprint> EmptyFingerprints = new Dictionary<string, FileFingerprint>();
     private const long SettleMilliseconds = 250;
-    // Describing the whole project again after an edit took 0.5 s for 100 items and 2.1 s for 1000 on the CI runner.
-    // The preview's render thread does it inline only while that stays short; otherwise in the background, rendering
-    // normally until it is done (the first time, by the number of items).
+    // Describing the whole project again after an edit took 0.5 s for 100 items and 2.1 s for 1000 on the CI runner
+    // (before the streaming split). The preview's render thread does it inline for small projects, and for larger ones
+    // while the last description stayed short; otherwise in the background, rendering normally until it is done.
     private static readonly long InlineDescribeTicks = System.Diagnostics.Stopwatch.Frequency / 20;
     private const int InlineDescribeItems = 200;
     private Task<Description?>? describeTask;
@@ -211,8 +211,9 @@ internal sealed class KeyDependencyTracker : IDisposable
         if (describeRevision == current && task.IsCompletedSuccessfully && task.Result is { } description) Apply(description, current);
     }
 
-    private bool DescribeInline() => lastDescribeTicks >= 0 ? lastDescribeTicks <= InlineDescribeTicks
-        : scene.Scenes.Timelines.Append(scene.Timeline).Distinct().Sum(timeline => timeline.Items.Count) <= InlineDescribeItems;
+    private bool DescribeInline() =>
+        scene.Scenes.Timelines.Append(scene.Timeline).Distinct().Sum(timeline => timeline.Items.Count) <= InlineDescribeItems
+        || lastDescribeTicks >= 0 && lastDescribeTicks <= InlineDescribeTicks;
 
     // Tests: whether a background description is running.
     internal bool Describing { get { lock (gate) return describeTask is { IsCompleted: false }; } }

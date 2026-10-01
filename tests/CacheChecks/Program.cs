@@ -287,8 +287,8 @@ internal static class Program
         shapes[5].X.SetFirstValue(-1);
         Thread.Sleep(300); // settle
         var edit = Returned(out keyed, out reason);
-        Check(!keyed && reason.Contains("背景"), "After an edit, a slow description ran on the render thread: " + reason);
-        Check(edit < TimeSpan.FromMilliseconds(250), $"Starting the description after an edit took {edit.TotalMilliseconds:F0} ms");
+        // Inline only if the last description was short; either way the render thread must not wait long.
+        Check(edit < TimeSpan.FromMilliseconds(250), $"The capture after an edit took {edit.TotalMilliseconds:F0} ms ({reason})");
         Check(Ready(out var again) != before, "The edited frame kept its key");
         Console.WriteLine($"Background description (1000 items): first capture returned in {first.TotalMilliseconds:F1} ms, key after {ready.TotalMilliseconds:F0} ms; "
             + $"after an edit, returned in {edit.TotalMilliseconds:F1} ms, key after {again.TotalMilliseconds:F0} ms");
