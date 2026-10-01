@@ -118,7 +118,7 @@ internal static class PreviewPerformanceChecks
                 Check(stages.Single(s => s.Stage == PreviewStage.TotalUpdate).SampleCount == Frames, mode + " did not measure all updates");
                 Check(stages.Single(s => s.Stage == PreviewStage.TotalPreview).SampleCount == Frames, mode + " did not measure all previews");
                 if (mode == "cold-store") Check(saved == Frames && ramHits == 0, $"Cold-store counts: saved={saved}, hits={ramHits}");
-                if (mode == "ram-hit") Check(ramHits == Frames && saved == 0, $"RAM-hit counts: hits={ramHits}, saved={saved}");
+                if (mode.StartsWith("ram-hit", StringComparison.Ordinal)) Check(ramHits == Frames && saved == 0, $"RAM-hit counts: hits={ramHits}, saved={saved}");
                 if (mode == "off") Check(saved == 0 && ramHits == 0, "OFF used the cache");
                 long bytes = GC.GetTotalAllocatedBytes(precise: true) - allocated;
                 Console.WriteLine($"{mode}: {wall.Elapsed.TotalMilliseconds / Frames:F3} ms/frame, final flush {flush.Elapsed.TotalMilliseconds:F3} ms, RAM hits {ramHits}, stored {saved}");
@@ -126,7 +126,12 @@ internal static class PreviewPerformanceChecks
                     AllocatedBytes = bytes, GcCollections = Enumerable.Range(0, 3).Select(i => GC.CollectionCount(i) - collections[i]).ToArray(), RamHits = ramHits, Stored = saved, Stages = stages };
             }
 
-            var measurements = new[] { Measure("off", false), Measure("cold-store", true), Measure("ram-hit", true) };
+            var measurements = new List<object> { Measure("off", false), Measure("cold-store", true), Measure("ram-hit", true) };
+            CacheTrace.Start(Path.GetFullPath("dist/performance-trace.jsonl"), "ram-hit-trace");
+            ProcessingTraceHooks.Start();
+            ProcessingTraceHooks.Discover(); // Installation cost is outside the measured loop.
+            try { measurements.Add(Measure("ram-hit-trace", true)); }
+            finally { ProcessingTraceHooks.Stop(); CacheTrace.StopAsync().GetAwaiter().GetResult(); }
             // Every frame, with no captures in the preceding measurements.
             for (int frame = 0; frame < Frames; frame++)
             {
@@ -162,3 +167,4 @@ internal static class PreviewPerformanceChecks
     private static bool SkipLoader() => false;
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 }
+

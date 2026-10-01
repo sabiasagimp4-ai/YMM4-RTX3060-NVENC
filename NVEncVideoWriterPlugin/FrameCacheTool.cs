@@ -12,6 +12,7 @@ public sealed class FrameCacheToolPlugin : IToolPlugin
     {
         HostIntegration.EnsureInstalled();
         PluginSettings.Apply();
+        CacheDiagnostics.TryStartEnvironment();
     }
     public string Name => "描画キャッシュ";
     public Type ViewModelType => typeof(FrameCacheToolViewModel);
@@ -223,6 +224,9 @@ public sealed class FrameCacheToolView : UserControl
     private readonly TextBlock status = new() { TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock counts = new() { Margin = new Thickness(0, 8, 0, 12), TextWrapping = TextWrapping.Wrap };
     private readonly TextBlock error = new() { TextWrapping = TextWrapping.Wrap };
+    private readonly Button trace = new() { Content = "詳細ログを開始", HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(12, 6, 12, 6) };
+    private readonly TextBox scenario = new() { Text = "manual", Width = 180, Margin = new Thickness(8, 0, 0, 0) };
+    private readonly TextBlock traceInfo = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 8) };
     private readonly Button purge = new() { Content = "保存したキャッシュを消去", HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(12, 6, 12, 6) };
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(1) };
 
@@ -233,6 +237,24 @@ public sealed class FrameCacheToolView : UserControl
 
         var panel = new StackPanel { Margin = new Thickness(12), MaxWidth = 640 };
         panel.Children.Add(new TextBlock { Text = "描画キャッシュ", FontSize = 18 });
+        var traceRow = new StackPanel { Orientation = Orientation.Horizontal };
+        System.Windows.Automation.AutomationProperties.SetAutomationId(trace, "CacheTraceToggle");
+        System.Windows.Automation.AutomationProperties.SetAutomationId(scenario, "CacheTraceScenario");
+        traceRow.Children.Add(trace); traceRow.Children.Add(scenario);
+        panel.Children.Add(traceRow); panel.Children.Add(traceInfo);
+        trace.Click += async (_, _) =>
+        {
+            trace.IsEnabled = false;
+            var path = CacheDiagnostics.OutputPath;
+            try
+            {
+                if (CacheDiagnostics.IsRecording) { await CacheDiagnostics.StopAsync(); traceInfo.Text = "ログを保存しました: " + path; }
+                else CacheDiagnostics.StartDefault(scenario.Text);
+            }
+            catch (Exception exception) { traceInfo.Text = "ログを保存できませんでした: " + exception.GetBaseException().Message; }
+            finally { trace.IsEnabled = true; Refresh(); }
+        };
+        scenario.TextChanged += (_, _) => { if (CacheDiagnostics.IsRecording) CacheDiagnostics.MarkScenario(scenario.Text); };
         panel.Children.Add(new PluginSettingsPanel());
         panel.Children.Add(status);
         panel.Children.Add(new TextBlock { Text = "キャッシュ状況（タイムライン全体）", Margin = new Thickness(0, 12, 0, 4) });
@@ -275,6 +297,8 @@ public sealed class FrameCacheToolView : UserControl
 
     private void Refresh()
     {
+        trace.Content = CacheDiagnostics.IsRecording ? "詳細ログを停止" : "詳細ログを開始";
+        if (CacheDiagnostics.IsRecording) traceInfo.Text = "記録中: " + CacheDiagnostics.OutputPath + "\n混雑による欠落: " + CacheDiagnostics.DroppedRecords;
         status.Text = HostIntegration.Status + Environment.NewLine + FrameRenderReadiness.Summary
             + Environment.NewLine + TimelineFrameCache.Status + Environment.NewLine + IdleFramePreRenderer.Status
             + Environment.NewLine + CacheMemoryController.Status;

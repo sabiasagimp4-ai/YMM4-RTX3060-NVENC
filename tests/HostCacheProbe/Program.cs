@@ -37,6 +37,7 @@ internal static class Program
         }
         if (args.Contains("--integration"))
         {
+            ProcessingTraceChecks.Run();
             HostIntegrationChecks.Run(host);
             return 0;
         }
@@ -95,7 +96,14 @@ internal static class Program
         if (args.Contains("--gpu"))
         {
             if (features is null) Console.WriteLine("Cache checks skipped: the plugin does not use the cache on this build");
-            else FramePixelChecks.Run(host, video >= 0 && video + 1 < args.Length ? Path.GetFullPath(args[video + 1]) : null, features);
+            else
+            {
+                int traceArg = Array.IndexOf(args, "--trace-output");
+                bool trace = traceArg >= 0 && traceArg + 1 < args.Length;
+                if (trace) { CacheTrace.Start(args[traceArg + 1], "host-gpu-checks"); ProcessingTraceHooks.Start(); ProcessingTraceHooks.Discover(); }
+                try { FramePixelChecks.Run(host, video >= 0 && video + 1 < args.Length ? Path.GetFullPath(args[video + 1]) : null, features); }
+                finally { if (trace) { ProcessingTraceHooks.Stop(); CacheTrace.StopAsync().GetAwaiter().GetResult(); } }
+            }
         }
         return 0;
     }
@@ -173,3 +181,4 @@ internal static class ProbeLoader
         return assemblies;
     }
 }
+

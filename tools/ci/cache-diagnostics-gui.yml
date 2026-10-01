@@ -1,0 +1,57 @@
+name: cache-diagnostics-gui
+
+# Starts a copy of YMM4 (the zip of this repository's release 0.1) with the plugin installed on a GitHub-hosted
+# Windows runner, opens a generated project, opens the frame cache tool and prints screenshots and UI texts to the
+# log (tools/ci/gui-smoke.ps1). No NVIDIA GPU: Direct2D runs on the runner's basic adapter.
+on:
+  push:
+    branches: ['ci/cache-diagnostics-gui']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gui:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      DOTNET_NOLOGO: '1'
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      YMM4_DIR: '${{ github.workspace }}\ymm4-host\'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: YMM4 (release 0.1)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download 0.1 --repo $env:GITHUB_REPOSITORY --pattern '*.zip' --dir host-zip
+          if ($LASTEXITCODE -ne 0) { throw 'Release download failed' }
+          New-Item -ItemType Directory -Path ymm4-host -Force | Out-Null
+          $zip = (Get-ChildItem host-zip -Filter *.zip | Select-Object -First 1).FullName
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne '49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a') { throw 'Host checksum mismatch' }
+          tar -xf $zip -C ymm4-host
+          if ($LASTEXITCODE -ne 0) { throw 'Extract failed' }
+      - name: Build the plugin
+        run: |
+          dotnet build NVEncVideoWriterPlugin\NVEncVideoWriterPlugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --nologo -v q
+          if ($LASTEXITCODE -ne 0) { throw 'Plugin build failed' }
+      - name: Test project
+        run: |
+          dotnet run --project tests\GuiSmoke\GuiSmoke.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR "$env:RUNNER_TEMP\gui-smoke.ymmp"
+          if ($LASTEXITCODE -ne 0) { throw 'Project generation failed' }
+      - name: YMM4 with the plugin (screenshots in this log)
+        shell: powershell
+        run: |
+          & .\tools\ci\gui-smoke.ps1 -HostDir $env:YMM4_DIR -Project "$env:RUNNER_TEMP\gui-smoke.ymmp" -PluginDir 'NVEncVideoWriterPlugin\bin\Release\net10.0-windows10.0.19041.0' -TracePath "$env:GITHUB_WORKSPACE\dist\gui-trace.jsonl"
+
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cache-diagnostics-gui
+          path: dist
+          retention-days: 14

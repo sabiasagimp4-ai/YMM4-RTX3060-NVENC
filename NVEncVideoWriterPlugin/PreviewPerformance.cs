@@ -68,13 +68,25 @@ internal static class PreviewPerformance
     internal readonly struct Measurement(PreviewStage stage) : IDisposable
     {
         private readonly long started = Timestamp;
-        public void Dispose() { if (started != 0) End(stage, started); }
+        private readonly CacheTrace.Span? trace = CacheTrace.Measure(stage.ToString());
+        public void Dispose()
+        {
+            long end = Timestamp;
+            trace?.Dispose();
+            if (started != 0) Add(stage, end - started);
+        }
     }
     internal static void Add(PreviewStage stage, long ticks)
     {
         if (RecordingEnabled) samples[(int)stage].Add(ticks);
     }
-    internal static void End(PreviewStage stage, long started) => Add(stage, Timestamp - started);
+    internal static void End(PreviewStage stage, long started)
+    {
+        long end = Timestamp;
+        CacheTrace.Timing(stage.ToString(), started, end);
+        Add(stage, end - started);
+    }
     internal static void Reset() { foreach (var sample in samples) sample.Reset(); }
     internal static PreviewPerformanceRow[] Snapshot() => Enum.GetValues<PreviewStage>().Select(stage => samples[(int)stage].Snapshot(stage)).ToArray();
 }
+

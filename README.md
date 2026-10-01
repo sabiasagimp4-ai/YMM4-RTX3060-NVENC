@@ -84,3 +84,5 @@ MP4のサンプル索引は出力時間に比例してRAMを使用します。�
 
 本体は [MIT](LICENSE) です。元実装と NVIDIA ヘッダーの由来は [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) を参照してください。YMM4 本体や NVIDIA ドライバーは同梱しません。
 
+
+実YMM4の詳細ログと動的な処理検出は [CACHE_DIAGNOSTICS.md](docs/CACHE_DIAGNOSTICS.md) を参照。ツールから計測を開始/停止できます。

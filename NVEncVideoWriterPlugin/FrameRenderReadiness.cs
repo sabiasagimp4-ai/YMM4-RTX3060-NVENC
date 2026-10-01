@@ -161,7 +161,8 @@ internal static class FrameRenderReadiness
             added.Add((timelineUpdate, finalizer));
             var decoderFinalizer = Method(nameof(DecoderFinalizer));
             foreach (var check in checks)
-                if (TryPatchDecoder(harmony, check, decoderFinalizer)) added.Add((check.Update, decoderFinalizer));
+                if (TryPatchDecoder(harmony, check, decoderFinalizer))
+                { added.Add((check.Update, Method(nameof(DecoderTracePrefix)))); added.Add((check.Update, decoderFinalizer)); }
             lock (patchGate) installedPatches = [.. added];
             Volatile.Write(ref installed, 1);
             reason = string.Empty;
@@ -183,7 +184,7 @@ internal static class FrameRenderReadiness
     {
         try
         {
-            harmony.Patch(check.Update, finalizer: new HarmonyMethod(finalizer, Priority.Last));
+            harmony.Patch(check.Update, prefix: new HarmonyMethod(Method(nameof(DecoderTracePrefix))), finalizer: new HarmonyMethod(finalizer, Priority.Last));
             return true;
         }
         catch (Exception error) when (check.Unhookable is { } fallback && error is not OutOfMemoryException)
@@ -243,8 +244,17 @@ internal static class FrameRenderReadiness
         finally { current.Value = __state.Parent; }
     }
 
-    private static void DecoderFinalizer(object __instance, object[] __args, MethodBase __originalMethod, Exception? __exception)
+    private static void DecoderTracePrefix(object __instance, TimeSpan __0, out CacheTrace.Span? __state) =>
+        __state = CacheTrace.Measure("decoder-update", component: __instance.GetType().FullName,
+            frameTimeTicks: __0.Ticks, operation: CacheTrace.OperationId);
+
+    private static void DecoderFinalizer(object __instance, object[] __args, MethodBase __originalMethod, Exception? __exception, CacheTrace.Span? __state)
     {
+        if (__state is not null)
+        {
+            if (__exception is not null) { __state.Outcome = "exception"; __state.Detail = __exception.GetType().Name; }
+            __state.Dispose();
+        }
         var scope = current.Value;
         // TimelineSource.Update prefetches items about a second ahead with Task.Run, which captures the
         // current scope; that decode can finish after the frame completed. The frame that later adopts the
@@ -265,6 +275,8 @@ internal static class FrameRenderReadiness
                 && check.HoldsFrame(__instance, time);
         }
         catch { holds = false; }
+        using var readiness = CacheTrace.Measure("decoder-readiness", "state", __instance.GetType().FullName);
+        if (readiness is not null) readiness.Outcome = holds ? "ready" : "not-ready";
         if (!holds) Fail(scope);
     }
 
@@ -303,7 +315,7 @@ internal static class FrameRenderReadiness
                         [check.Update.MethodHandle] = check,
                     });
                     if (TryPatchDecoder(hostBinding.Harmony, check, patch))
-                        lock (patchGate) installedPatches = [.. installedPatches, (check.Update, patch)];
+                        lock (patchGate) installedPatches = [.. installedPatches, (check.Update, Method(nameof(DecoderTracePrefix))), (check.Update, patch)];
                 }
             }
             catch (Exception error) when (error is not OutOfMemoryException)
@@ -525,3 +537,4 @@ internal static class FrameRenderReadiness
         public int GetHashCode(MethodInfo value) => value.MethodHandle.GetHashCode();
     }
 }
+

@@ -19,6 +19,7 @@
     <Compile Include="../../NVEncVideoWriterPlugin/HostBaselines.cs" Link="HostBaselines.cs" />
     <Compile Include="../CacheChecks/StoreChecks.cs" Link="StoreChecks.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameModelSplit.cs" Link="FrameModelSplit.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/CacheTrace.cs" Link="CacheTrace.cs" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>
 </Project>

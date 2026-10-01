@@ -6,7 +6,8 @@ param(
     [Parameter(Mandatory)] [string] $HostDir,
     [Parameter(Mandatory)] [string] $Project,
     [Parameter(Mandatory)] [string] $PluginDir,
-    [int] $SettleSeconds = 60
+    [int] $SettleSeconds = 60,
+    [string] $TracePath = ""
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms, WindowsBase, UIAutomationClient, UIAutomationTypes
@@ -144,6 +145,10 @@ New-Item -ItemType Directory -Path $settings -Force | Out-Null
 try { Set-DisplayResolution -Width 1600 -Height 900 -Force -ErrorAction Stop } catch { Write-Output "resolution unchanged: $($_.Exception.Message)" }
 Write-Output "screen: $([System.Windows.Forms.Screen]::PrimaryScreen.Bounds)"
 
+if ($TracePath) {
+    $env:YMM4_CACHE_TRACE = $TracePath
+    $env:YMM4_CACHE_SCENARIO = 'gui-open'
+}
 $process = Start-Process (Join-Path $HostDir 'YukkuriMovieMaker.exe') -ArgumentList "`"$Project`"" -PassThru
 try {
     # Wait for the main window; close dialogs (message boxes, the first-run "about" window) on the way.
@@ -228,6 +233,23 @@ try {
     List-Windows $process
     Shot 'tool-opened'
 
+    function Trace-Control([string] $id) {
+        foreach ($window in @(Windows-Of $process)) {
+            $condition = New-Object System.Windows.Automation.PropertyCondition ($ae::AutomationIdProperty, $id)
+            $found = $ae::FromHandle($window.Handle).FindFirst($scope::Descendants, $condition)
+            if ($found) { return $found }
+        }
+        return $null
+    }
+    function Scenario([string] $name) {
+        if (-not $TracePath) { return }
+        $box = Trace-Control 'CacheTraceScenario'
+        if (-not $box) { throw 'Trace scenario control was not found' }
+        $box.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($name)
+        Write-Output "TRACE-SCENARIO $name"
+    }
+    Scenario 'idle-fill'
+
     # Select the Layer 00 item (on screen at the playhead, so the preview draws its selection rectangle), then leave
     # YMM4 alone: the idle pre-renderer fills the cache ahead of the playhead and the bars turn green/blue.
     Click-At 180 546 'the Layer 00 item'
@@ -236,6 +258,7 @@ try {
     Start-Sleep -Seconds ([Math]::Max(5, $SettleSeconds - 20))
     Shot 'settled'
     # Seek to 00:00:05 on the ruler: that frame (both rectangles and the text) comes from the cache.
+    Scenario 'paused-seek'
     Click-At 250 518 'the ruler at 5 s'
     Start-Sleep -Seconds 4
     Shot 'seek'
@@ -247,9 +270,10 @@ try {
     Start-Sleep -Seconds 2
     Shot 'seek-hover'
 
-    # Normal playback beyond the pre-rendered 10 s: seek to 16 s and play at once (before the pre-renderer's idle
+    # Normal playback at a separate playhead position: seek to 16 s and play at once (before the pre-renderer's idle
     # delay), so the host renders these frames and the cache stores them; then the same range again.
     foreach ($pass in 1, 2) {
+        Scenario "playback-$pass"
         Click-At 580 518 'the ruler at 16 s'
         Start-Sleep -Milliseconds 300
         [Win]::SetForegroundWindow($main.Handle) | Out-Null
@@ -258,6 +282,36 @@ try {
         [System.Windows.Forms.SendKeys]::SendWait(' ')
         Start-Sleep -Seconds 2
         Shot "playback-$pass" # the tool's counters are in the picture (its texts are not exposed to UI Automation)
+    }
+    Scenario 'edit-delete'
+    [Win]::SetForegroundWindow($main.Handle) | Out-Null
+    [System.Windows.Forms.SendKeys]::SendWait('{DELETE}')
+    Start-Sleep -Seconds 3
+    Scenario 'undo'
+    [System.Windows.Forms.SendKeys]::SendWait('^z')
+    Start-Sleep -Seconds 3
+    Scenario 'redo'
+    [System.Windows.Forms.SendKeys]::SendWait('^y')
+    Start-Sleep -Seconds 3
+    Scenario 'preview-wheel'
+    [Win]::SetCursorPos(470, 237) | Out-Null
+    [Win]::mouse_event(2048, 0, 0, 120, [UIntPtr]::Zero)
+    Start-Sleep -Seconds 3
+    if ($TracePath) {
+        $toggle = Trace-Control 'CacheTraceToggle'
+        if (-not $toggle -or $toggle.Current.Name -ne (U '\u8A73\u7D30\u30ED\u30B0\u3092\u505C\u6B62')) { throw 'The trace is not recording' }
+        $toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        $until = (Get-Date).AddSeconds(20)
+        $finished = $false
+        while ((Get-Date) -lt $until -and -not $finished) {
+            Start-Sleep -Milliseconds 250
+            if (Test-Path $TracePath) {
+                $last = Get-Content $TracePath -Tail 1 -Encoding UTF8 -ErrorAction SilentlyContinue
+                $finished = $last -and $last -match '"Kind":"summary"'
+            }
+        }
+        if (-not $finished) { throw 'Trace did not finish before YMM4 exit' }
+        Write-Output "TRACE-SAVED $TracePath"
     }
     List-Windows $process
     foreach ($window in Windows-Of $process) { Texts ($ae::FromHandle($window.Handle)) $window.Title }
@@ -272,3 +326,4 @@ finally {
         }
     }
 }
+

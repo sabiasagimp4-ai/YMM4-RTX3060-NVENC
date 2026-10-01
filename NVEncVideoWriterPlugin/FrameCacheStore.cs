@@ -357,6 +357,9 @@ internal sealed class FrameCacheStore : IDisposable
                 active = operation;
                 try
                 {
+                    using var trace = CacheTrace.Measure("disk-" + operation.Kind.ToString().ToLowerInvariant(), "io-wall", operation: operation.TraceOperation);
+                    if (operation.QueuedAt != 0)
+                        CacheTrace.Timing("disk-queue-wait", operation.QueuedAt, Stopwatch.GetTimestamp(), "queue-wait");
                     switch (operation.Kind)
                     {
                         case OperationKind.Read:
@@ -750,5 +753,9 @@ internal sealed class FrameCacheStore : IDisposable
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
     private readonly record struct PendingKey(long Generation, string Key);
-    private sealed record DiskOperation(OperationKind Kind, long Generation, string Key, byte[]? Pixels, TaskCompletionSource? Completion);
+    private sealed record DiskOperation(OperationKind Kind, long Generation, string Key, byte[]? Pixels, TaskCompletionSource? Completion)
+    {
+        internal long TraceOperation { get; } = CacheTrace.OperationId;
+        internal long QueuedAt { get; } = CacheTrace.Enabled ? Stopwatch.GetTimestamp() : 0;
+    }
 }

@@ -275,6 +275,7 @@ internal static class TimelineFrameCache
         long generation, TimeSpan time, string usageKey, PreviewViewport? viewport, bool wantRects, bool rectsReusable, bool playing) : IDisposable
     {
         internal readonly bool Playing = playing;
+        internal readonly long TraceOperation = CacheTrace.OperationId;
         private int disposed;
         internal readonly SourceState State = state;
         internal readonly Scene Scene = scene;
@@ -305,9 +306,10 @@ internal static class TimelineFrameCache
         public void Dispose() { Readback.Dispose(); Pending.Release(); }
     }
 
-    private sealed class UpdateMeasurement(bool preview)
+    private sealed class UpdateMeasurement(bool preview, TimeSpan time, string usage)
     {
         internal readonly long Started = PreviewPerformance.Timestamp;
+        internal readonly CacheTrace.Span? Trace = CacheTrace.Measure("timeline-update", frameTimeTicks: time.Ticks, usage: usage);
         internal readonly int ThreadId = Environment.CurrentManagedThreadId;
         internal readonly bool Preview = preview;
         internal Pending? Pending;
@@ -326,7 +328,7 @@ internal static class TimelineFrameCache
     private static bool Prefix(object __instance, TimeSpan time, object usage, out UpdateMeasurement __state)
     {
         string name = usage.ToString() ?? string.Empty;
-        __state = new UpdateMeasurement(name is "Playing" or "Paused");
+        __state = new UpdateMeasurement(name is "Playing" or "Paused", time, name);
         updateMeasurements.Remove(__instance);
         updateMeasurements.Add(__instance, __state);
         __state.RunsHost = CachePrefix(__instance, time, usage, out var pending);
@@ -516,6 +518,8 @@ internal static class TimelineFrameCache
     {
         if (state.Deferred is not { } deferred) return;
         state.Deferred = null;
+        using var trace = CacheTrace.Measure("deferred-store", frameTimeTicks: deferred.Pending.Time.Ticks,
+            usage: deferred.Pending.UsageKey, operation: deferred.Pending.TraceOperation);
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
@@ -578,6 +582,14 @@ internal static class TimelineFrameCache
             __state.Pending?.Path?.Add(__state.TotalTicks);
             if (__state.Preview) PreviewPerformance.Add(PreviewStage.TotalUpdate, __state.TotalTicks);
             __state.Completed = __exception is null;
+            if (__state.Trace is { } trace)
+            {
+                trace.Outcome = __exception is not null ? "exception" : __state.Pending is null ? "bypass"
+                    : __state.RunsHost ? "render" : ReferenceEquals(__state.Pending.Path, LiveTimes) ? "live"
+                    : ReferenceEquals(__state.Pending.Path, DiskTimes) ? "disk" : "ram";
+                trace.Detail = __exception?.GetType().Name;
+                trace.Dispose();
+            }
         }
         return __exception;
     }
@@ -819,11 +831,11 @@ internal static class TimelineFrameCache
         return IsValidViewport(viewport, context.MaximumBitmapSize);
     }
 
-    private readonly record struct DrawMeasurement(long Started, UpdateMeasurement? Update);
+    private readonly record struct DrawMeasurement(long Started, UpdateMeasurement? Update, CacheTrace.Span? Trace);
 
     private static void ObservePlayer(object __instance, out DrawMeasurement __state)
     {
-        __state = new(PreviewPerformance.Timestamp, null);
+        __state = new(PreviewPerformance.Timestamp, null, CacheTrace.Measure("player-draw"));
         try
         {
             var source = playerSourceField.GetValue(__instance);
@@ -855,6 +867,11 @@ internal static class TimelineFrameCache
     private static Exception? DrawFinalizer(Exception? __exception, DrawMeasurement __state)
     {
         long drawTicks = PreviewPerformance.Timestamp - __state.Started;
+        if (__state.Trace is { } trace)
+        {
+            if (__exception is not null) { trace.Outcome = "exception"; trace.Detail = __exception.GetType().Name; }
+            trace.Dispose();
+        }
         PreviewPerformance.Add(PreviewStage.PreviewDraw, drawTicks);
         // CPU time in Update + Draw, excluding the gap, Present, audio and playback/scheduler waits.
         if (__exception is null && __state.Update is { } update)
@@ -892,7 +909,12 @@ internal static class TimelineFrameCache
     }
     private static bool ValidContext(ID2D1DeviceContext context) => context.Transform == Matrix3x2.Identity
         && context.Dpi.Width == 96 && context.Dpi.Height == 96 && context.UnitMode == UnitMode.Dips;
-    private static bool Bypass(string reason) { status = reason; Interlocked.Increment(ref bypasses); return true; }
+    private static bool Bypass(string reason)
+    {
+        using var trace = CacheTrace.Measure("cache-bypass", "state");
+        if (trace is not null) { trace.Outcome = "bypass"; trace.Detail = reason; }
+        status = reason; Interlocked.Increment(ref bypasses); return true;
+    }
     private static void Hit(object source, Pending pending, RectsUpdate update, ItemRect[]? recalled)
     {
         pending.CacheHit = true;
