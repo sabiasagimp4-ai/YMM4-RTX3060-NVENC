@@ -100,20 +100,20 @@ internal static class FingerprintSamples
 {
     internal sealed class A
     {
-        internal int Add(int x) => x + 1;
+        internal int Add(int x) => x + 100;
         internal int Clamp(int x) => x < 0 ? 0 : Math.Max(x, 10);
         internal Func<int, int> Twice() => y => y * 2;
     }
 
     internal sealed class B
     {
-        internal int Add(int x) => x + 1;
+        internal int Add(int x) => x + 100;
         internal int Clamp(int x) => x < 0 ? 0 : Math.Max(x, 10);
     }
 
     internal sealed class C
     {
-        internal int Add(int x) => x + 2;
+        internal int Add(int x) => x + 101; // the same opcode (ldc.i4.s), another operand
         internal int Clamp(int x) => x < 0 ? 1 : x;
     }
 }
