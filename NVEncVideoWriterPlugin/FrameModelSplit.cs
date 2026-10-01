@@ -10,20 +10,30 @@ namespace NVEncVideoWriterPlugin;
 // (StoreChecks compares them).
 internal static class FrameModelSplit
 {
-    internal readonly record struct Parts(string Global, string Nested, string[] RootItems);
+    // What a "$type" means for the frames: Known (code that was read, or data no cached frame reads), AudioOnly (only
+    // frames that read audio, the wide ones), Foreign (code that was not read).
+    internal enum TypeUse { Known, AudioOnly, Foreign }
 
-    // allowType(type, property names from the model's root to the "$type"): false rejects the model, and the
-    // rejected type is returned. Throws InvalidDataException for a model of another shape.
+    // ForeignItems: root items holding a foreign type; NestedForeign: one in another timeline; ForeignCharacters:
+    // indexes into the model's "Characters"; AudioForeign: an audio-only type anywhere.
+    internal readonly record struct Parts(string Global, string Nested, string[] RootItems,
+        bool[] ForeignItems, bool NestedForeign, int[] ForeignCharacters, bool AudioForeign);
+
+    // classify(type, property names from the model's root to the "$type"). A foreign type outside the items,
+    // timelines and characters rejects the model and is returned. Throws InvalidDataException for a model of
+    // another shape.
     internal static bool TrySplit(string model, Guid rootId, IEnumerable<string> globalResources,
-        Func<string, IReadOnlyList<string>, bool> allowType, out Parts parts, out string? rejected)
+        Func<string, IReadOnlyList<string>, TypeUse> classify, out Parts parts, out string? rejected)
     {
-        var splitter = new Splitter(model, allowType);
+        var splitter = new Splitter(model, classify);
         bool split = splitter.Run(rootId, globalResources, out parts);
         rejected = splitter.Rejected;
         return split;
     }
 
-    private sealed class Splitter(string model, Func<string, IReadOnlyList<string>, bool> allowType)
+    private enum Owner { Global, RootItem, Nested, Character }
+
+    private sealed class Splitter(string model, Func<string, IReadOnlyList<string>, TypeUse> classify)
     {
         private readonly JsonTextReader reader = new(new StringReader(model))
         {
@@ -32,6 +42,11 @@ internal static class FrameModelSplit
             MaxDepth = null,
         };
         private readonly List<string> path = [];
+        private readonly List<bool> foreignItems = [];
+        private readonly SortedSet<int> foreignCharacters = [];
+        private bool nestedForeign, audioForeign;
+        private Owner owner;
+        private int ownerIndex;
         internal string? Rejected { get; private set; }
 
         internal bool Run(Guid rootId, IEnumerable<string> globalResources, out Parts parts)
@@ -62,6 +77,19 @@ internal static class FrameModelSplit
                     Expect(reader.TokenType, JsonToken.EndArray);
                     global.WriteEndArray();
                 }
+                else if (name == "Characters" && reader.TokenType == JsonToken.StartArray)
+                {
+                    global.WriteStartArray();
+                    path.Add(name);
+                    for (int index = 0; Next() != JsonToken.EndArray; index++)
+                    {
+                        (owner, ownerIndex) = (Owner.Character, index);
+                        if (!Copy(global, null)) return false;
+                    }
+                    owner = Owner.Global;
+                    path.RemoveAt(path.Count - 1);
+                    global.WriteEndArray();
+                }
                 else if (name == "Resources")
                 {
                     reader.Skip(); // replaced by the resources every frame depends on
@@ -69,7 +97,7 @@ internal static class FrameModelSplit
                     foreach (string resource in globalResources) global.WriteValue(resource);
                     global.WriteEndArray();
                 }
-                else if (!Copy(global, name)) return false;
+                else if (!CheckedCopy(global, name)) return false;
             }
             Expect(reader.TokenType, JsonToken.EndObject);
             global.WriteEndObject();
@@ -77,7 +105,8 @@ internal static class FrameModelSplit
             if (!rootFound || reader.Read()) throw new InvalidDataException("The model has no root timeline or extra content");
             global.Flush();
             nested.Flush();
-            parts = new(globalText.ToString(), nestedText.ToString(), [.. items]);
+            parts = new(globalText.ToString(), nestedText.ToString(), [.. items], [.. foreignItems], nestedForeign,
+                [.. foreignCharacters], audioForeign);
             return true;
         }
 
@@ -91,6 +120,7 @@ internal static class FrameModelSplit
             if (root && rootFound) throw new InvalidDataException("Two root timelines");
             rootFound |= root;
             var writer = root ? global : nested;
+            owner = root ? Owner.Global : Owner.Nested;
             writer.WriteStartObject();
             writer.WritePropertyName("ID");
             if (!Copy(writer, "ID")) return false;
@@ -104,19 +134,23 @@ internal static class FrameModelSplit
                     path.Add(name);
                     while (Next() != JsonToken.EndArray)
                     {
+                        (owner, ownerIndex) = (Owner.RootItem, items.Count);
+                        foreignItems.Add(false);
                         var text = new StringWriter();
                         using (var item = new JsonTextWriter(text))
                             if (!Copy(item, null)) return false;
                         items.Add(text.ToString());
                     }
+                    owner = Owner.Global;
                     path.RemoveAt(path.Count - 1);
                     continue;
                 }
                 writer.WritePropertyName(name);
-                if (!Copy(writer, name)) return false;
+                if (!CheckedCopy(writer, name)) return false;
             }
             Expect(reader.TokenType, JsonToken.EndObject);
             writer.WriteEndObject();
+            owner = Owner.Global;
             return true;
         }
 
@@ -135,12 +169,7 @@ internal static class FrameModelSplit
                             string property = (string)reader.Value!;
                             writer.WritePropertyName(property);
                             Next();
-                            if (property == "$type" && (reader.TokenType != JsonToken.String || !allowType((string)reader.Value!, path)))
-                            {
-                                Rejected = reader.Value?.ToString() ?? string.Empty;
-                                return false;
-                            }
-                            if (!Copy(writer, property)) return false;
+                            if (!CheckedCopy(writer, property)) return false;
                         }
                         Expect(reader.TokenType, JsonToken.EndObject);
                         writer.WriteEndObject();
@@ -160,6 +189,30 @@ internal static class FrameModelSplit
                 }
             }
             finally { if (name is not null) path.RemoveAt(path.Count - 1); }
+        }
+
+        // Copy, checking the value first when it is a "$type".
+        private bool CheckedCopy(JsonWriter writer, string name)
+        {
+            if (name == "$type" && !Attribute(reader.TokenType == JsonToken.String
+                ? classify((string)reader.Value!, path) : TypeUse.Foreign)) return false;
+            return Copy(writer, name);
+        }
+
+        // False when a foreign type belongs to no item, timeline or character (the model is rejected).
+        private bool Attribute(TypeUse use)
+        {
+            if (use == TypeUse.AudioOnly) audioForeign = true;
+            if (use != TypeUse.Foreign) return true;
+            switch (owner)
+            {
+                case Owner.RootItem: foreignItems[ownerIndex] = true; return true;
+                case Owner.Nested: nestedForeign = true; return true;
+                case Owner.Character: foreignCharacters.Add(ownerIndex); return true;
+                default:
+                    Rejected = reader.Value?.ToString() ?? string.Empty;
+                    return false;
+            }
         }
 
         private JsonToken Next() => reader.Read() ? reader.TokenType : throw new InvalidDataException("The model ended early");

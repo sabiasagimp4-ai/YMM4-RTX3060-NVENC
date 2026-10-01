@@ -127,7 +127,7 @@ internal sealed class KeyDependencyTracker : IDisposable
             var dependencies = frame is int at ? cachedFrames!.For(at) : null;
             if (!(dependencies ?? cachedFrames!.Whole).Cacheable)
             {
-                reason = "立ち絵（非同期の口パク）か、確認できない素材（未インストールのフォントや外部の場所のファイル）を使うアイテムが映るため、通常描画を使用します。";
+                reason = "立ち絵（非同期の口パク）、外部プラグインのコード（エフェクト・図形・アイテム・トランジション）、確認できない素材（DirectWrite にないフォントや外部の場所のファイル）のいずれかを使うアイテムが映るため、通常描画を使用します。";
                 return false;
             }
             string[] files = dependencies?.Files ?? cachedPaths;
@@ -392,6 +392,11 @@ internal sealed class KeyDependencyTracker : IDisposable
         var fileTypes = SettingsBase<YukkuriMovieMaker.Settings.FileSettings>.Default.FileExtensions;
         Subscribe(fileTypes);
         foreach (var extension in fileTypes) Subscribe(extension);
+        // Font names map to faces through these (FrameCacheKey.ResolveFont).
+        var fonts = SettingsBase<YukkuriMovieMaker.Settings.FontSettings>.Default;
+        Subscribe(fonts);
+        Subscribe(fonts.CustomFonts);
+        foreach (var font in fonts.CustomFonts) Subscribe(font);
         var timelines = scene.Scenes.Timelines.Append(scene.Timeline).Distinct().ToArray();
         foreach (var timeline in timelines)
         {

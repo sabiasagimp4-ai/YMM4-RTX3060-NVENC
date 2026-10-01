@@ -1,7 +1,10 @@
 using System.ComponentModel;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using SharpGen.Runtime;
+using Vortice.DirectWrite;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
@@ -34,7 +37,7 @@ internal static class FrameCacheKey
             reason = "描画キャッシュの状態検査を省略しました: " + ex.GetType().Name;
             return false;
         }
-        if (!frames!.Whole.Cacheable) return Bypass("立ち絵（非同期の口パク）か、確認できない素材を使うアイテムがあります。", out reason);
+        if (!frames!.Whole.Cacheable) return Bypass("立ち絵、外部プラグインのコード、確認できない素材のいずれかを使うアイテムがあります。", out reason);
         hasExternalDependencies = paths.Length != 0;
         if (hasExternalDependencies)
             return Bypass("外部素材は背景での内容確認が必要です。", out reason);
@@ -83,26 +86,69 @@ internal static class FrameCacheKey
             var paths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             var resources = new SortedSet<string>(StringComparer.Ordinal);
             var nestedPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            var nestedResources = new SortedSet<string>(StringComparer.Ordinal);
             var rootItems = scene.Timeline.Items.ToArray();
             var rootDependencies = new List<(SortedSet<string> Paths, SortedSet<string> Resources, bool Uncacheable)>(rootItems.Length);
-            bool nestedUncacheable = false;
+            bool nestedUncacheable = false, audioForeign = false;
+            if (sourceReaders.Length != 3) return Bypass("読み込みプラグインの状態を確認できません。", out reason);
+            // Files are read by the file source readers (fonts by DirectWrite). With a reader whose code was not
+            // read, the items that read files are rendered normally.
+            bool customReaders = sourceReaders.SelectMany(readers => readers).Any(type => !IsBuiltInSourceReader(type));
+
+            // Characters first: what in a character is a plugin's or cannot be resolved disables the items using it.
+            var characterPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            var characterResources = new SortedSet<string>(StringComparer.Ordinal);
+            var foreignCharacters = new HashSet<Character>();
+            foreach (var character in characters)
+            {
+                var ownPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+                var ownFonts = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+                try
+                {
+                    // A character's tachie settings only reach TachieSource, whose frames are never cached: their
+                    // files are not dependencies of any frame (the settings themselves stay in the key).
+                    var (shared, tachieOnly) = SplitCharacter<IFileItem>(character);
+                    var files = shared.SelectMany(part => part.GetFiles()).ToList();
+                    var tachieFiles = tachieOnly.SelectMany(part => part.GetFiles());
+                    // If YMM4 adds another kind of character file, all of them stay dependencies of every frame.
+                    if (!new HashSet<string>(character.GetFiles()).SetEquals(files.Concat(tachieFiles))) files = character.GetFiles().ToList();
+                    foreach (var file in files) AddPath(file, ownPaths);
+                    var (sharedResources, tachieResources) = SplitCharacter<IResourceItem>(character);
+                    foreach (var resource in sharedResources.SelectMany(part => part.GetResources()))
+                    {
+                        if (Note(ClassifyResource(resource.Key), ref audioForeign)) foreignCharacters.Add(character);
+                        AddResource(resource, ownPaths, characterResources, ownFonts);
+                    }
+                    foreach (var resource in tachieResources.SelectMany(part => part.GetResources())) AddResource(resource, Unused(), characterResources, null);
+                    if (customReaders && ownPaths.Any(path => !ownFonts.Contains(path))) foreignCharacters.Add(character);
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+                {
+                    foreignCharacters.Add(character); // e.g. a remote file
+                }
+                characterPaths.UnionWith(ownPaths);
+            }
+
             foreach (var timeline in timelines)
             {
                 bool root = ReferenceEquals(timeline, scene.Timeline);
                 foreach (var item in timeline.Items)
                 {
-                    if (item.GetType().Assembly != typeof(Scene).Assembly)
-                        return Bypass("外部アイテムの描画状態を検証できません: " + item.GetType().FullName, out reason);
-                    if (item is ShapeItem shape && !IsBuiltIn(shape.ShapeType2))
-                        return Bypass("外部図形プラグインの描画状態を検証できません。", out reason);
                     var itemPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+                    var itemFonts = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
                     var itemResources = new SortedSet<string>(StringComparer.Ordinal);
                     // A tachie's mouth follows a volume envelope computed asynchronously (TachieSource), so its frames
                     // are rendered normally. Faces and voices only reach tachie items drawn at the same frame
                     // (TimelineSource picks them per frame, 4.56.1.0), so other frames stay cacheable; in another
                     // timeline it disables the scene item frames that draw it. Its files are then never needed.
                     bool tachie = item is TachieItem;
-                    bool uncacheable = tachie;
+                    // Code this plugin did not read renders a plugin's item type, a plugin's shape, and (below) a
+                    // plugin's effect, brush or transition: only the frames showing such an item are rendered normally
+                    // (CompositeItemPicker draws an item only at its own frames; transitions and scene items are
+                    // followed by FrameDependencyIndex).
+                    bool uncacheable = tachie || item.GetType().Assembly != typeof(Scene).Assembly
+                        || item is ShapeItem shape && !IsBuiltIn(shape.ShapeType2)
+                        || GetCharacter(item) is { } character && foreignCharacters.Contains(character);
                     try
                     {
                         if (!tachie)
@@ -110,47 +156,32 @@ internal static class FrameCacheKey
                             foreach (var file in item.GetFiles()) AddPath(file, itemPaths);
                             if (item is VoiceItem voice && !string.IsNullOrWhiteSpace(voice.FilePath)) AddPath(voice.FilePath, itemPaths);
                         }
-                        foreach (var resource in item.GetResources()) AddResource(resource, tachie ? Unused() : itemPaths, itemResources);
+                        foreach (var resource in item.GetResources())
+                        {
+                            uncacheable |= Note(ClassifyResource(resource.Key), ref audioForeign);
+                            AddResource(resource, tachie ? Unused() : itemPaths, itemResources, itemFonts);
+                        }
                     }
-                    catch (NotSupportedException)
+                    catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
                     {
-                        // An uninstalled font or a remote file cannot be fingerprinted: only frames showing the item bypass.
+                        // An uninstalled font, a remote file, or a plugin item failing to list its files.
                         uncacheable = true;
                     }
+                    if (customReaders && itemPaths.Any(path => !itemFonts.Contains(path))) uncacheable = true;
                     paths.UnionWith(itemPaths);
                     resources.UnionWith(itemResources);
                     if (root) rootDependencies.Add((itemPaths, itemResources, uncacheable));
                     else
                     {
                         nestedPaths.UnionWith(itemPaths);
+                        nestedResources.UnionWith(itemResources);
                         nestedUncacheable |= uncacheable;
                     }
                 }
             }
             if (rootDependencies.Count != rootItems.Length) return Bypass("タイムラインの状態が検査中に変化しました。", out reason);
-            var characterPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-            var characterResources = new SortedSet<string>(StringComparer.Ordinal);
-            foreach (var character in characters)
-            {
-                // A character's tachie settings only reach TachieSource, whose frames are never cached: their files
-                // are not dependencies of any frame (the settings themselves stay in the key, in the character).
-                var (shared, tachieOnly) = SplitCharacter<IFileItem>(character);
-                var files = shared.SelectMany(part => part.GetFiles()).ToList();
-                var tachieFiles = tachieOnly.SelectMany(part => part.GetFiles());
-                // If YMM4 adds another kind of character file, all of them stay dependencies of every frame.
-                if (!new HashSet<string>(character.GetFiles()).SetEquals(files.Concat(tachieFiles))) files = character.GetFiles().ToList();
-                foreach (var file in files) AddPath(file, characterPaths);
-                var (sharedResources, tachieResources) = SplitCharacter<IResourceItem>(character);
-                foreach (var resource in sharedResources.SelectMany(part => part.GetResources())) AddResource(resource, characterPaths, characterResources);
-                foreach (var resource in tachieResources.SelectMany(part => part.GetResources())) AddResource(resource, Unused(), characterResources);
-            }
             paths.UnionWith(characterPaths);
             resources.UnionWith(characterResources);
-            if (resources.Any(IsExternalPluginResource))
-                return Bypass("外部エフェクト・プラグインの描画状態は通常描画を使用します。", out reason);
-            if (sourceReaders.Length != 3) return Bypass("読み込みプラグインの状態を確認できません。", out reason);
-            if (paths.Count != 0 && sourceReaders.SelectMany(readers => readers).Any(type => !IsBuiltInSourceReader(type)))
-                return Bypass("外部素材でカスタム読み込みプラグインが有効なため、通常描画を使用します。", out reason);
             var settings = SettingsBase<YMMSettings>.Default;
             var loaders = SettingsBase<PluginLoaderSettings>.Default;
             var snapshot = new
@@ -181,12 +212,26 @@ internal static class FrameCacheKey
             model = YukkuriMovieMaker.Json.Json.GetJsonText(snapshot);
             if (model.Length > MaximumModelCharacters)
                 return Bypass("プロジェクトの描画状態がキャッシュ検査の上限を超えています。", out reason);
-            // Runtime types in polymorphic parameters/effects must also belong to the inspected host (checked while
-            // the model is split; strings stay strings, so distinct texts never serialize to the same token).
-            if (!FrameModelSplit.TrySplit(model, scene.Timeline.ID, characterResources, IsKnownType, out var split, out string? rejected))
-                return Bypass("外部描画パラメーターを検証できません: " + rejected, out reason);
+            // Runtime types in polymorphic parameters and effects are checked while the model is split (strings stay
+            // strings, so distinct texts never serialize to the same token): a plugin's type disables the item,
+            // timeline or character holding it; elsewhere (project-wide settings) the whole project.
+            if (!FrameModelSplit.TrySplit(model, scene.Timeline.ID, characterResources, ClassifyType, out var split, out string? rejected))
+                return Bypass("プロジェクト全体の描画設定に外部プラグインの型があります: " + rejected, out reason);
+            if (split.ForeignItems.Length != rootItems.Length) throw new InvalidDataException("Serialized root items do not match the timeline");
+            for (int i = 0; i < rootItems.Length; i++)
+            {
+                bool foreignCharacter = GetCharacter(rootItems[i]) is { } character
+                    && split.ForeignCharacters.Any(index => ReferenceEquals(characters[index], character));
+                if (split.ForeignItems[i] || foreignCharacter)
+                    rootDependencies[i] = (rootDependencies[i].Paths, rootDependencies[i].Resources, true);
+            }
+            nestedUncacheable |= split.NestedForeign || timelines.Where(t => !ReferenceEquals(t, scene.Timeline)).SelectMany(t => t.Items)
+                .Any(item => GetCharacter(item) is { } character && split.ForeignCharacters.Any(index => ReferenceEquals(characters[index], character)));
             if (paths.Count > MaximumFiles) return Bypass("外部素材の数がキャッシュ検査の上限を超えています。", out reason);
-            frames = DescribeFrames(split, rootItems, rootDependencies, characterPaths, nestedPaths, nestedUncacheable);
+            // Wide frames (scene items, audio spectrum) read other timelines and the audio: a plugin's audio effect
+            // anywhere reaches them.
+            frames = DescribeFrames(split, rootItems, rootDependencies, characterPaths, nestedPaths, nestedResources,
+                nestedUncacheable || audioForeign || split.AudioForeign);
             dependencies = paths.ToArray();
             return true;
         }
@@ -197,24 +242,41 @@ internal static class FrameCacheKey
         }
     }
 
-    // Parameters of the tachie plugins YMM4 ships (loaded from its folder) only reach TachieSource, whose frames are
-    // rendered normally, so they do not disable the other frames. Elsewhere, or from a tachie plugin a user added,
-    // a foreign type still bypasses.
-    private static bool IsKnownType(string type, IReadOnlyList<string> path)
+    // A "$type" outside the host and plugin API is a plugin's code, except where no cached frame reads it: tachie
+    // parameters only reach TachieSource (tachie frames are never cached), and voice parameters only make the voice's
+    // audio, a fingerprinted file (no video renderer reads them: TimelineSource, JimakuSource, 4.56.1.0). Audio
+    // effects only reach frames that read audio.
+    private static FrameModelSplit.TypeUse ClassifyType(string type, IReadOnlyList<string> path)
     {
         string assembly = type.Split(',').Skip(1).FirstOrDefault()?.Trim() ?? string.Empty;
-        return assembly is "YukkuriMovieMaker" or "YukkuriMovieMaker.Plugin" || IsBundledTachieParameter(path, assembly);
+        if (assembly is "YukkuriMovieMaker" or "YukkuriMovieMaker.Plugin") return FrameModelSplit.TypeUse.Known;
+        if (path.Any(property => property == "VoiceParameter"
+            || property.StartsWith("Tachie", StringComparison.Ordinal) && property.EndsWith("Parameter", StringComparison.Ordinal)))
+            return FrameModelSplit.TypeUse.Known;
+        return path.Contains("AudioEffects") ? FrameModelSplit.TypeUse.AudioOnly : FrameModelSplit.TypeUse.Foreign;
     }
 
-    // `path`: the property names from the model's root to the object holding the "$type".
-    private static bool IsBundledTachieParameter(IReadOnlyList<string> path, string assemblyName)
+    // Resources naming a plugin's code: ve:// (video effect), ae:// (audio effect), plugin:// (shape, transition,
+    // brush, voice, tachie). Voice and tachie plugins draw nothing a cached frame shows (see ClassifyType).
+    private static FrameModelSplit.TypeUse ClassifyResource(string resource)
     {
-        if (!assemblyName.StartsWith("YukkuriMovieMaker.Plugin.Tachie.", StringComparison.Ordinal)
-            || !path.Any(property => property.StartsWith("Tachie", StringComparison.Ordinal) && property.EndsWith("Parameter", StringComparison.Ordinal)))
-            return false;
-        var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(loaded => loaded.GetName().Name == assemblyName);
-        return assembly is not null
-            && IsBundledPluginAssembly(assemblyName, assembly.Location, Path.GetDirectoryName(typeof(Scene).Assembly.Location));
+        int scheme = resource.IndexOf("://", StringComparison.Ordinal);
+        if (scheme < 0 || resource[..scheme] is not ("ve" or "ae" or "plugin")) return FrameModelSplit.TypeUse.Known;
+        string typeName = resource[(scheme + 3)..];
+        if (IsBuiltIn(typeof(Scene).Assembly.GetType(typeName) ?? typeof(CacheProvider).Assembly.GetType(typeName))) return FrameModelSplit.TypeUse.Known;
+        if (resource.StartsWith("ae://", StringComparison.Ordinal)) return FrameModelSplit.TypeUse.AudioOnly;
+        if (resource.StartsWith("plugin://", StringComparison.Ordinal)
+            && PluginLoader.UserPlugins.FirstOrDefault(plugin => plugin.GetType().FullName == typeName)
+                is YukkuriMovieMaker.Plugin.Voice.IVoicePlugin or YukkuriMovieMaker.Plugin.Tachie.ITachiePlugin)
+            return FrameModelSplit.TypeUse.Known;
+        return FrameModelSplit.TypeUse.Foreign;
+    }
+
+    // True for Foreign; records AudioOnly.
+    private static bool Note(FrameModelSplit.TypeUse use, ref bool audioForeign)
+    {
+        audioForeign |= use == FrameModelSplit.TypeUse.AudioOnly;
+        return use == FrameModelSplit.TypeUse.Foreign;
     }
 
     // Character.GetFiles/GetResources in 4.56.1.0: subtitle and audio effects, and the tachie effects and parameters.
@@ -232,9 +294,9 @@ internal static class FrameCacheKey
     // other timelines (only read by frames with a scene item), and one hash per root timeline item.
     private static FrameDependencyIndex DescribeFrames(FrameModelSplit.Parts split, IItem[] rootItems,
         List<(SortedSet<string> Paths, SortedSet<string> Resources, bool Uncacheable)> rootDependencies,
-        SortedSet<string> characterPaths, SortedSet<string> nestedPaths, bool nestedUncacheable)
+        SortedSet<string> characterPaths, SortedSet<string> nestedPaths, SortedSet<string> nestedResources, bool nestedUncacheable)
     {
-        var (global, nested, texts) = split;
+        var (global, nested, texts) = (split.Global, split.Nested, split.RootItems);
         if (texts.Length != rootItems.Length) throw new InvalidDataException("Serialized root items do not match the timeline");
         var entries = new FrameDependencyIndex.Entry[rootItems.Length];
         for (int i = 0; i < rootItems.Length; i++)
@@ -248,7 +310,7 @@ internal static class FrameCacheKey
                 rootDependencies[i].Paths.ToArray(), rootDependencies[i].Uncacheable);
         }
         return new FrameDependencyIndex(FrameDependencyIndex.Hash(global), characterPaths,
-            FrameDependencyIndex.Hash(nested), nestedPaths, entries, nestedUncacheable);
+            FrameDependencyIndex.Hash(nested + "\n" + string.Join("\n", nestedResources)), nestedPaths, entries, nestedUncacheable);
     }
 
     internal static Character? GetCharacter(IItem item) => item switch
@@ -314,13 +376,6 @@ internal static class FrameCacheKey
         .Select(type => $"{type.FullName}|{type.Assembly.GetName().Name}|{type.Assembly.ManifestModule.ModuleVersionId:D}")
         .ToArray();
 
-    private static bool IsExternalPluginResource(string resource)
-    {
-        if (!(resource.StartsWith("ve://", StringComparison.Ordinal) || resource.StartsWith("ae://", StringComparison.Ordinal) || resource.StartsWith("plugin://", StringComparison.Ordinal))) return false;
-        string typeName = resource[(resource.IndexOf("://", StringComparison.Ordinal) + 3)..];
-        return !IsBuiltIn(typeof(Scene).Assembly.GetType(typeName) ?? typeof(CacheProvider).Assembly.GetType(typeName));
-    }
-
     internal static string FromFingerprints(string model, IReadOnlyDictionary<string, FileFingerprint> fingerprints)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -344,42 +399,100 @@ internal static class FrameCacheKey
         paths.Add(Path.GetFullPath(value));
     }
 
-    private static void AddResource(TimelineResource resource, ISet<string> paths, ISet<string> resources)
+    // `fonts`: the files of fonts are also added there (they are read by DirectWrite, not by a source reader).
+    private static void AddResource(TimelineResource resource, ISet<string> paths, ISet<string> resources, ISet<string>? fonts)
     {
         resources.Add(resource.Key);
         if (Uri.TryCreate(resource.Key, UriKind.Absolute, out var uri) && uri.IsFile)
             AddPath(uri.LocalPath, paths);
         else if (resource.ResourceType == TimelineResourceType.Font)
         {
-            // Font family names alone do not identify installed font content: the files are dependencies.
-            foreach (string file in FontFiles(resource.Key["font://".Length..])) AddPath(file, paths);
+            var (face, files) = ResolveFont(resource.Key["font://".Length..]);
+            resources.Add(face);
+            foreach (string file in files)
+            {
+                AddPath(file, paths);
+                fonts?.Add(Path.GetFullPath(file));
+            }
         }
         else if (resource.ResourceType is TimelineResourceType.Video or TimelineResourceType.Image or TimelineResourceType.Audio or TimelineResourceType.CustomVoice or TimelineResourceType.Tachie)
             AddPath(resource.Key, paths);
     }
 
-    // WPF resolves a family's typefaces again on every call, for each text and voice item of every description. The
-    // files only change when fonts are installed or removed, so they are kept for a short time; a font file whose
-    // content changes is still caught by its fingerprint.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string[]? Files, long Until)> fontFiles = new(StringComparer.Ordinal);
-    private const long FontFilesMilliseconds = 30_000;
+    // YMM4 draws a font name through its font settings (TextFormatDescription, TextSource, JimakuSource, 4.56.1.0):
+    // the first of SystemFonts then CustomFonts with that name, else Arial, gives a family, weight, style and stretch
+    // that DirectWrite finds in the system font collection (bold and italic pick other faces of the family). The
+    // mapping goes into the key and the family's files are dependencies. A family DirectWrite does not have would be
+    // drawn by font fallback, which is not followed: the item is rendered normally.
+    internal static (string Face, string[] Files) ResolveFont(string name)
+    {
+        var settings = SettingsBase<FontSettings>.Default;
+        var font = settings.SystemFonts.Concat(settings.CustomFonts).FirstOrDefault(f => f.FontName == name) ?? new Font();
+        string family = font.CanonicalFontName ?? string.Empty;
+        string face = $"fontface://{name}\n{family}|{(int)font.CanonicalFontWeight}|{(int)font.CanonicalFontStyle}|{(int)font.CanonicalFontStretch}";
+        return (face, FamilyFiles(family));
+    }
 
-    private static string[] FontFiles(string family)
+    // The files only change when fonts are installed or removed, so a family's are kept for a short time; a font
+    // file whose content changes is still caught by its fingerprint.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string[]? Files, long Until)> familyFiles = new(StringComparer.Ordinal);
+    private const long FamilyFilesMilliseconds = 30_000;
+
+    private static string[] FamilyFiles(string family)
     {
         long now = Environment.TickCount64;
-        if (!fontFiles.TryGetValue(family, out var known) || now >= known.Until)
+        if (!familyFiles.TryGetValue(family, out var known) || now >= known.Until)
         {
-            var files = new List<string>();
-            foreach (var typeface in new System.Windows.Media.FontFamily(family).GetTypefaces())
-            {
-                if (!typeface.TryGetGlyphTypeface(out var glyph) || !glyph.FontUri.IsFile) { files = null; break; }
-                files.Add(glyph.FontUri.LocalPath);
-            }
-            known = (files?.ToArray(), now + FontFilesMilliseconds);
-            if (fontFiles.Count > 4096) fontFiles.Clear();
-            fontFiles[family] = known;
+            known = (FindFamilyFiles(family), now + FamilyFilesMilliseconds);
+            if (familyFiles.Count > 4096) familyFiles.Clear();
+            familyFiles[family] = known;
         }
         return known.Files ?? throw new NotSupportedException("Unresolved font");
+    }
+
+    // Null when the family is not in the system collection or a file of it is not local.
+    private static string[]? FindFamilyFiles(string family)
+    {
+        using var factory = DWrite.DWriteCreateFactory<IDWriteFactory>();
+        using var collection = factory.GetSystemFontCollection(false);
+        if (!collection.FindFamilyName(family, out int index)) return null;
+        using var fonts = collection.GetFontFamily(index);
+        var files = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < fonts.FontCount; i++)
+        {
+            using var font = fonts.GetFont(i);
+            using var face = font.CreateFontFace();
+            foreach (var file in face.GetFiles())
+                using (file)
+                {
+                    string? path = LocalPath(file);
+                    if (path is null) return null;
+                    files.Add(path);
+                }
+        }
+        return files.Count == 0 ? null : [.. files];
+    }
+
+    private static string? LocalPath(IDWriteFontFile file)
+    {
+        using var loader = file.Loader as ComObject;
+        using var local = loader?.QueryInterfaceOrNull<IDWriteLocalFontFileLoader>();
+        if (local is null) return null;
+        byte[] key = file.GetReferenceKey().ToArray();
+        nint keyMemory = Marshal.AllocHGlobal(Math.Max(1, key.Length));
+        try
+        {
+            Marshal.Copy(key, 0, keyMemory, key.Length);
+            int length = local.GetFilePathLengthFromKey(keyMemory, key.Length) + 1;
+            nint pathMemory = Marshal.AllocHGlobal(length * sizeof(char));
+            try
+            {
+                local.GetFilePathFromKey(keyMemory, key.Length, pathMemory, length);
+                return Marshal.PtrToStringUni(pathMemory);
+            }
+            finally { Marshal.FreeHGlobal(pathMemory); }
+        }
+        finally { Marshal.FreeHGlobal(keyMemory); }
     }
 
     private static void Append(IncrementalHash hash, string value)

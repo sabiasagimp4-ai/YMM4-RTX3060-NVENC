@@ -71,7 +71,7 @@ internal static class Program
         timeline.VideoInfo.Width--;
         Check(Key(scene) == empty, "Restored model failed to reuse key");
 
-        // A font every Windows has: the key fingerprints the font files, and an uninstalled one bypasses.
+        // A font every Windows has: the key fingerprints the font files.
         var text = new TextItem { Text = "Cache key", Font = "Arial" };
         timeline.Items = timeline.Items.Add(text);
         string textKey = WaitForKey(tracker);
@@ -133,8 +133,12 @@ internal static class Program
             Type[][] builtInReader = [[typeof(Scene)], [], []];
             Check(FrameCacheKey.TryDescribe(scene, builtInReader, out string readerModel, out _, out string readerReason), readerReason);
             Check(readerModel.Contains(typeof(Scene).Assembly.ManifestModule.ModuleVersionId.ToString("D"), StringComparison.Ordinal), "Built-in reader MVID missing from the key model");
-            Check(!FrameCacheKey.TryDescribe(scene, [[typeof(Program)], [], []], out _, out _, out readerReason)
-                && readerReason.Contains("カスタム読み込み", StringComparison.Ordinal), "External media with a custom source reader did not bypass");
+            // A reader whose code was not read: the frames showing a file render normally, the others stay cached.
+            Check(FrameCacheKey.TryDescribe(scene, [[typeof(Program)], [], []], out _, out _, out var customFrames, out readerReason), readerReason);
+            Check(!customFrames!.For(image.Frame).Cacheable, "External media with a custom source reader did not bypass");
+            Check(customFrames.For(image.Frame + image.Length + 10).Cacheable, "A custom source reader disabled frames without files");
+            Check(FrameCacheKey.TryDescribe(scene, builtInReader, out _, out _, out var builtInFrames, out readerReason)
+                && builtInFrames!.For(image.Frame).Cacheable, "External media with a built-in reader bypassed: " + readerReason);
             Check(!tracker.TryGetKey(out _, out _), "Cold external assets did not bypass while hashing");
             string fileKey = WaitForKey(tracker);
             // The idle pre-renderer's clone: seeded with the verified files, it has the same key at once.
@@ -457,6 +461,53 @@ internal static class Program
         Check(WaitForFrameKey(tracker, 10) == at10, "A tachie elsewhere disabled or changed unrelated frames");
         timeline.Items = timeline.Items.Remove(tachie);
 
+        // Code this plugin did not read (a plugin's effect, item type, or a bundled Community effect, all foreign to
+        // the host assemblies): only the frames showing that item render normally.
+        var foreignEffect = new ShapeItem { Frame = 300, Length = 10, Layer = 4 };
+        foreignEffect.VideoEffects = foreignEffect.VideoEffects.Add(new ForeignBlurEffect());
+        timeline.Items = timeline.Items.Add(foreignEffect);
+        WaitForFrameKey(tracker, 10);
+        Check(!tracker.TryCapture(305, out _, out _), "A frame showing a plugin's effect was cached");
+        Check(WaitForFrameKey(tracker, 10) == at10, "A plugin's effect elsewhere disabled or changed unrelated frames");
+        timeline.Items = timeline.Items.Remove(foreignEffect);
+        var foreignItem = new ForeignShapeItem { Frame = 300, Length = 10, Layer = 4 };
+        timeline.Items = timeline.Items.Add(foreignItem);
+        WaitForFrameKey(tracker, 10);
+        Check(!tracker.TryCapture(305, out _, out _), "A frame showing a plugin's item was cached");
+        Check(WaitForFrameKey(tracker, 10) == at10, "A plugin's item elsewhere disabled or changed unrelated frames");
+        timeline.Items = timeline.Items.Remove(foreignItem);
+        Check(WaitForFrameKey(tracker, 305) is { Length: > 0 }, "The frame did not become cacheable again after the plugin's item was removed");
+
+        // Fonts are resolved as YMM4 draws them (FrameCacheKey.ResolveFont): an unknown name is drawn in Arial, so it
+        // is cached like Arial; a font settings entry maps a name to a face, and changing it changes the frames'
+        // keys; a family DirectWrite does not have disables only the frames showing it.
+        var arial = FrameCacheKey.ResolveFont("Arial");
+        Check(arial.Files.Any(file => Path.GetFileName(file).StartsWith("arial", StringComparison.OrdinalIgnoreCase)),
+            "Arial did not resolve to its files: " + string.Join(", ", arial.Files));
+        var unknownFont = FrameCacheKey.ResolveFont("ymm-cache-no-such-font");
+        Check(unknownFont.Face.EndsWith("\nArial|400|0|5", StringComparison.Ordinal), "An unknown font name was not drawn as Arial: " + unknownFont.Face);
+        var fontText = new TextItem { Frame = 300, Length = 10, Layer = 4, Text = "font", Font = "ymm-cache-alias" };
+        timeline.Items = timeline.Items.Add(fontText);
+        string unknownFrame = WaitForFrameKey(tracker, 305);
+        Check(WaitForFrameKey(tracker, 10) == at10, "A text item elsewhere changed unrelated frames");
+        var fontSettings = YukkuriMovieMaker.Plugin.SettingsBase<YukkuriMovieMaker.Settings.FontSettings>.Default;
+        var alias = new YukkuriMovieMaker.Settings.Font { FontName = "ymm-cache-alias", CanonicalFontName = "Arial", CanonicalFontWeight = YukkuriMovieMaker.Settings.FontWeight.Bold };
+        fontSettings.CustomFonts.Add(alias);
+        try
+        {
+            string boldFrame = WaitForFrameKey(tracker, 305);
+            Check(boldFrame != unknownFrame, "Mapping a font name to another face did not change its frames");
+            alias.CanonicalFontWeight = YukkuriMovieMaker.Settings.FontWeight.Normal;
+            Check(WaitForFrameKey(tracker, 305) != boldFrame, "Editing a font settings entry did not change its frames");
+            alias.CanonicalFontName = "ymm-cache-no-such-family";
+            WaitForFrameKey(tracker, 10);
+            Check(!tracker.TryCapture(305, out _, out _), "A frame drawn with a family DirectWrite does not have was cached");
+            Check(WaitForFrameKey(tracker, 10) == at10, "An unresolvable font elsewhere disabled or changed unrelated frames");
+        }
+        finally { fontSettings.CustomFonts.Remove(alias); }
+        Check(WaitForFrameKey(tracker, 305) == unknownFrame, "Removing the font settings entry did not restore the frames");
+        timeline.Items = timeline.Items.Remove(fontText);
+
         var scene = new SceneItem { Frame = 200, Length = 10, Layer = 3 };
         timeline.Items = timeline.Items.Add(scene);
         string sceneFrame = WaitForFrameKey(tracker, 205);
@@ -473,10 +524,22 @@ internal static class Program
         Check(!tracker.TryCapture(205, out _, out _), "A scene item frame drawing a tachie was cached");
         Check(WaitForFrameKey(tracker, 10) == at10, "A tachie in another timeline disabled ordinary frames");
         nested.Items = nested.Items.Remove(nestedTachie);
+        // So does a plugin's effect there.
+        var nestedForeign = new ShapeItem { Frame = 0, Length = 10 };
+        nestedForeign.VideoEffects = nestedForeign.VideoEffects.Add(new ForeignBlurEffect());
+        nested.Items = nested.Items.Add(nestedForeign);
+        WaitForFrameKey(tracker, 10);
+        Check(!tracker.TryCapture(205, out _, out _), "A scene item frame drawing a plugin's effect was cached");
+        Check(WaitForFrameKey(tracker, 10) == at10, "A plugin's effect in another timeline disabled ordinary frames");
+        nested.Items = nested.Items.Remove(nestedForeign);
         timeline.Items = timeline.Items.Remove(scene).Remove(early).Remove(late);
         Console.WriteLine("Per-frame keys: unrelated frames survive edits, boundaries, settings, per-frame files, scene items OK");
     }
     private static bool SkipLoader() => false;
+
+    // Stand-ins for a plugin's code: types outside the host assemblies.
+    private sealed class ForeignBlurEffect : YukkuriMovieMaker.Project.Effects.GaussianBlurEffect { }
+    private sealed class ForeignShapeItem : ShapeItem { }
     // Readers in the plugin assemblies YMM4 ships (its folder) are built in, so a project with a file or a font
     // stays cacheable; the same assembly names from user\plugin, or other names in YMM4's folder, are not.
     // A character whose tachie comes from a plugin YMM4 ships: its parameter types (foreign to the host assemblies)
