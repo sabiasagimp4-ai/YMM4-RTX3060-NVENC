@@ -143,6 +143,12 @@ internal static class HostIntegration
 
     private static string HostVersion(Assembly host) => host.GetName().Version?.ToString() ?? "?";
 
+    // Where TryMatchReadBuild keeps its verdict (probes point it elsewhere).
+    internal static string VerdictFile { get; set; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YMM4-RTX3060-NVENC", "host-contracts.json");
+
+    internal static string PluginIdentity => typeof(HostIntegration).Assembly.ManifestModule.ModuleVersionId.ToString("N");
+
     internal static HostFeatures FeaturesFrom(HostContracts.Evaluation evaluation) => new(evaluation.Baseline ?? "?",
         evaluation.Has(HostContracts.Preview),
         evaluation.Has(HostContracts.SelectionRects),
@@ -164,10 +170,7 @@ internal static class HostIntegration
                 detail = "読み込まれた YukkuriMovieMaker.dll がフォルダーのファイルと異なります。";
                 return false;
             }
-            string cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "YMM4-RTX3060-NVENC", "host-contracts.json");
-            var evaluation = HostContracts.EvaluateCached(directory, cache,
-                typeof(HostIntegration).Assembly.ManifestModule.ModuleVersionId.ToString("N"));
+            var evaluation = HostContracts.EvaluateCached(directory, VerdictFile, PluginIdentity);
             if (evaluation.Baseline is null)
             {
                 detail = "キャッシュが前提とする本体のコードが、検証済みの版と異なります"

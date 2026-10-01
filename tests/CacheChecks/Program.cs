@@ -150,6 +150,7 @@ internal static class Program
         }
 
         CheckFrameKeys(timeline, nested, tracker);
+        MeasureCaptureCost();
 
         timeline.Items = timeline.Items.Add(new TachieItem());
         Check(!FrameCacheKey.TryCreate(scene, out _, out string reason) && reason.Contains("非同期"), "Transient lip-sync was cached");
@@ -157,6 +158,47 @@ internal static class Program
         Check(!tracker.ValidateRevision(tracker.CaptureRevision()) && !tracker.TryGetKey(out _, out _), "Disposed tracker remained usable");
         Console.WriteLine("Cache drawing keys and tracker: empty/text/shape, seek/selection, edit/restore/undo/redo, nested scene, parent context, same-metadata file replacement, missing input, transient lip-sync bypass, revision capture/validation and disposal OK");
         return 0;
+    }
+
+    // What per-frame keys save on every cached frame: a frame verifies only its own files (FileDependencyLease),
+    // not every file of the project. 200 image items with one file each, one item per 10 frames.
+    private static void MeasureCaptureCost()
+    {
+        const int count = 200;
+        var timeline = new Timeline();
+        var scenes = new Scenes(false);
+        scenes.AddScene(timeline);
+        var scene = new Scene(timeline, scenes, []);
+        string folder = Path.Combine(Path.GetTempPath(), "ymm-capture-cost-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var items = Enumerable.Range(0, count).Select(i =>
+            {
+                string file = Path.Combine(folder, $"image{i:000}.png");
+                File.WriteAllBytes(file, BitConverter.GetBytes(i));
+                return (IItem)new ImageItem { FilePath = file, Frame = i * 10, Length = 10, Layer = 1 };
+            });
+            timeline.Items = timeline.Items.AddRange(items);
+            using var tracker = new KeyDependencyTracker(scene);
+            WaitForKey(tracker);
+            for (int i = 0; i < count; i += 20) WaitForFrameKey(tracker, i * 10 + 5);
+            double Average(Func<int, (bool, KeyCapture?)> capture)
+            {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                for (int i = 0; i < 20; i++)
+                {
+                    var (ok, held) = capture(i);
+                    Check(ok, "Capture failed while measuring");
+                    held!.Dispose();
+                }
+                return clock.Elapsed.TotalMilliseconds / 20;
+            }
+            double whole = Average(_ => (tracker.TryCapture(out KeyCapture? held, out string _), held));
+            double frame = Average(i => (tracker.TryCapture((i * 10 % count) * 10 + 5, out KeyCapture? held, out string _), held));
+            Console.WriteLine($"Key capture with {count} files in the project: whole project {whole:F2} ms/frame, per frame (1 file) {frame:F2} ms/frame (20 samples; no threshold)");
+        }
+        finally { Directory.Delete(folder, recursive: true); }
     }
 
     private static string Key(Scene scene)

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Reflection;
 using HarmonyLib;
 using NVEncVideoWriterPlugin;
@@ -39,35 +40,36 @@ internal static class HostIntegrationChecks
             .Single(m => m.Name == "Update" && m.GetParameters().Length == 2);
         bool Hooked(MethodBase method, string owner) => Harmony.GetPatchInfo(method)?.Owners.Contains(owner) == true;
 
-        var harmony = new Harmony("ymm.tests.integration");
-        harmony.Patch(AccessTools.Method(typeof(HostContracts), nameof(HostContracts.EvaluateCached)),
-            prefix: new HarmonyMethod(typeof(HostIntegrationChecks), nameof(Mismatch)));
+        // A verdict file saying the code differs, for exactly these host binaries and this plugin build.
+        string directory = Path.GetDirectoryName(Path.GetFullPath(host.Location))!;
+        string verdicts = Path.Combine(Path.GetTempPath(), "ymm-host-verdict-" + Guid.NewGuid().ToString("N") + ".json");
+        string saved = HostIntegration.VerdictFile;
+        HostIntegration.VerdictFile = verdicts;
         try
         {
+            HostContracts.SaveVerdict(verdicts, HostContracts.VerdictKey(directory, HostIntegration.PluginIdentity),
+                new(null, new HashSet<string>(), new SortedDictionary<string, string> { [HostContracts.Core] = "変更 YukkuriMovieMaker.Player.Video.TimelineSource" }));
             Check(HostIntegration.Install(host, verified: false, version: string.Empty), HostIntegration.Status);
             Check(!HostIntegration.CacheAvailable && HostIntegration.Status.Contains("未確認の版", StringComparison.Ordinal)
                 && HostIntegration.Status.Contains("TimelineSource", StringComparison.Ordinal), HostIntegration.Status);
             Check(Hooked(export, HostIntegration.PatchId), "An unread build did not get the export hook");
             Check(!Hooked(update, HostIntegration.PatchId + ".cache"), "An unread build with other code got the cache");
+            File.Delete(verdicts);
+            Console.WriteLine("Host integration: a build whose code differs from the read builds keeps the protected export, without the cache");
+
+            Check(HostIntegration.Install(host, verified: false, version: string.Empty), HostIntegration.Status);
+            Check(HostIntegration.CacheAvailable && HostIntegration.Status.Contains("4.56.1.0 と同じ", StringComparison.Ordinal), HostIntegration.Status);
+            Check(HostFeatures.For(host) is { Basis: "4.56.1.0", Preview: true, SelectionRects: true, WrappedSources: true, RulerBars: true },
+                "Decided features: " + HostFeatures.For(host));
+            Check(Hooked(export, HostIntegration.PatchId) && Hooked(update, HostIntegration.PatchId + ".cache"), "The matched build did not get both hooks");
+            Check(File.Exists(verdicts), "The verdict was not kept for the next start");
+            Console.WriteLine("Host integration: a build whose code matches 4.56.1.0 gets the cache: " + HostIntegration.Status);
         }
-        finally { harmony.UnpatchAll(harmony.Id); }
-        Console.WriteLine("Host integration: a build whose code differs from the read builds keeps the protected export, without the cache");
-
-        Check(HostIntegration.Install(host, verified: false, version: string.Empty), HostIntegration.Status);
-        Check(HostIntegration.CacheAvailable && HostIntegration.Status.Contains("4.56.1.0 と同じ", StringComparison.Ordinal), HostIntegration.Status);
-        Check(HostFeatures.For(host) is { Basis: "4.56.1.0", Preview: true, SelectionRects: true, WrappedSources: true, RulerBars: true },
-            "Decided features: " + HostFeatures.For(host));
-        Check(Hooked(export, HostIntegration.PatchId) && Hooked(update, HostIntegration.PatchId + ".cache"), "The matched build did not get both hooks");
-        Console.WriteLine("Host integration: a build whose code matches 4.56.1.0 gets the cache: " + HostIntegration.Status);
-    }
-
-    private static bool Mismatch(ref HostContracts.Evaluation __result)
-    {
-        __result = new(null, new HashSet<string>(), new SortedDictionary<string, string>
+        finally
         {
-            [HostContracts.Core] = "変更 YukkuriMovieMaker.Player.Video.TimelineSource",
-        });
-        return false;
+            HostIntegration.VerdictFile = saved;
+            File.Delete(verdicts);
+        }
     }
 
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }

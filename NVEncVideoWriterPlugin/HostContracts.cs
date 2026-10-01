@@ -251,8 +251,7 @@ internal static partial class HostContracts
     // Evaluate(Describe(hostDirectory)), remembered in cacheFile for the same host binaries and plugin build.
     internal static Evaluation EvaluateCached(string hostDirectory, string cacheFile, string pluginIdentity)
     {
-        string key = pluginIdentity + ";" + string.Join(";", Directory.GetFiles(hostDirectory, "YukkuriMovieMaker*.dll")
-            .Order(StringComparer.OrdinalIgnoreCase).Select(path => $"{Path.GetFileName(path)}={Identity(path)}"));
+        string key = VerdictKey(hostDirectory, pluginIdentity);
         try
         {
             if (File.Exists(cacheFile) && JsonSerializer.Deserialize<CachedVerdict>(File.ReadAllText(cacheFile)) is { } cached && cached.Key == key)
@@ -261,6 +260,25 @@ internal static partial class HostContracts
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or NotSupportedException) { }
         var evaluation = Evaluate(Describe(hostDirectory));
+        SaveVerdict(cacheFile, key, evaluation);
+        return evaluation;
+    }
+
+    // The host binaries (every YukkuriMovieMaker*.dll of the folder) and the plugin build a verdict belongs to.
+    internal static string VerdictKey(string hostDirectory, string pluginIdentity)
+    {
+        return pluginIdentity + ";" + string.Join(";", Directory.GetFiles(hostDirectory, "YukkuriMovieMaker*.dll")
+            .Order(StringComparer.OrdinalIgnoreCase).Select(path => $"{Path.GetFileName(path)}={Identity(path)}"));
+
+        static string Identity(string path)
+        {
+            try { return HostFingerprint.ReadMvid(path).ToString("N"); }
+            catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException) { return "native:" + new FileInfo(path).Length; }
+        }
+    }
+
+    internal static void SaveVerdict(string cacheFile, string key, Evaluation evaluation)
+    {
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(cacheFile)!);
@@ -270,13 +288,6 @@ internal static partial class HostContracts
             File.Move(temporary, cacheFile, true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-        return evaluation;
-
-        static string Identity(string path)
-        {
-            try { return HostFingerprint.ReadMvid(path).ToString("N"); }
-            catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException) { return "native:" + new FileInfo(path).Length; }
-        }
     }
 
     // Null when equal; otherwise the first few differences, by type name.
