@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -27,6 +28,13 @@ internal static class IdleFramePreRenderer
     private static int enabled;
     private static string status = "アイドル時の先読みは無効です。";
     private static bool inputSubscribed;
+    // Every batch runs on one worker thread, which creates, uses and disposes the batches' renderer (BatchRenderer).
+    // The renderer is kept from batch to batch and released once no batch has come for RendererIdleTime.
+    private static readonly BlockingCollection<Action> work = new();
+    private static Thread? worker;
+    private static readonly TimeSpan RendererIdleTime = TimeSpan.FromSeconds(2);
+    private static BatchRenderer? renderer; // worker thread only
+    private static Session? rendererSession; // worker thread only
 
     internal static bool Enabled
     {
@@ -68,6 +76,7 @@ internal static class IdleFramePreRenderer
         {
             CancelActiveJob();
             if (timer?.IsEnabled == true) timer.Stop();
+            if (Volatile.Read(ref worker) is not null) Post(DropRenderer);
             UnsubscribeInput();
             SetStatus("アイドル時の先読みは無効です。");
             return;
@@ -210,8 +219,7 @@ internal static class IdleFramePreRenderer
         {
             if (!ReferenceEquals(session, current) || activeJob is not null) return;
             activeJob = job;
-            _ = Task.Factory.StartNew(() => RenderBatch(current, job, viewport, frame, start, end),
-                CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            Post(() => RenderBatch(current, job, viewport, frame, start, end));
         }
         SetStatus($"停止中キャッシュを進めています（{start:N0} / {length:N0} フレーム）。");
     }
@@ -247,11 +255,10 @@ internal static class IdleFramePreRenderer
             using (initial)
             {
                 if (!initial!.Validate() || !CanContinue(current, job.Token, anchorFrame)) return;
-                var snapshot = YukkuriMovieMaker.Json.Json.LoadFromText<ModelSnapshot>(initial.Model)
-                    ?? throw new InvalidDataException("描画状態を読み込めませんでした。");
-                var cloneScene = CloneScene(snapshot);
-                using var cloneTracker = new KeyDependencyTracker(cloneScene, current.Tracker.VerifiedFingerprints);
-                using var source = CreateBatchSource(cloneScene);
+                var batch = RendererFor(current, initial.Model);
+                var cloneScene = batch.CloneScene;
+                var cloneTracker = batch.CloneTracker;
+                var source = batch.Source;
 
                 for (long ordinal = first; ordinal <= endOrdinal; ordinal++)
                 {
@@ -304,6 +311,7 @@ internal static class IdleFramePreRenderer
         catch (OperationCanceledException) { }
         catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
         {
+            DropRenderer(); // its state after the failure is unknown
             SetStatus("先読みをスキップしました: " + error.GetBaseException().Message);
         }
         finally
@@ -331,6 +339,85 @@ internal static class IdleFramePreRenderer
         try { TimelineFrameCache.ExcludeFromPreviewCache(source); }
         catch { ((IDisposable)source).Dispose(); throw; }
         return source;
+    }
+
+    // A clone of the live model with its own tracker and renderer (CreateBatchSource), for idle batches of that model.
+    internal sealed class BatchRenderer : IDisposable
+    {
+        internal BatchRenderer(KeyDependencyTracker liveTracker, string model)
+        {
+            Model = model;
+            Fingerprints = liveTracker.VerifiedFingerprints;
+            CloneScene = CloneSceneFromModel(model);
+            CloneTracker = new KeyDependencyTracker(CloneScene, Fingerprints);
+            try { Source = CreateBatchSource(CloneScene); }
+            catch { CloneTracker.Dispose(); throw; }
+        }
+        internal string Model { get; }
+        // The live tracker's verified fingerprints the clone compares its files with (replaced, never changed, when
+        // the live tracker verifies files again).
+        internal IReadOnlyDictionary<string, FileFingerprint>? Fingerprints { get; }
+        internal Scene CloneScene { get; }
+        internal KeyDependencyTracker CloneTracker { get; }
+        internal TimelineSourceAndDevices Source { get; }
+        public void Dispose()
+        {
+            try { ((IDisposable)Source).Dispose(); }
+            finally { CloneTracker.Dispose(); }
+        }
+    }
+
+    // Worker thread: the last batch's renderer when it renders the same model for the same session with the same
+    // verified files, else a new one. The model is the whole drawing state, so an equal model is an equal clone;
+    // PrimeFrame still compares the live and clone keys of every frame.
+    internal static bool Reusable(BatchRenderer? kept, KeyDependencyTracker liveTracker, string model) =>
+        kept is not null && kept.Model == model && ReferenceEquals(kept.Fingerprints, liveTracker.VerifiedFingerprints);
+
+    private static BatchRenderer RendererFor(Session current, string model)
+    {
+        if (renderer is { } kept && ReferenceEquals(rendererSession, current) && Reusable(kept, current.Tracker, model)) return kept;
+        DropRenderer();
+        renderer = new BatchRenderer(current.Tracker, model);
+        rendererSession = current;
+        return renderer;
+    }
+
+    // Worker thread.
+    private static void DropRenderer()
+    {
+        var dropped = renderer;
+        renderer = null;
+        rendererSession = null;
+        try { dropped?.Dispose(); }
+        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException) { }
+    }
+
+    private static void Post(Action action)
+    {
+        lock (gate)
+        {
+            if (worker is null)
+            {
+                var thread = new Thread(WorkerLoop) { IsBackground = true, Name = "YMM4-RTX3060-NVENC idle pre-render" };
+                thread.Start();
+                Volatile.Write(ref worker, thread);
+            }
+        }
+        work.Add(action);
+    }
+
+    private static void WorkerLoop()
+    {
+        while (true)
+        {
+            if (!work.TryTake(out var action, RendererIdleTime))
+            {
+                DropRenderer(); // a pause in the work: give the renderer's GPU memory back
+                continue;
+            }
+            try { action(); }
+            catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException) { }
+        }
     }
 
     // One frame of a batch: the live and clone keys must agree; a frame already stored (in RAM, or on disk where the

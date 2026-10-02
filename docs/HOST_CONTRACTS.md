@@ -36,10 +36,11 @@ Harmony 2.4.2は一部の例外フィルター付きmethodを作り直せない�
 - 単純なscene command listの再表示はlate zoom／panで画素が一致しなかった。現在は実viewport・黒背景・描画modeを含めてcapture／復元する。
 - closed command listでも可変effect graphへの参照は不変画像にならない。GPU保持するのはUploadPreviewが生成した書換えないbitmapのcommand listだけ。
 - 保存するmissフレームは一度だけ描く。保存用にviewへ描いたbitmapをUploadPreviewと同じ1:1 command listで出力へ差し替え、playerのDrawは合成を再評価せずblitする。ホストの出力はホストのdisposerに残し、Draw直前のviewが描いたviewと異なれば（ズーム・パン・サイズ変更）それへ戻す。このcopyはGPU保持しない。
+- 保存の読み戻しはソースごとに3枚まで同時に待つ（全部がGPU上にある時だけ保存を見送る）。1回のUpdateで仕上げるのは原則1枚。描画先とstagingはソースごとのpoolで使い回し、表示中のcopyの描画先は出力から外れてからpoolへ戻す。
 - cacheとsourceのCOM参照を分離し、LRU退避後も表示中borrowを壊さない。世代・key・context・依存を採用直前にも照合する。
 - Harmony finalizerは例外がなくても走る。遅延保存へ渡すcaptureは `Pending.HandOver()` で移管し、`DeferredStore.Dispose` がReleaseする。
 - 停止時の遅延保存は対応playerのBeforeEditで仕上げる。refresh契約がない版は同期readbackが必要となる場合があり、GPU非待機を一律保証しない。
-- idle複製はTimeline.Lengthも写し、liveの検証済み指紋を引き継ぐ。キーとlease指紋の一致を省略しない。
+- idle複製はTimeline.Lengthも写し、liveの検証済み指紋を引き継ぐ。キーとlease指紋の一致を省略しない。複製・tracker・`TimelineSourceAndDevices` は1本のworker threadで作成・使用・破棄し、モデルと検証済み指紋が同じ間はバッチをまたいで使い回す。仕事が2秒途切れたら解放する。
 - フレーム時刻はホスト同様 `VideoInfo.GetTimeFrom` で作り、正確なticksをキーにする。丸めて別sampleを共有しない。
 - 素材をホストが保持したまま上書きすると、新しい指紋で古い画像を保存し得る。`HostContent` の再起動までのbypassを、ファイルwatch通知だけで解除しない。
 

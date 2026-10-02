@@ -49,8 +49,8 @@ internal sealed class KeyDependencyTracker : IDisposable
     public KeyDependencyTracker(Scene scene) => this.scene = scene;
 
     // For a copy of a scene whose files another tracker has verified (the idle pre-renderer's clone, which lives for
-    // one batch and would otherwise never finish hashing): captures still lease every file and compare it with these
-    // fingerprints, so a file changed since then bypasses.
+    // the batches of one model and would otherwise not finish hashing first): captures still lease every file and
+    // compare it with these fingerprints, so a file changed since then bypasses.
     internal KeyDependencyTracker(Scene scene, IReadOnlyDictionary<string, FileFingerprint>? verified) : this(scene) => fingerprints = verified;
 
     // Never changed in place: a new verification replaces the whole dictionary.

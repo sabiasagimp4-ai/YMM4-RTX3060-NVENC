@@ -21,6 +21,7 @@ using YukkuriMovieMaker.Project.Items;
 internal static class PreviewPerformanceChecks
 {
     private const int Frames = 100, Width = 1920, Height = 1080;
+    private const int ReadbackSlots = 3; // TimelineFrameCache.ReadbacksInFlight
     private const BindingFlags Instance = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
 
     internal static void Run(Assembly host)
@@ -277,6 +278,7 @@ internal static class PreviewPerformanceChecks
             harmony.UnpatchAll(harmony.Id);
         }
         Check(TimelineFrameCache.GpuBytes == 0, "Performance fixture leaked GPU reservations");
+        Check(TimelineFrameCache.ReadbackPoolBytes == 0, "Performance fixture leaked pooled readback textures");
     }
 
 
@@ -290,6 +292,8 @@ internal static class PreviewPerformanceChecks
         PreviewPerformance.Reset();
         long hits = TimelineFrameCache.RamHits, gpuHits = TimelineFrameCache.GpuHits, stored = TimelineFrameCache.PreviewStored;
         long drawnOnce = TimelineFrameCache.DrawnOnce, busy = TimelineFrameCache.ReadbackBusySkips;
+        long created = TimelineFrameCache.ReadbackTexturesCreated;
+        var pauses = GC.GetTotalPauseDuration();
         long allocated = GC.GetTotalAllocatedBytes(precise: true);
         var collections = Enumerable.Range(0, 3).Select(GC.CollectionCount).ToArray();
         var perFrame = new long[Frames];
@@ -313,14 +317,25 @@ internal static class PreviewPerformanceChecks
         long ramHits = TimelineFrameCache.RamHits - hits, saved = TimelineFrameCache.PreviewStored - stored;
         long once = TimelineFrameCache.DrawnOnce - drawnOnce;
         busy = TimelineFrameCache.ReadbackBusySkips - busy;
+        created = TimelineFrameCache.ReadbackTexturesCreated - created;
+        // A long frame is told apart from a GC pause and from paging (the working set) by these.
+        double gcPause = (GC.GetTotalPauseDuration() - pauses).TotalMilliseconds;
+        long workingSet = Environment.WorkingSet >> 20, pooled = TimelineFrameCache.ReadbackPoolBytes >> 20;
         var stages = PreviewPerformance.Snapshot();
         if (checkCounts)
         {
             Check(stages.Single(s => s.Stage == PreviewStage.TotalUpdate).SampleCount == Frames, mode + " did not measure all updates");
             Check(stages.Single(s => s.Stage == PreviewStage.TotalPreview).SampleCount == Frames, mode + " did not measure all previews");
             if (mode.StartsWith("cold-store", StringComparison.Ordinal))
+            {
                 Check(saved > 0 && saved <= Frames && ramHits == 0 && (TimelineFrameCache.DrawOnce ? once > 0 : once == 0),
                     $"Cold-store counts: saved={saved}, hits={ramHits}, drawn once={once}");
+                // The source's pool reuses its readback textures: a pass creates a few, not two per stored frame.
+                Check(created <= 2 * ReadbackSlots + 2, $"{mode} created {created} readback textures for {saved} stored frames");
+            }
+            // With the GPU done before each frame, every readback has completed by the next update.
+            if (mode.StartsWith("cold-store", StringComparison.Ordinal) && mode.Contains("-paced", StringComparison.Ordinal))
+                Check(saved == Frames && busy == 0, $"{mode}: stored {saved} of {Frames}, {busy} skipped with every readback busy");
             if (mode.StartsWith("ram-hit", StringComparison.Ordinal)) Check(ramHits == Frames && saved == 0, $"RAM-hit counts: hits={ramHits}, saved={saved}");
             if (mode.StartsWith("gpu-hit", StringComparison.Ordinal)) Check(gpuHitCount == Frames && ramHits == 0 && saved == 0,
                 $"GPU-hit counts: gpu={gpuHitCount}, ram={ramHits}, saved={saved}");
@@ -337,9 +352,9 @@ internal static class PreviewPerformanceChecks
         Console.WriteLine(FormattableString.Invariant($"PERF|{fixture}|{mode}|frame={FrameStats(perFrame)}|update={Stage(PreviewStage.TotalUpdate)}|key={Stage(PreviewStage.KeyGeneration)}")
             + FormattableString.Invariant($"|lookup={Stage(PreviewStage.CacheLookup)}|host={Stage(PreviewStage.HostRender)}|copy={Stage(PreviewStage.BeginGpuCopy)}|alloc={Stage(PreviewStage.CpuAllocation)}")
             + FormattableString.Invariant($"|memcpy={Stage(PreviewStage.CpuMemcpy)}|map={Stage(PreviewStage.MapWait)}|draw={Stage(PreviewStage.PreviewDraw)}|bytes={bytes}|gc={gc[0]}/{gc[1]}/{gc[2]}")
-            + FormattableString.Invariant($"|gpuhits={gpuHitCount}|ramhits={ramHits}|stored={saved}|opens/frame={opens / (double)Frames:F1}|once={once}|busy={busy}"));
+            + FormattableString.Invariant($"|gpuhits={gpuHitCount}|ramhits={ramHits}|stored={saved}|opens/frame={opens / (double)Frames:F1}|once={once}|busy={busy}|created={created}|gcpause={gcPause:F1}|ws={workingSet}|pool={pooled}"));
         return new { Fixture = fixture, Mode = mode, WallMilliseconds = wall.Elapsed.TotalMilliseconds, FinalFlushMilliseconds = flush.Elapsed.TotalMilliseconds,
-            AllocatedBytes = bytes, GcCollections = gc, GpuHits = gpuHitCount, RamHits = ramHits, Stored = saved, DrawnOnce = once, ReadbackBusy = busy,
+            AllocatedBytes = bytes, GcCollections = gc, GpuHits = gpuHitCount, RamHits = ramHits, Stored = saved, DrawnOnce = once, ReadbackBusy = busy, TexturesCreated = created, GcPauseMilliseconds = gcPause, WorkingSetMiB = workingSet, PoolMiB = pooled,
             FileOpensPerFrame = opens / (double)Frames, FrameMilliseconds = perFrame.Select(Milliseconds).ToArray(), Stages = stages };
     }
 
@@ -383,22 +398,23 @@ internal static class PreviewPerformanceChecks
         while (immediate.GetData(query, IntPtr.Zero, 0, AsyncGetDataFlags.None).Code != 0) Thread.Yield();
     };
 
-    // Cold playback with every frame stored, drawn once (cold-store) and twice as before (cold-store-twice), twice
-    // each in alternating order. Each pass starts from an empty store.
-    // With `between` (WaitForGpu) the passes are "-paced": the GPU finishes each frame before the next, so every
-    // readback completes in time and both variants store every frame.
+    // Cold playback with every frame stored, drawn once (cold-store) and twice as before (cold-store-twice), three
+    // times each in balanced order. Each pass starts from an empty store. With `between` (WaitForGpu) the passes are
+    // "-paced": the GPU finishes each frame before the next, so every readback completes in time.
     private static List<object> MeasureColdPair(string fixture, Timeline timeline, ITimelineSource source, Action draw, Action? between = null)
     {
         var measurements = new List<object>();
         string paced = between is null ? "" : "-paced";
         try
         {
-            foreach (var (mode, once) in new[] { ("cold-store", true), ("cold-store-twice", false), ("cold-store", true), ("cold-store-twice", false) })
+            for (int pass = 0; pass < 6; pass++)
             {
+                // once, twice, twice, once, once, twice: each variant runs first in a pair and later in a run as often.
+                bool once = pass is 0 or 3 or 4;
                 TimelineFrameCache.CompletePendingStore(source);
                 TimelineFrameCache.Clear();
                 TimelineFrameCache.DrawOnce = once;
-                string name = mode + paced + (measurements.Count < 2 ? "" : "-2");
+                string name = (once ? "cold-store" : "cold-store-twice") + paced + (pass / 2 == 0 ? "" : "-" + (pass / 2 + 1));
                 measurements.Add(MeasureCore(fixture, timeline, source, draw, name, true, between: between));
             }
         }
@@ -653,27 +669,39 @@ internal static class PreviewPerformanceChecks
         var outcomes = new SortedDictionary<string, int>(StringComparer.Ordinal);
         long opens = FileDependencyLease.FileOpens;
         var wall = Stopwatch.StartNew();
-        for (int start = 0; start < Frames; start += Batch)
+        // As RenderBatch: one renderer (clone, tracker, TimelineSourceAndDevices) for consecutive batches of one model.
+        IdleFramePreRenderer.BatchRenderer? batch = null;
+        int renderers = 0;
+        try
         {
-            long batchStarted = Stopwatch.GetTimestamp();
-            Check(liveTracker.TryCapture(start, out var initial, out var why), "Idle fixture: " + why);
-            Scene cloneScene;
-            using (initial) cloneScene = IdleFramePreRenderer.CloneSceneFromModel(initial!.Model);
-            using var cloneTracker = new KeyDependencyTracker(cloneScene, liveTracker.VerifiedFingerprints);
-            using var source = IdleFramePreRenderer.CreateBatchSource(cloneScene);
-            for (int frame = start; frame < Math.Min(Frames, start + Batch); frame++)
+            for (int start = 0; start < Frames; start += Batch)
             {
-                long started = frame == start ? batchStarted : Stopwatch.GetTimestamp();
-                var result = IdleFramePreRenderer.PrimeFrame(liveTracker, scene, cloneTracker, cloneScene, source,
-                    time => source.Update(time, TimelineSourceUsage.Playing), frame, view, () => true, CancellationToken.None, out _);
-                outcomes[result.ToString()] = outcomes.GetValueOrDefault(result.ToString()) + 1;
-                ticks[frame] = Stopwatch.GetTimestamp() - started;
+                long batchStarted = Stopwatch.GetTimestamp();
+                Check(liveTracker.TryCapture(start, out var initial, out var why), "Idle fixture: " + why);
+                using (initial)
+                    if (!IdleFramePreRenderer.Reusable(batch, liveTracker, initial!.Model))
+                    {
+                        batch?.Dispose();
+                        batch = new IdleFramePreRenderer.BatchRenderer(liveTracker, initial.Model);
+                        renderers++;
+                    }
+                var current = batch!;
+                for (int frame = start; frame < Math.Min(Frames, start + Batch); frame++)
+                {
+                    long started = frame == start ? batchStarted : Stopwatch.GetTimestamp();
+                    var result = IdleFramePreRenderer.PrimeFrame(liveTracker, scene, current.CloneTracker, current.CloneScene, current.Source,
+                        time => current.Source.Update(time, TimelineSourceUsage.Playing), frame, view, () => true, CancellationToken.None, out _);
+                    outcomes[result.ToString()] = outcomes.GetValueOrDefault(result.ToString()) + 1;
+                    ticks[frame] = Stopwatch.GetTimestamp() - started;
+                }
             }
         }
+        finally { batch?.Dispose(); }
         wall.Stop();
+        Check(renderers == 1, $"Idle batches of one model created {renderers} renderers");
         opens = FileDependencyLease.FileOpens - opens;
         string summary = string.Join(",", outcomes.Select(pair => $"{pair.Key}={pair.Value}"));
-        Console.WriteLine(FormattableString.Invariant($"PERF|files24|idle-batches|frame={FrameStats(ticks)}|fps={Frames * 1000.0 / wall.Elapsed.TotalMilliseconds:F1}|opens/frame={opens / (double)Frames:F1}|{summary}"));
+        Console.WriteLine(FormattableString.Invariant($"PERF|files24|idle-batches|frame={FrameStats(ticks)}|fps={Frames * 1000.0 / wall.Elapsed.TotalMilliseconds:F1}|opens/frame={opens / (double)Frames:F1}|renderers={renderers}|{summary}"));
         return new { Fixture = "files24", Mode = "idle-batches", WallMilliseconds = wall.Elapsed.TotalMilliseconds, Outcomes = outcomes,
             FileOpensPerFrame = opens / (double)Frames, FrameMilliseconds = ticks.Select(Milliseconds).ToArray() };
     }
