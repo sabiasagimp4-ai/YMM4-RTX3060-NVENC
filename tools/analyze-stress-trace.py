@@ -54,6 +54,23 @@ def analyze(path, projects=None):
     if any(row.get('Outcome') == 'exception' for row in updates):
         errors.append('Timeline update threw an exception')
     if projects is not None:
+        revisit_file = Path(projects) / 'stress-revisit.json'
+        if revisit_file.exists():
+            wanted = set(json.loads(revisit_file.read_text(encoding='utf-8-sig')))
+            evidence = {}
+            for phase in ('stress-revisit-1', 'stress-revisit-2'):
+                observed = [r for r in phases[phase] if r.get('FrameTimeTicks') is not None]
+                frame = lambda r: round(r['FrameTimeTicks'] * 30 / 10_000_000)
+                actual = {frame(r) for r in observed}
+                cached = [r for r in observed if frame(r) in wanted and r.get('Outcome') in ('ram', 'gpu', 'disk')]
+                evidence[phase] = dict(RequestedFrames=sorted(actual), ExpectedFrames=sorted(wanted),
+                                       ExactRevisits=len(wanted & actual), CachedExactUpdates=len(cached),
+                                       Routes=dict(collections.Counter(r.get('Outcome') for r in observed)))
+                if len(wanted & actual) < 3:
+                    errors.append(f'{phase}: fewer than three cold frame times actually revisited')
+                if not cached:
+                    errors.append(f'{phase}: no GPU/RAM/disk reuse observed on the exact cold frame times')
+            report['RevisitEvidence'] = evidence
         control = {}
         for phase, expected in [('off-playback', 'preview-off'), ('cold-playback', 'preview-on'), ('warm-playback', 'preview-on')]:
             begin = next((t for t, name in markers if name == phase), -1)

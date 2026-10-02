@@ -85,10 +85,16 @@ RTX3060実機の結果とWARP CIの結果は混ぜない。
 YMM4のシリアライザーと `RefreshTimelineLengthAndMaxLayer` を使い、生成後に長さ・個数を検証する。
 
 Windows CIの使い捨てYMM4を `gui-smoke.ps1 -Stress` で操作する。
-RAM上限256MiB・idle生成OFFで、無効→有効初回→有効再再生、5回のシーク、削除、Undo、Redo、消去を試行する。
-各再生は35秒待つ。画面、5秒ごとのprocess CPU使用時間・private/working set・handle数・キャッシュ表示、
+RAM上限64MiB・idle生成OFFで、無効→有効初回→有効再再生、5回のシーク、削除、Undo、Redo、消去を試行する。
+最初の検証は256MiBで行い、現行の小さいRAM上限はディスク復元の検証用。
+各再生は5秒待機×7回。区間の実際の経過時間はマーカーから確認する。
+画面、process CPU使用時間・private/working set・handle数、5秒間隔の `cache-metrics` にキャッシュ表示を残す。
+再生中のUIAツリー巡回は測定に余計な待ちを加えるため実行しない。
 編集後にホストが保存した各ymmp、詳細JSONLを `dist` に残す。
-以下は再生時刻が20秒以上進んだことと編集個数420→421→420→421を検証する。
+以下はPlayingの10個以上の異なるフレーム時刻が20秒以上にわたることと編集個数420→421→420→421を検証する。
+重いソフトウェア／VM環境ではフレーム落ちが多いため、2回目の再生を全900フレームがwarmな試験とは扱わない。
+初回に実際に描画した5時刻へ2回戻り、3個以上の時刻一致と、その時刻のGPU/RAM/ディスク再利用を検証する。
+固定座標によるシークは1フレームずれることがあるので、実際の要求時刻を必ず保存する。
 
 ```sh
 python tools/analyze-stress-trace.py dist/gui-trace.jsonl --projects dist --output dist/stress-summary.json

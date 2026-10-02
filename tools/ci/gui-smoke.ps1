@@ -144,7 +144,7 @@ foreach ($file in 'YMM4Rtx3060Nvenc.dll', '0Harmony.dll', 'NvencNative.dll') {
 $version = (Get-Item (Join-Path $HostDir 'YukkuriMovieMaker.dll')).VersionInfo.FileVersion
 $settings = Join-Path $HostDir "user\setting\$version"
 New-Item -ItemType Directory -Path $settings -Force | Out-Null
-$cacheSettings = if ($Stress) { '{"SettingsVersion":1,"Enabled":true,"PreviewCache":true,"ExportCache":false,"AutomaticRamBudget":false,"RamLimitMiB":256,"CacheFramesWhenIdle":false}' } else { '{"Enabled":true}' }
+$cacheSettings = if ($Stress) { '{"SettingsVersion":1,"Enabled":true,"PreviewCache":true,"ExportCache":false,"AutomaticRamBudget":false,"RamLimitMiB":64,"CacheFramesWhenIdle":false}' } else { '{"Enabled":true}' }
 [IO.File]::WriteAllText((Join-Path $settings 'NVEncVideoWriterPlugin.FrameCacheToolSettings.json'), $cacheSettings)
 # YMM4's own settings for a first start: this version was already seen (no "about" window) and the file extension
 # question was answered (no message box). Everything else keeps YMM4's defaults.
@@ -274,11 +274,9 @@ try {
         function Snapshot-Stress([string] $phase) {
             $process.Refresh()
             if ($process.HasExited) { throw "YMM4 exited during $phase ($($process.ExitCode))" }
-            $countsElement = Trace-Control 'FrameCacheCounts'
-            $statusElement = Trace-Control 'FrameCacheStatus'
             $record = [pscustomobject]@{ Utc=(Get-Date).ToUniversalTime().ToString('o'); Phase=$phase; CpuSeconds=$process.TotalProcessorTime.TotalSeconds;
                 PrivateBytes=$process.PrivateMemorySize64; WorkingSetBytes=$process.WorkingSet64; Handles=$process.HandleCount;
-                Counts=$(if ($countsElement) { $countsElement.Current.Name } else { '' }); Status=$(if ($statusElement) { $statusElement.Current.Name } else { '' }) }
+                CacheMetricsSource='cache-metrics in gui-trace.jsonl' }
             $telemetry.Add($record)
             $record | ConvertTo-Json -Compress | Write-Output
         }
