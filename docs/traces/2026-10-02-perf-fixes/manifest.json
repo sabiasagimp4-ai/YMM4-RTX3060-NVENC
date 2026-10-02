@@ -1,0 +1,42 @@
+{
+  "Host": "YMM4 Lite 4.56.1.0",
+  "Environment": "GitHub Windows 2022 (2 cores), Direct2D on WARP (Microsoft Basic Render Driver); no RTX3060 performance claim",
+  "Workflow": "cache-development, job windows, steps FileLeaseChecks / CacheChecks / HostCacheProbe --integration / HostCacheProbe --preview-performance",
+  "Frames": 100,
+  "Resolution": "1920x1080, 30 fps",
+  "Fixtures": {
+    "base": "one shape per frame and one Arial text item (the 5 Arial font files are the frame's file dependencies)",
+    "files24": "base shapes, 120 more shapes, one Arial text item and 24 audio items with distinct WAV files (29 file dependencies per frame)"
+  },
+  "Before": {
+    "SourceCommit": "cf7d605d34007e7afbf2b03a30cfb9821823924f",
+    "Note": "main 23e4fdb plus a file-open counter (FileDependencyLease.FileOpens) and a behaviour-preserving extraction of the idle helpers (CreateBatchSource, PrimeFrame); IdleCacheOrder moved to its own file",
+    "RunId": 37025132066,
+    "Files": {
+      "before-run1.txt": {
+        "Attempt": 1,
+        "JobId": 110897889604
+      },
+      "before-run2.txt": {
+        "Attempt": 2,
+        "JobId": 110902222644
+      }
+    }
+  },
+  "After": {
+    "SourceCommit": "4e6db4b2c7d8dbbf2b7d51742639b31d72e6b811",
+    "RunId": 37025867505,
+    "Files": {
+      "after-run1.txt": {
+        "Attempt": 1,
+        "JobId": 110900486907
+      },
+      "after-run2.txt": {
+        "Attempt": 2,
+        "JobId": 110903985886
+      }
+    }
+  },
+  "LineFormat": "PERF|fixture|mode|frame=p50/p95/p99/max/mean (ms, Update+Draw on the test's render thread)|stage=p50/p95/mean ...|opens/frame=files opened by the plugin per frame",
+  "Extraction": "lines copied from the job logs, timestamps removed; the parent-directory-rename line exists only after the fix (the check was added with it)"
+}

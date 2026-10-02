@@ -1,0 +1,25 @@
+64MiB fingerprint cold=75.65ms, warm average=0.092ms (20 runs)
+Key capture with 200 files in the project: whole project 5.48 ms/frame, per frame (1 file) 0.06 ms/frame (20 samples; no threshold)
+PERF|base|off|frame=1.554/2.432/2.705/3.254/1.617|update=0.749/2.095/0.899|key=-|lookup=-|host=0.743/2.091/0.895|copy=-|alloc=-|memcpy=-|map=-|draw=0.543/1.126/0.701|bytes=3536880|gc=0/0/0|gpuhits=0|ramhits=0|stored=0|opens/frame=0.0
+PERF|base|cold-store|frame=9.494/13.753/14.710/42.808/9.362|update=9.096/13.277/8.853|key=0.426/0.697/0.433|lookup=0.100/0.121/0.098|host=1.568/4.547/2.252|copy=2.337/2.807/2.315|alloc=0.048/0.081/0.051|memcpy=4.001/4.790/4.080|map=0.017/0.076/0.034|draw=0.387/0.936/0.485|bytes=718623696|gc=1/0/0|gpuhits=0|ramhits=0|stored=86|opens/frame=9.2
+PERF|base|ram-hit|frame=5.760/7.553/8.530/9.968/5.141|update=5.614/7.368/5.000|key=0.349/0.435/0.349|lookup=5.175/6.894/4.575|host=-|copy=-|alloc=-|memcpy=-|map=-|draw=0.124/0.166/0.125|bytes=1692904|gc=0/0/0|gpuhits=0|ramhits=100|stored=0|opens/frame=5.0
+PERF|base|ram-hit-trace|frame=7.693/10.709/12.865/15.115/8.059|update=7.542/10.450/7.869|key=0.400/0.491/0.411|lookup=7.007/9.828/7.364|host=-|copy=-|alloc=-|memcpy=-|map=-|draw=0.160/0.196/0.165|bytes=4076408|gc=0/0/0|gpuhits=0|ramhits=100|stored=0|opens/frame=5.0
+PERF|base|ram-hit-hot-0|frame=6.596/9.142/9.775/13.113/6.151|update=6.438/8.995/5.997|key=0.324/0.415/0.332|lookup=6.076/8.346/5.571|host=-|copy=-|alloc=-|memcpy=-|map=-|draw=0.140/0.171/0.139|bytes=1615528|gc=0/0/0|gpuhits=0|ramhits=100|stored=0|opens/frame=5.0
+PERF|base|gpu-hit-hot-1|frame=0.168/0.196/0.324/0.520/0.176|update=0.146/0.168/0.153|key=0.110/0.121/0.113|lookup=0.016/0.024/0.019|host=-|copy=-|alloc=-|memcpy=-|map=-|draw=0.020/0.028/0.022|bytes=1572600|gc=0/0/0|gpuhits=100|ramhits=0|stored=0|opens/frame=5.0
+PERF|base|gpu-hit-hot-2|frame=0.168/0.193/0.228/0.488/0.174|update=0.146/0.160/0.151|key=0.110/0.118/0.113|lookup=0.016/0.023/0.017|host=-|copy=-|alloc=-|memcpy=-|map=-|draw=0.020/0.030/0.022|bytes=1572600|gc=0/0/0|gpuhits=100|ramhits=0|stored=0|opens/frame=5.0
+PERF|base|ram-hit-hot-3|frame=8.144/12.559/63.460/123.846/10.418|update=8.003/12.291/10.235|key=0.330/0.650/0.371|lookup=7.476/11.559/9.774|host=-|copy=-|alloc=-|memcpy=-|map=-|draw=0.159/0.220/0.172|bytes=1578472|gc=0/0/0|gpuhits=0|ramhits=100|stored=0|opens/frame=5.0
+PERF|base|ram-hit-hot-4|frame=6.805/9.428/41.481/56.099/7.729|update=6.654/9.287/7.572|key=0.308/0.583/0.347|lookup=6.274/8.270/7.145|host=-|copy=-|alloc=-|memcpy=-|map=-|draw=0.137/0.199/0.147|bytes=1730632|gc=1/1/0|gpuhits=0|ramhits=100|stored=0|opens/frame=5.0
+PERF|base|gpu-hit-hot-5|frame=0.167/0.293/0.348/0.366/0.183|update=0.142/0.257/0.157|key=0.109/0.200/0.120|lookup=0.013/0.024/0.015|host=-|copy=-|alloc=-|memcpy=-|map=-|draw=0.022/0.046/0.025|bytes=1572600|gc=0/0/0|gpuhits=100|ramhits=0|stored=0|opens/frame=5.0
+PERF|base|gpu-hit-trace|frame=0.170/0.279/0.314/0.317/0.185|update=0.147/0.230/0.158|key=0.109/0.169/0.116|lookup=0.017/0.028/0.019|host=-|copy=-|alloc=-|memcpy=-|map=-|draw=0.022/0.035/0.024|bytes=1949576|gc=0/0/0|gpuhits=100|ramhits=0|stored=0|opens/frame=5.0
+PERF|files24|off|frame=1.582/2.542/3.403/4.015/1.750|update=0.973/2.041/1.165|key=-|lookup=-|host=0.971/2.039/1.162|copy=-|alloc=-|memcpy=-|map=-|draw=0.586/0.778/0.578|bytes=4105056|gc=0/0/0|gpuhits=0|ramhits=0|stored=0|opens/frame=0.0
+PERF|files24|cold-store|frame=15.175/20.089/21.851/22.945/14.546|update=14.666/18.669/13.869|key=1.251/1.931/1.402|lookup=0.084/0.156/0.088|host=3.863/6.949/4.037|copy=1.948/3.079/2.290|alloc=0.008/0.036/0.036|memcpy=1.516/4.010/1.860|map=0.026/0.105/0.052|draw=0.529/1.100/0.632|bytes=806568104|gc=2/2/2|gpuhits=0|ramhits=0|stored=96|opens/frame=56.5
+PERF|files24|ram-hit|frame=6.210/6.878/7.054/8.197/5.777|update=6.028/6.697/5.617|key=1.243/1.372/1.246|lookup=4.545/5.191/4.195|host=-|copy=-|alloc=-|memcpy=-|map=-|draw=0.148/0.180/0.152|bytes=3214000|gc=0/0/0|gpuhits=0|ramhits=100|stored=0|opens/frame=29.0
+PERF|files24|gpu-hit-hot-0|frame=0.828/1.350/1.842/2.058/0.983|update=0.796/1.291/0.942|key=0.639/1.007/0.749|lookup=0.046/0.072/0.058|host=-|copy=-|alloc=-|memcpy=-|map=-|draw=0.029/0.058/0.036|bytes=3221376|gc=0/0/0|gpuhits=100|ramhits=0|stored=0|opens/frame=29.0
+PERF|files24|gpu-hit-hot-1|frame=0.816/0.853/1.007/1.048/0.823|update=0.788/0.818/0.794|key=0.632/0.653/0.638|lookup=0.044/0.052/0.045|host=-|copy=-|alloc=-|memcpy=-|map=-|draw=0.026/0.041/0.027|bytes=3220600|gc=0/0/0|gpuhits=100|ramhits=0|stored=0|opens/frame=29.0
+PERF|files24|idle-batches|frame=16.169/20.183/352.888/627.086/29.334|fps=33.8|opens/frame=88.2|Rendered=100
+PERF|files24|hooks-off|frame=1.549/2.436/2.633/3.155/1.614
+PERF|files24|no-hooks|frame=2.551/3.490/4.099/18.725/2.699
+Parent directory rename while a file in it is leased: refused
+Per-frame lease + verify with 10 files: 1.96ms (10 runs; no threshold)
+Per-frame lease + verify with 200 files: 40.45ms (10 runs; no threshold)
+Per-frame lease + verify with 50 files: 9.80ms (10 runs; no threshold)
