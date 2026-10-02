@@ -115,6 +115,25 @@ function Answer-Dialogs($process) {
     }
 }
 
+# Keep the exception evidence; a modal dialog makes coordinate-based playback/edit evidence invalid.
+function Assert-NoHostException($process) {
+    foreach ($window in @(Windows-Of $process) | Where-Object { $_.Title -match '^An exception occurred|^例外' }) {
+        $dialog = $ae::FromHandle($window.Handle)
+        Texts $dialog 'host-exception'
+        $copy = $dialog.FindFirst($scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition ($ae::NameProperty, 'Copy details to clipboard')))
+        $details = $window.Title
+        if ($copy) {
+            $copy.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+            Start-Sleep -Milliseconds 300
+            $details = [System.Windows.Forms.Clipboard]::GetText()
+        }
+        Write-Output "HOST-EXCEPTION $details"
+        if ($ArtifactDirectory) { $details | Set-Content (Join-Path $ArtifactDirectory 'host-exception.txt') -Encoding UTF8 }
+        Shot 'host-exception'
+        throw 'YMM4 reported an exception; see host-exception.txt. This run cannot count as successful playback/edit evidence.'
+    }
+}
+
 # The first element with this name that is on screen, in any window of the process (menus are windows of their own).
 function Find-Visible($process, [string] $name) {
     $named = New-Object System.Windows.Automation.PropertyCondition ($ae::NameProperty, $name)
@@ -240,6 +259,7 @@ try {
     Start-Sleep -Seconds 3
     List-Windows $process
     Shot 'tool-opened'
+    Assert-NoHostException $process
 
     function Trace-Control([string] $id) {
         foreach ($window in @(Windows-Of $process)) {
@@ -273,6 +293,7 @@ try {
         $telemetry = New-Object System.Collections.Generic.List[object]
         function Snapshot-Stress([string] $phase) {
             $process.Refresh()
+            Assert-NoHostException $process
             if ($process.HasExited) { throw "YMM4 exited during $phase ($($process.ExitCode))" }
             $record = [pscustomobject]@{ Utc=(Get-Date).ToUniversalTime().ToString('o'); Phase=$phase; CpuSeconds=$process.TotalProcessorTime.TotalSeconds;
                 PrivateBytes=$process.PrivateMemorySize64; WorkingSetBytes=$process.WorkingSet64; Handles=$process.HandleCount;
@@ -485,6 +506,10 @@ finally {
     if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
     $logs = Join-Path $HostDir 'user\log'
     if (Test-Path $logs) {
+        if ($ArtifactDirectory) {
+            New-Item -ItemType Directory -Path (Join-Path $ArtifactDirectory 'host-logs') -Force | Out-Null
+            Get-ChildItem $logs -File | Copy-Item -Destination (Join-Path $ArtifactDirectory 'host-logs')
+        }
         Get-ChildItem $logs -File | Sort-Object LastWriteTime | Select-Object -Last 2 | ForEach-Object {
             Write-Output "--- log $($_.Name)"
             Get-Content $_.FullName -Tail 80 -Encoding UTF8

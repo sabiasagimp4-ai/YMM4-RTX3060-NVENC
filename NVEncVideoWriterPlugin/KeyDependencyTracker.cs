@@ -339,7 +339,7 @@ internal sealed class KeyDependencyTracker : IDisposable
             CancellationToken token = cancellation.Token;
             fingerprintTask = Task.Run(() =>
             {
-                try { return Fingerprint(paths, previous, token, Publish, leading); }
+                try { return FingerprintSafely(paths, previous, token, Publish, leading); }
                 finally { FingerprintSlot.Release(); cancellation.Dispose(); }
             });
         }
@@ -368,6 +368,19 @@ internal sealed class KeyDependencyTracker : IDisposable
 
     // Chunks keep each lease under FileDependencyLease's per-lease limit; a failing chunk is retried file by file
     // so that one unverifiable file only disables the frames that use it.
+    // Editing/disposal cancels optional validation. Return an unavailable result instead of faulting a
+    // fire-and-forget Task: abandoned faulted tasks otherwise reach the host's unobserved-exception UI.
+    internal static (IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason) FingerprintSafely(string[] paths,
+        IReadOnlyDictionary<string, FileFingerprint>? previous, CancellationToken token,
+        Action<IReadOnlyDictionary<string, FileFingerprint>>? publish = null, int leading = 0)
+    {
+        try { return Fingerprint(paths, previous, token, publish, leading); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        { return (null, "外部素材の内容確認を中断しました。"); }
+        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
+        { return (null, "外部素材の内容確認に失敗しました: " + error.GetType().Name); }
+    }
+
     private static (IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason) Fingerprint(string[] paths,
         IReadOnlyDictionary<string, FileFingerprint>? previous, CancellationToken token,
         Action<IReadOnlyDictionary<string, FileFingerprint>>? publish = null, int leading = 0)

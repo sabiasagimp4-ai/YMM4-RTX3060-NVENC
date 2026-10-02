@@ -44,6 +44,7 @@ internal static class Program
         CheckBundledReaders();
         CheckBundledTachie();
         CheckFramePreparesOwnFiles();
+        CheckFingerprintCancellation();
         CheckIdentitySeeds();
         CheckCommunity();
         CheckDynamicDependencies();
@@ -790,6 +791,22 @@ internal static class Program
 
     // A frame only waits for its own files: with 150 large files in the project, a frame whose small file comes last
     // in the project's order is keyed once that file is verified, while the pass over the others still runs.
+    private static void CheckFingerprintCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var task = Task.Run(() => KeyDependencyTracker.FingerprintSafely(["cancelled-before-open.png"], null, cancellation.Token));
+        var result = task.GetAwaiter().GetResult();
+        Check(task.IsCompletedSuccessfully && result.Files is null && result.Reason.Contains("中断"),
+            "Cancelled fingerprint work escaped as a faulted/abandoned task");
+        // Optional-cache failures also return unavailable; no partial result becomes an accepted key.
+        var failure = Task.Run(() => KeyDependencyTracker.FingerprintSafely(["ignored"], null, default, leading: 2));
+        var unavailable = failure.GetAwaiter().GetResult();
+        Check(failure.IsCompletedSuccessfully && unavailable.Files is null && unavailable.Reason.Contains("失敗"),
+            "Fingerprint worker failure escaped as an unobserved task exception");
+        Console.WriteLine("Fingerprint worker: edit/disposal cancellation and optional failures return unavailable without task faults");
+    }
+
     private static void CheckFramePreparesOwnFiles()
     {
         string folder = Path.Combine(Path.GetTempPath(), "ymm-cache-priority-" + Guid.NewGuid().ToString("N"));
