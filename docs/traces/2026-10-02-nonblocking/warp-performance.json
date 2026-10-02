@@ -1,0 +1,1427 @@
+{
+  "HostVersion": "4.56.1.0",
+  "HostMvid": "23e5b5b5-adcf-43b7-b976-b6b63f8dadea",
+  "HostSha256": "90D5022E2F4B46631254FAF788A1DF8A420071D9A190644FCC29892EC44F439D",
+  "Adapter": "Microsoft Basic Render Driver",
+  "VendorId": 5140,
+  "DeviceId": 140,
+  "Driver": "000A00004F7C150A",
+  "Frames": 100,
+  "Width": 1920,
+  "Height": 1080,
+  "HotWorkingSetFrames": 8,
+  "CounterbalancedHotPasses": 6,
+  "DiskEnabled": false,
+  "PixelParityFrames": 100,
+  "TimingScope": "Real TimelineSource.Update \u002B stand-in source-only Draw; no GUI/audio/Present/pacing. Final readback flush separate. Cache OFF still has measurement hooks.",
+  "Measurements": [
+    {
+      "Mode": "off",
+      "WallMilliseconds": 161.6212,
+      "FinalFlushMilliseconds": 0.0012,
+      "AllocatedBytes": 3415296,
+      "GcCollections": [
+        0,
+        0,
+        0
+      ],
+      "GpuHits": 0,
+      "RamHits": 0,
+      "Stored": 0,
+      "Stages": [
+        {
+          "Stage": "KeyGeneration",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CacheLookup",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "HostRender",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.081533,
+          "P50Milliseconds": 0.7863,
+          "P95Milliseconds": 2.1399,
+          "TotalTicks": 1081533
+        },
+        {
+          "Stage": "BeginGpuCopy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuAllocation",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "MapWait",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuMemcpy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "RamCommit",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "DiskEnqueue",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "TotalUpdate",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.088097,
+          "P50Milliseconds": 0.7914,
+          "P95Milliseconds": 2.1477,
+          "TotalTicks": 1088097
+        },
+        {
+          "Stage": "PreviewDraw",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.514257,
+          "P50Milliseconds": 0.4702,
+          "P95Milliseconds": 0.8727,
+          "TotalTicks": 514257
+        },
+        {
+          "Stage": "TotalPreview",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.614431,
+          "P50Milliseconds": 1.3349,
+          "P95Milliseconds": 2.7357,
+          "TotalTicks": 1614431
+        },
+        {
+          "Stage": "CacheRead",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CacheRestore",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        }
+      ]
+    },
+    {
+      "Mode": "cold-store",
+      "WallMilliseconds": 1131.4039,
+      "FinalFlushMilliseconds": 6.1168,
+      "AllocatedBytes": 843732096,
+      "GcCollections": [
+        3,
+        2,
+        2
+      ],
+      "GpuHits": 0,
+      "RamHits": 0,
+      "Stored": 100,
+      "Stages": [
+        {
+          "Stage": "KeyGeneration",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.534378,
+          "P50Milliseconds": 1.6408,
+          "P95Milliseconds": 1.7818,
+          "TotalTicks": 1534378
+        },
+        {
+          "Stage": "CacheLookup",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.101608,
+          "P50Milliseconds": 0.1003,
+          "P95Milliseconds": 0.1618,
+          "TotalTicks": 101608
+        },
+        {
+          "Stage": "HostRender",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.125583,
+          "P50Milliseconds": 0.9131,
+          "P95Milliseconds": 2.8863,
+          "TotalTicks": 1125583
+        },
+        {
+          "Stage": "BeginGpuCopy",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.94072,
+          "P50Milliseconds": 1.8669,
+          "P95Milliseconds": 2.6043,
+          "TotalTicks": 1940720
+        },
+        {
+          "Stage": "CpuAllocation",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.402356,
+          "P50Milliseconds": 0.6496,
+          "P95Milliseconds": 0.7865,
+          "TotalTicks": 402356
+        },
+        {
+          "Stage": "MapWait",
+          "SampleCount": 198,
+          "MeanMilliseconds": 0.053565656565656566,
+          "P50Milliseconds": 0.0324,
+          "P95Milliseconds": 0.0904,
+          "TotalTicks": 106060
+        },
+        {
+          "Stage": "CpuMemcpy",
+          "SampleCount": 100,
+          "MeanMilliseconds": 2.059807,
+          "P50Milliseconds": 1.3527,
+          "P95Milliseconds": 3.3091,
+          "TotalTicks": 2059807
+        },
+        {
+          "Stage": "RamCommit",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.004886,
+          "P50Milliseconds": 0.0047,
+          "P95Milliseconds": 0.0066,
+          "TotalTicks": 4886
+        },
+        {
+          "Stage": "DiskEnqueue",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "TotalUpdate",
+          "SampleCount": 100,
+          "MeanMilliseconds": 10.841672,
+          "P50Milliseconds": 10.8614,
+          "P95Milliseconds": 13.378,
+          "TotalTicks": 10841672
+        },
+        {
+          "Stage": "PreviewDraw",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.450807,
+          "P50Milliseconds": 0.4279,
+          "P95Milliseconds": 0.643,
+          "TotalTicks": 450807
+        },
+        {
+          "Stage": "TotalPreview",
+          "SampleCount": 100,
+          "MeanMilliseconds": 11.312285,
+          "P50Milliseconds": 11.3196,
+          "P95Milliseconds": 13.8194,
+          "TotalTicks": 11312285
+        },
+        {
+          "Stage": "CacheRead",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.009664,
+          "P50Milliseconds": 0.0095,
+          "P95Milliseconds": 0.0119,
+          "TotalTicks": 9664
+        },
+        {
+          "Stage": "CacheRestore",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        }
+      ]
+    },
+    {
+      "Mode": "ram-hit",
+      "WallMilliseconds": 811.3693,
+      "FinalFlushMilliseconds": 0.0022,
+      "AllocatedBytes": 7326400,
+      "GcCollections": [
+        0,
+        0,
+        0
+      ],
+      "GpuHits": 0,
+      "RamHits": 100,
+      "Stored": 0,
+      "Stages": [
+        {
+          "Stage": "KeyGeneration",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.278062,
+          "P50Milliseconds": 1.3013,
+          "P95Milliseconds": 1.3789,
+          "TotalTicks": 1278062
+        },
+        {
+          "Stage": "CacheLookup",
+          "SampleCount": 100,
+          "MeanMilliseconds": 6.606511,
+          "P50Milliseconds": 6.1649,
+          "P95Milliseconds": 9.0611,
+          "TotalTicks": 6606511
+        },
+        {
+          "Stage": "HostRender",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "BeginGpuCopy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuAllocation",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "MapWait",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuMemcpy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "RamCommit",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "DiskEnqueue",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "TotalUpdate",
+          "SampleCount": 100,
+          "MeanMilliseconds": 7.943898000000001,
+          "P50Milliseconds": 7.5385,
+          "P95Milliseconds": 10.2752,
+          "TotalTicks": 7943898
+        },
+        {
+          "Stage": "PreviewDraw",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.156623,
+          "P50Milliseconds": 0.1546,
+          "P95Milliseconds": 0.1801,
+          "TotalTicks": 156623
+        },
+        {
+          "Stage": "TotalPreview",
+          "SampleCount": 100,
+          "MeanMilliseconds": 8.112371000000001,
+          "P50Milliseconds": 7.7091,
+          "P95Milliseconds": 10.4555,
+          "TotalTicks": 8112371
+        },
+        {
+          "Stage": "CacheRead",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.013857,
+          "P50Milliseconds": 0.0135,
+          "P95Milliseconds": 0.0164,
+          "TotalTicks": 13857
+        },
+        {
+          "Stage": "CacheRestore",
+          "SampleCount": 100,
+          "MeanMilliseconds": 6.481875,
+          "P50Milliseconds": 6.0569,
+          "P95Milliseconds": 8.9326,
+          "TotalTicks": 6481875
+        }
+      ]
+    },
+    {
+      "Mode": "ram-hit-trace",
+      "WallMilliseconds": 922.9528,
+      "FinalFlushMilliseconds": 0.0012,
+      "AllocatedBytes": 9802832,
+      "GcCollections": [
+        0,
+        0,
+        0
+      ],
+      "GpuHits": 0,
+      "RamHits": 100,
+      "Stored": 0,
+      "Stages": [
+        {
+          "Stage": "KeyGeneration",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.2370780000000001,
+          "P50Milliseconds": 1.2475,
+          "P95Milliseconds": 1.3233,
+          "TotalTicks": 1237078
+        },
+        {
+          "Stage": "CacheLookup",
+          "SampleCount": 100,
+          "MeanMilliseconds": 7.758615,
+          "P50Milliseconds": 6.9596,
+          "P95Milliseconds": 10.2527,
+          "TotalTicks": 7758615
+        },
+        {
+          "Stage": "HostRender",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "BeginGpuCopy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuAllocation",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "MapWait",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuMemcpy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "RamCommit",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "DiskEnqueue",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "TotalUpdate",
+          "SampleCount": 100,
+          "MeanMilliseconds": 9.058848000000001,
+          "P50Milliseconds": 8.2257,
+          "P95Milliseconds": 11.5562,
+          "TotalTicks": 9058848
+        },
+        {
+          "Stage": "PreviewDraw",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.154811,
+          "P50Milliseconds": 0.1523,
+          "P95Milliseconds": 0.178,
+          "TotalTicks": 154811
+        },
+        {
+          "Stage": "TotalPreview",
+          "SampleCount": 100,
+          "MeanMilliseconds": 9.228048,
+          "P50Milliseconds": 8.4289,
+          "P95Milliseconds": 11.7386,
+          "TotalTicks": 9228048
+        },
+        {
+          "Stage": "CacheRead",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.011184000000000001,
+          "P50Milliseconds": 0.0123,
+          "P95Milliseconds": 0.0167,
+          "TotalTicks": 11184
+        },
+        {
+          "Stage": "CacheRestore",
+          "SampleCount": 100,
+          "MeanMilliseconds": 7.661476,
+          "P50Milliseconds": 6.8611,
+          "P95Milliseconds": 10.1612,
+          "TotalTicks": 7661476
+        }
+      ]
+    },
+    {
+      "Mode": "ram-hit-hot-0",
+      "WallMilliseconds": 657.3528,
+      "FinalFlushMilliseconds": 0.0012,
+      "AllocatedBytes": 7223944,
+      "GcCollections": [
+        0,
+        0,
+        0
+      ],
+      "GpuHits": 0,
+      "RamHits": 100,
+      "Stored": 0,
+      "Stages": [
+        {
+          "Stage": "KeyGeneration",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.205668,
+          "P50Milliseconds": 1.1947,
+          "P95Milliseconds": 1.3106,
+          "TotalTicks": 1205668
+        },
+        {
+          "Stage": "CacheLookup",
+          "SampleCount": 100,
+          "MeanMilliseconds": 5.158773999999999,
+          "P50Milliseconds": 5.7871,
+          "P95Milliseconds": 6.3391,
+          "TotalTicks": 5158774
+        },
+        {
+          "Stage": "HostRender",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "BeginGpuCopy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuAllocation",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "MapWait",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuMemcpy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "RamCommit",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "DiskEnqueue",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "TotalUpdate",
+          "SampleCount": 100,
+          "MeanMilliseconds": 6.4121559999999995,
+          "P50Milliseconds": 7.0347,
+          "P95Milliseconds": 7.711,
+          "TotalTicks": 6412156
+        },
+        {
+          "Stage": "PreviewDraw",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.149908,
+          "P50Milliseconds": 0.1521,
+          "P95Milliseconds": 0.1718,
+          "TotalTicks": 149908
+        },
+        {
+          "Stage": "TotalPreview",
+          "SampleCount": 100,
+          "MeanMilliseconds": 6.572458,
+          "P50Milliseconds": 7.184,
+          "P95Milliseconds": 7.8936,
+          "TotalTicks": 6572458
+        },
+        {
+          "Stage": "CacheRead",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.0031450000000000002,
+          "P50Milliseconds": 0.003,
+          "P95Milliseconds": 0.004,
+          "TotalTicks": 3145
+        },
+        {
+          "Stage": "CacheRestore",
+          "SampleCount": 100,
+          "MeanMilliseconds": 5.092296999999999,
+          "P50Milliseconds": 5.7146,
+          "P95Milliseconds": 6.2643,
+          "TotalTicks": 5092297
+        }
+      ]
+    },
+    {
+      "Mode": "gpu-hit-hot-1",
+      "WallMilliseconds": 132.6581,
+      "FinalFlushMilliseconds": 0.0009,
+      "AllocatedBytes": 2454936,
+      "GcCollections": [
+        0,
+        0,
+        0
+      ],
+      "GpuHits": 100,
+      "RamHits": 0,
+      "Stored": 0,
+      "Stages": [
+        {
+          "Stage": "KeyGeneration",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.63958,
+          "P50Milliseconds": 0.6284,
+          "P95Milliseconds": 0.6918,
+          "TotalTicks": 639580
+        },
+        {
+          "Stage": "CacheLookup",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.6146699999999999,
+          "P50Milliseconds": 0.5999,
+          "P95Milliseconds": 0.7292,
+          "TotalTicks": 614670
+        },
+        {
+          "Stage": "HostRender",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "BeginGpuCopy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuAllocation",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "MapWait",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuMemcpy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "RamCommit",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "DiskEnqueue",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "TotalUpdate",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.2812899999999998,
+          "P50Milliseconds": 1.2558,
+          "P95Milliseconds": 1.3965,
+          "TotalTicks": 1281290
+        },
+        {
+          "Stage": "PreviewDraw",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.042941,
+          "P50Milliseconds": 0.0375,
+          "P95Milliseconds": 0.0694,
+          "TotalTicks": 42941
+        },
+        {
+          "Stage": "TotalPreview",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.32636,
+          "P50Milliseconds": 1.2959,
+          "P95Milliseconds": 1.4772,
+          "TotalTicks": 1326360
+        },
+        {
+          "Stage": "CacheRead",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CacheRestore",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        }
+      ]
+    },
+    {
+      "Mode": "gpu-hit-hot-2",
+      "WallMilliseconds": 205.0465,
+      "FinalFlushMilliseconds": 0.0011,
+      "AllocatedBytes": 2515144,
+      "GcCollections": [
+        0,
+        0,
+        0
+      ],
+      "GpuHits": 100,
+      "RamHits": 0,
+      "Stored": 0,
+      "Stages": [
+        {
+          "Stage": "KeyGeneration",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.987249,
+          "P50Milliseconds": 1.0661,
+          "P95Milliseconds": 1.159,
+          "TotalTicks": 987249
+        },
+        {
+          "Stage": "CacheLookup",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.950279,
+          "P50Milliseconds": 1.0292,
+          "P95Milliseconds": 1.1284,
+          "TotalTicks": 950279
+        },
+        {
+          "Stage": "HostRender",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "BeginGpuCopy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuAllocation",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "MapWait",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuMemcpy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "RamCommit",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "DiskEnqueue",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "TotalUpdate",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.9767730000000001,
+          "P50Milliseconds": 2.1502,
+          "P95Milliseconds": 2.2984,
+          "TotalTicks": 1976773
+        },
+        {
+          "Stage": "PreviewDraw",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.069617,
+          "P50Milliseconds": 0.0739,
+          "P95Milliseconds": 0.0956,
+          "TotalTicks": 69617
+        },
+        {
+          "Stage": "TotalPreview",
+          "SampleCount": 100,
+          "MeanMilliseconds": 2.050016,
+          "P50Milliseconds": 2.2353,
+          "P95Milliseconds": 2.4011,
+          "TotalTicks": 2050016
+        },
+        {
+          "Stage": "CacheRead",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CacheRestore",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        }
+      ]
+    },
+    {
+      "Mode": "ram-hit-hot-3",
+      "WallMilliseconds": 1014.1535,
+      "FinalFlushMilliseconds": 0.0017,
+      "AllocatedBytes": 7240024,
+      "GcCollections": [
+        1,
+        0,
+        0
+      ],
+      "GpuHits": 0,
+      "RamHits": 100,
+      "Stored": 0,
+      "Stages": [
+        {
+          "Stage": "KeyGeneration",
+          "SampleCount": 100,
+          "MeanMilliseconds": 2.449307,
+          "P50Milliseconds": 1.2018,
+          "P95Milliseconds": 1.3411,
+          "TotalTicks": 2449307
+        },
+        {
+          "Stage": "CacheLookup",
+          "SampleCount": 100,
+          "MeanMilliseconds": 7.458988000000001,
+          "P50Milliseconds": 7.2206,
+          "P95Milliseconds": 9.791,
+          "TotalTicks": 7458988
+        },
+        {
+          "Stage": "HostRender",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "BeginGpuCopy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuAllocation",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "MapWait",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuMemcpy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "RamCommit",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "DiskEnqueue",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "TotalUpdate",
+          "SampleCount": 100,
+          "MeanMilliseconds": 9.962591999999999,
+          "P50Milliseconds": 8.5208,
+          "P95Milliseconds": 11.247,
+          "TotalTicks": 9962592
+        },
+        {
+          "Stage": "PreviewDraw",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.168568,
+          "P50Milliseconds": 0.1652,
+          "P95Milliseconds": 0.1957,
+          "TotalTicks": 168568
+        },
+        {
+          "Stage": "TotalPreview",
+          "SampleCount": 100,
+          "MeanMilliseconds": 10.140322,
+          "P50Milliseconds": 8.6874,
+          "P95Milliseconds": 11.4134,
+          "TotalTicks": 10140322
+        },
+        {
+          "Stage": "CacheRead",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.003405,
+          "P50Milliseconds": 0.0033,
+          "P95Milliseconds": 0.0045,
+          "TotalTicks": 3405
+        },
+        {
+          "Stage": "CacheRestore",
+          "SampleCount": 100,
+          "MeanMilliseconds": 7.391335000000001,
+          "P50Milliseconds": 7.1679,
+          "P95Milliseconds": 9.7154,
+          "TotalTicks": 7391335
+        }
+      ]
+    },
+    {
+      "Mode": "ram-hit-hot-4",
+      "WallMilliseconds": 796.1942,
+      "FinalFlushMilliseconds": 0.0018,
+      "AllocatedBytes": 7182000,
+      "GcCollections": [
+        0,
+        0,
+        0
+      ],
+      "GpuHits": 0,
+      "RamHits": 100,
+      "Stored": 0,
+      "Stages": [
+        {
+          "Stage": "KeyGeneration",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.266859,
+          "P50Milliseconds": 1.2577,
+          "P95Milliseconds": 1.3613,
+          "TotalTicks": 1266859
+        },
+        {
+          "Stage": "CacheLookup",
+          "SampleCount": 100,
+          "MeanMilliseconds": 6.473662000000001,
+          "P50Milliseconds": 6.0241,
+          "P95Milliseconds": 8.0433,
+          "TotalTicks": 6473662
+        },
+        {
+          "Stage": "HostRender",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "BeginGpuCopy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuAllocation",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "MapWait",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuMemcpy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "RamCommit",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "DiskEnqueue",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "TotalUpdate",
+          "SampleCount": 100,
+          "MeanMilliseconds": 7.77722,
+          "P50Milliseconds": 7.3028,
+          "P95Milliseconds": 9.4518,
+          "TotalTicks": 7777220
+        },
+        {
+          "Stage": "PreviewDraw",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.17476299999999997,
+          "P50Milliseconds": 0.1602,
+          "P95Milliseconds": 0.1793,
+          "TotalTicks": 174763
+        },
+        {
+          "Stage": "TotalPreview",
+          "SampleCount": 100,
+          "MeanMilliseconds": 7.960712,
+          "P50Milliseconds": 7.4634,
+          "P95Milliseconds": 9.6207,
+          "TotalTicks": 7960712
+        },
+        {
+          "Stage": "CacheRead",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.003236,
+          "P50Milliseconds": 0.0031,
+          "P95Milliseconds": 0.0047,
+          "TotalTicks": 3236
+        },
+        {
+          "Stage": "CacheRestore",
+          "SampleCount": 100,
+          "MeanMilliseconds": 6.420534,
+          "P50Milliseconds": 5.9738,
+          "P95Milliseconds": 7.978,
+          "TotalTicks": 6420534
+        }
+      ]
+    },
+    {
+      "Mode": "gpu-hit-hot-5",
+      "WallMilliseconds": 136.044,
+      "FinalFlushMilliseconds": 0.001,
+      "AllocatedBytes": 2455824,
+      "GcCollections": [
+        0,
+        0,
+        0
+      ],
+      "GpuHits": 100,
+      "RamHits": 0,
+      "Stored": 0,
+      "Stages": [
+        {
+          "Stage": "KeyGeneration",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.64959,
+          "P50Milliseconds": 0.6256,
+          "P95Milliseconds": 0.7978,
+          "TotalTicks": 649590
+        },
+        {
+          "Stage": "CacheLookup",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.635572,
+          "P50Milliseconds": 0.5965,
+          "P95Milliseconds": 1.0146,
+          "TotalTicks": 635572
+        },
+        {
+          "Stage": "HostRender",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "BeginGpuCopy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuAllocation",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "MapWait",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuMemcpy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "RamCommit",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "DiskEnqueue",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "TotalUpdate",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.312794,
+          "P50Milliseconds": 1.2489,
+          "P95Milliseconds": 1.7029,
+          "TotalTicks": 1312794
+        },
+        {
+          "Stage": "PreviewDraw",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.045121,
+          "P50Milliseconds": 0.0391,
+          "P95Milliseconds": 0.079,
+          "TotalTicks": 45121
+        },
+        {
+          "Stage": "TotalPreview",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.3602029999999998,
+          "P50Milliseconds": 1.2907,
+          "P95Milliseconds": 1.777,
+          "TotalTicks": 1360203
+        },
+        {
+          "Stage": "CacheRead",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CacheRestore",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        }
+      ]
+    },
+    {
+      "Mode": "gpu-hit-trace",
+      "WallMilliseconds": 155.8727,
+      "FinalFlushMilliseconds": 0.0011,
+      "AllocatedBytes": 3633944,
+      "GcCollections": [
+        0,
+        0,
+        0
+      ],
+      "GpuHits": 100,
+      "RamHits": 0,
+      "Stored": 0,
+      "Stages": [
+        {
+          "Stage": "KeyGeneration",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.682427,
+          "P50Milliseconds": 0.6724,
+          "P95Milliseconds": 0.7052,
+          "TotalTicks": 682427
+        },
+        {
+          "Stage": "CacheLookup",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.74104,
+          "P50Milliseconds": 0.7297,
+          "P95Milliseconds": 0.7881,
+          "TotalTicks": 741040
+        },
+        {
+          "Stage": "HostRender",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "BeginGpuCopy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuAllocation",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "MapWait",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CpuMemcpy",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "RamCommit",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "DiskEnqueue",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "TotalUpdate",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.48411,
+          "P50Milliseconds": 1.4635,
+          "P95Milliseconds": 1.553,
+          "TotalTicks": 1484110
+        },
+        {
+          "Stage": "PreviewDraw",
+          "SampleCount": 100,
+          "MeanMilliseconds": 0.0641,
+          "P50Milliseconds": 0.0607,
+          "P95Milliseconds": 0.0706,
+          "TotalTicks": 64100
+        },
+        {
+          "Stage": "TotalPreview",
+          "SampleCount": 100,
+          "MeanMilliseconds": 1.5580109999999998,
+          "P50Milliseconds": 1.5385,
+          "P95Milliseconds": 1.6444,
+          "TotalTicks": 1558011
+        },
+        {
+          "Stage": "CacheRead",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        },
+        {
+          "Stage": "CacheRestore",
+          "SampleCount": 0,
+          "MeanMilliseconds": 0,
+          "P50Milliseconds": 0,
+          "P95Milliseconds": 0,
+          "TotalTicks": 0
+        }
+      ]
+    }
+  ]
+}

@@ -45,12 +45,12 @@
 
 `TimelineAudioPlayer.Position` が再生時計。`StopAsync()` はゼロへseekし、`EndAudioTask()` はrepeat時に開始位置へ戻すため、そのままbuffer待機へ流用しない。UI／render workerでasync toggleを同期Waitしない。
 
-D2D `Map(Read)` にDoNotWaitはなく、1フレーム遅延やreadbackリングだけで非ブロックとは言えない。D3D11 query等を使う場合もD2D flushとの順序とdevice一致を確認する。現在のGPU保持は復元画像が対象であり、cold renderのreadbackは残る。
+D2D `Map(Read)` にDoNotWaitはなく、1フレーム遅延やreadbackリングだけで非ブロックとは言えない。ライブプレビューは実際のD2D targetのDXGI surfaceからD3D11 deviceを取得し、EndDraw後にstagingへコピー、Flushで提出してDoNotWait Mapで完了をpollする方式へ変更した。保留はsourceごとに1枚、処理中の追加保存は省略する。現在のGPU保持は復元画像が対象であり、cold renderの描画・GPUコピー・CPU memcpy費用は残る。
 
 30秒・動画120／文字300／音声1の [実GUI負荷試験](STRESS_GUI_RESULTS_2026-10-02.md) では、ホストの動画更新とMap待ちが支配的だった。
 フレーム落ちで2回目にも未描画時刻を要求するため、キー生成の軽量化だけでは再生を速くできない。
 同じ時刻への再訪ではRAM／ディスク／GPU復元が動き、64MiBのRAM上限も確認した。
-重い動画の次の重点は安全な非待機readbackと音声時計を含むCache Before Playback。CIの結果をRTX3060のFPSとして扱わない。
+非待機readbackの検証は [NONBLOCKING_READBACK_RESULTS_2026-10-02.md](NONBLOCKING_READBACK_RESULTS_2026-10-02.md) に記録する。非待機readbackの回帰・実測を続け、重い動画の次の重点は音声時計を含むCache Before Playbackと安全な段階別再利用。CIの結果をRTX3060のFPSとして扱わない。
 
 SingleFlightではidleが不要になってもlive／exportのjobを巻き添えにしない。保存価値と画像の有効性を分け、容量不足だけで要求された有効結果を捨てない。採用直前の依存・取消・世代・予算確認から公開まで既存guardを使う。同じTimelineSourceや描画contextを複数Taskから同時UpdateするだけのMFRは行わない。
 

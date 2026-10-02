@@ -46,7 +46,7 @@
 
 CPUの**経過時間**であり、CPU使用時間/cycle数ではない。OS schedulingやlock待ちも含む。
 spanはinclusive。親と子を足してフレーム時間にしない。TotalUpdateとDrawの和もPresent・音声・再生時計の全体ではない。
-MapWaitは同期待ちを含むがGPU実行時間ではなく、BeginGpuCopyは提出側CPU時間。
+MapWaitはMap呼出しのCPU wall timeであり、GPU実行時間ではない。ライブプレビューは非待機Map、明示的capture／idleは同期Map。`readback-poll`のready／gpu-busyと`cache-admission`のreadback-busyで完了待ちと保存見送りを識別する。BeginGpuCopyはコピー提出側CPU時間であり、GPU完了時間ではない。
 非同期methodはTaskを返すまでのasync-submitだけであり、Task完了時間ではない。
 独立したworkerへの因果IDは明示的に伝えたディスク投入等だけ保証する。任意のTask/独自threadへの自動伝播は保証しない。
 true GPU durationにはtimestamp/disjoint query、再生・Present・音声の全体には追加の観測点が必要。

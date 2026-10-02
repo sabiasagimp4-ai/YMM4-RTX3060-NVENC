@@ -4,6 +4,8 @@
 
 実際のYMM4 Lite 4.56.1.0をWindows CIで起動し、無効／初回／再再生、既描画時刻への再訪、シーク、削除、Undo、Redo、キャッシュ消去を実行しました。RTX3060実機の性能測定ではありません。
 
+このページは同期readback時点の記録です。続く非待機readbackの実装・検証は [NONBLOCKING_READBACK_RESULTS_2026-10-02.md](NONBLOCKING_READBACK_RESULTS_2026-10-02.md) を参照。
+
 ## 確認した結果
 
 | RAM上限 | Playing更新 無効／初回／2回目 | 再生時刻の最大（秒） | 完全なログ | 編集結果 |

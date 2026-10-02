@@ -1,0 +1,74 @@
+{
+  "Host": "YMM4 Lite 4.56.1.0",
+  "Environment": "GitHub Windows 2022; no RTX3060 performance claim",
+  "SourceCommit": "6b39416817c8bf1f261975f978ba9b83c7aad2c6",
+  "MirrorCommit": "16f0b529b72008939577340f64ead5138106ed32",
+  "RunId": 37013534089,
+  "RamLimitMiB": 64,
+  "RawBytes": 4867282,
+  "RawSha256": "df0d4f31c05de80fb67fb3dafc7ac05d8f003b1effabda7f040113b8729fc7a5",
+  "GzipSha256": "0583c41a87ac5f0ab78df1f37acf28dd98f85c3f22eed073b87607cdaa3396b0",
+  "Summary": {
+    "Kind": "summary",
+    "Accepted": 14127,
+    "Written": 14127,
+    "Dropped": 0,
+    "OpenSpans": 0,
+    "EndTicks": 6374865473
+  },
+  "StressPassed": true,
+  "FrameRoutes": {
+    "render": 49,
+    "live": 3,
+    "bypass": 39,
+    "disk": 8,
+    "gpu": 7
+  },
+  "ReadbackStages": {
+    "MapWait": {
+      "Samples": 183,
+      "Outcomes": {
+        "ok": 183
+      },
+      "P50Ms": 0.0099,
+      "P95Ms": 13.7344,
+      "MeanMs": 2.48907650273224,
+      "MaxMs": 120.1543
+    },
+    "readback-poll": {
+      "Samples": 183,
+      "Outcomes": {
+        "ready": 48,
+        "gpu-busy": 135
+      },
+      "P50Ms": 0.0344,
+      "P95Ms": 13.7447,
+      "MeanMs": 3.5887852459016396,
+      "MaxMs": 182.6477
+    },
+    "BeginGpuCopy": {
+      "Samples": 48,
+      "Outcomes": {
+        "ok": 48
+      },
+      "P50Ms": 8.8222,
+      "P95Ms": 396.9687,
+      "MeanMs": 67.64521666666667,
+      "MaxMs": 430.8184
+    },
+    "deferred-store": {
+      "Samples": 183,
+      "Outcomes": {
+        "ok": 48,
+        "gpu-busy": 135
+      },
+      "P50Ms": 2.4853,
+      "P95Ms": 50.4124,
+      "MeanMs": 11.329192349726776,
+      "MaxMs": 284.6677
+    }
+  },
+  "WarpRunId": 37013484288,
+  "WarpSha256": "7ef16bdde72b79d873f778addd8dfeb608ee2ae44d82fa1166e74e115867cd20",
+  "Percentiles": "nearest rank; CPU wall time; MapWait mixes ready and busy probes"
+}

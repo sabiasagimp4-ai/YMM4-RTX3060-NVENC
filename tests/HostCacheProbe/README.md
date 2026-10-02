@@ -20,7 +20,7 @@ dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:Y
 | --trace-output <path> | ホスト試験のJSONLログを新しいファイルへ採取 |
 | --unread | 読み取り済み版とのcontracts照合で有効な機能だけを検証 |
 
-性能fixtureの結果は `dist/preview-performance.json`、RAM／GPUのtraceは同じdistへ出力する。比較のwarmupと画素検査は測定外。軽いfixtureでcache OFFが速い場合もあり、測定値をGUIのFPSへ置き換えない。
+性能fixtureの結果は `dist/preview-performance.json`、RAM／GPUのtraceは同じdistへ出力する。比較のwarmupと画素検査は測定外。非待機readbackではGPU処理中に新しい保存を見送れるため、coldの保存枚数を記録し、RAM-hitの全フレーム準備は測定外で明示的に完了させる。軽いfixtureでcache OFFが速い場合もあり、測定値をGUIのFPSへ置き換えない。
 
 mainの `cache-development` CIではportable、native、file lease、依存キー、--integration／--gpu／--preview-performanceを実行する。`YMM4-dlls` のCIテンプレートでは動画fixtureと実GUI試験も実行する。CIのWARP検証とRTX 3060上のNVENC smokeは別。GPU計測はCPU wall timeで、GPU実行時間を測っていない。
 
