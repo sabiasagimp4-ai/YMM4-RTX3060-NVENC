@@ -119,7 +119,7 @@ internal static class PreviewPerformanceChecks
                 var stages = PreviewPerformance.Snapshot();
                 Check(stages.Single(s => s.Stage == PreviewStage.TotalUpdate).SampleCount == Frames, mode + " did not measure all updates");
                 Check(stages.Single(s => s.Stage == PreviewStage.TotalPreview).SampleCount == Frames, mode + " did not measure all previews");
-                if (mode == "cold-store") Check(saved == Frames && ramHits == 0, $"Cold-store counts: saved={saved}, hits={ramHits}");
+                if (mode == "cold-store") Check(saved > 0 && saved <= Frames && ramHits == 0, $"Cold-store counts: saved={saved}, hits={ramHits}");
                 if (mode.StartsWith("ram-hit", StringComparison.Ordinal)) Check(ramHits == Frames && saved == 0, $"RAM-hit counts: hits={ramHits}, saved={saved}");
                 if (mode.StartsWith("gpu-hit", StringComparison.Ordinal)) Check(gpuHitCount == Frames && ramHits == 0 && saved == 0,
                     $"GPU-hit counts: gpu={gpuHitCount}, ram={ramHits}, saved={saved}");
@@ -130,7 +130,14 @@ internal static class PreviewPerformanceChecks
                     AllocatedBytes = bytes, GcCollections = Enumerable.Range(0, 3).Select(i => GC.CollectionCount(i) - collections[i]).ToArray(), GpuHits = gpuHitCount, RamHits = ramHits, Stored = saved, Stages = stages };
             }
 
-            var measurements = new List<object> { Measure("off", false), Measure("cold-store", true), Measure("ram-hit", true) };
+            var measurements = new List<object> { Measure("off", false), Measure("cold-store", true) };
+            // Nonblocking cold playback may skip captures while a previous GPU copy is busy. Prime all
+            // frames explicitly outside the measured loop before asserting a 100% RAM-hit workload.
+            for (int frame = 0; frame < Frames; frame++)
+            {
+                Update(frame); Draw(); TimelineFrameCache.CompletePendingStore(source);
+            }
+            measurements.Add(Measure("ram-hit", true));
             CacheTrace.Start(Path.GetFullPath("dist/performance-trace.jsonl"), "ram-hit-trace");
             ProcessingTraceHooks.Start();
             ProcessingTraceHooks.Discover(); // Installation cost is outside the measured loop.
