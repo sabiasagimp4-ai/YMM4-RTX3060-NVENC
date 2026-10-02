@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using HarmonyLib;
 using NVEncVideoWriterPlugin;
 using Vortice.Direct2D1;
+using Vortice.Direct3D11;
 using Vortice.DXGI;
 using Vortice.Mathematics;
 using YukkuriMovieMaker.Commons;
@@ -102,6 +103,7 @@ internal static class PreviewPerformanceChecks
             // Stored misses drawn once (the player blits the pixels drawn for the store) and, as before, twice;
             // alternated in this run so that the runner's speed does not decide the comparison.
             measurements.AddRange(MeasureColdPair("base", timeline, source, Draw));
+            measurements.AddRange(MeasureColdPair("base", timeline, source, Draw, WaitForGpu(target)));
             // A stored miss shows the pixels drawn for the store: equal to the host's own render, also at a fractional
             // view offset. A Draw with another view (zoom, pan, resize) shows the host's output again.
             var plainView = viewport;
@@ -280,8 +282,9 @@ internal static class PreviewPerformanceChecks
 
     // One measured pass of `Frames` Update+Draw pairs on `source`. Prints a PERF line (parsed from CI logs) with
     // per-frame wall time percentiles and the plugin's stage percentiles (p50/p95/mean, ms).
+    // between: runs after each measured frame, outside its time (WaitForGpu).
     private static object MeasureCore(string fixture, Timeline timeline, ITimelineSource source, Action draw, string mode, bool enabled,
-        Func<int, int>? sequence = null, bool checkCounts = true)
+        Func<int, int>? sequence = null, bool checkCounts = true, Action? between = null)
     {
         TimelineFrameCache.SetEnabled(enabled, false);
         PreviewPerformance.Reset();
@@ -299,6 +302,7 @@ internal static class PreviewPerformanceChecks
             using (PreviewPerformance.Measure(PreviewStage.PreviewDraw)) draw();
             PreviewPerformance.End(PreviewStage.TotalPreview, started);
             perFrame[frame] = PreviewPerformance.Timestamp - started;
+            between?.Invoke();
         }
         wall.Stop();
         opens = FileDependencyLease.FileOpens - opens;
@@ -365,19 +369,37 @@ internal static class PreviewPerformanceChecks
         Check(TimelineFrameCache.DrawnOnce == once + 1, $"Stored miss {frame} was not shown from its stored pixels: {TimelineFrameCache.Status}");
     }
 
+    // Waits until the GPU has run everything submitted so far (on WARP: rasterized it), as a GPU faster than the
+    // frame rate would be done before the next frame. Used between measured frames.
+    private static Action WaitForGpu(ID2D1Bitmap1 target) => () =>
+    {
+        using var surface = target.Surface;
+        using var texture = surface!.QueryInterface<ID3D11Texture2D>();
+        using var device = texture.Device;
+        using var query = device.CreateQuery(new QueryDescription(QueryType.Event, QueryFlags.None));
+        using var immediate = device.ImmediateContext;
+        immediate.End(query);
+        immediate.Flush();
+        while (immediate.GetData(query, IntPtr.Zero, 0, AsyncGetDataFlags.None).Code != 0) Thread.Yield();
+    };
+
     // Cold playback with every frame stored, drawn once (cold-store) and twice as before (cold-store-twice), twice
     // each in alternating order. Each pass starts from an empty store.
-    private static List<object> MeasureColdPair(string fixture, Timeline timeline, ITimelineSource source, Action draw)
+    // With `between` (WaitForGpu) the passes are "-paced": the GPU finishes each frame before the next, so every
+    // readback completes in time and both variants store every frame.
+    private static List<object> MeasureColdPair(string fixture, Timeline timeline, ITimelineSource source, Action draw, Action? between = null)
     {
         var measurements = new List<object>();
+        string paced = between is null ? "" : "-paced";
         try
         {
-            foreach (var (mode, once) in new[] { ("cold-store", true), ("cold-store-twice", false), ("cold-store-2", true), ("cold-store-twice-2", false) })
+            foreach (var (mode, once) in new[] { ("cold-store", true), ("cold-store-twice", false), ("cold-store", true), ("cold-store-twice", false) })
             {
                 TimelineFrameCache.CompletePendingStore(source);
                 TimelineFrameCache.Clear();
                 TimelineFrameCache.DrawOnce = once;
-                measurements.Add(MeasureCore(fixture, timeline, source, draw, mode, true));
+                string name = mode + paced + (measurements.Count < 2 ? "" : "-2");
+                measurements.Add(MeasureCore(fixture, timeline, source, draw, name, true, between: between));
             }
         }
         finally { TimelineFrameCache.DrawOnce = true; }
@@ -455,8 +477,9 @@ internal static class PreviewPerformanceChecks
                 TimelineFrameCache.CompletePendingStore(source);
             }
             TimelineFrameCache.Clear();
-            measurements.Add(MeasureCore("effects", timeline, source, Draw, "off", false));
-            measurements.AddRange(MeasureColdPair("effects", timeline, source, Draw));
+            measurements.Add(MeasureCore("effects", timeline, source, Draw, "off-paced", false, between: WaitForGpu(target)));
+            // Unpaced, WARP queues blurred frames faster than it renders them and stalls for seconds at a time.
+            measurements.AddRange(MeasureColdPair("effects", timeline, source, Draw, WaitForGpu(target)));
             TimelineFrameCache.CompletePendingStore(source);
         }
         finally
@@ -549,6 +572,7 @@ internal static class PreviewPerformanceChecks
 
             measurements.Add(MeasureCore("files24", timeline, live, () => Draw(live), "off", false));
             measurements.AddRange(MeasureColdPair("files24", timeline, live, () => Draw(live)));
+            measurements.AddRange(MeasureColdPair("files24", timeline, live, () => Draw(live), WaitForGpu(target)));
             for (int frame = 0; frame < Frames; frame++) { Update(live, frame); Draw(live); TimelineFrameCache.CompletePendingStore(live); }
             measurements.Add(MeasureCore("files24", timeline, live, () => Draw(live), "ram-hit", true));
             const int HotFrames = 8;
