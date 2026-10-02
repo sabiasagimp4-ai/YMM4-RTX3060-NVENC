@@ -60,9 +60,7 @@ internal static class PreviewPerformanceChecks
         try
         {
             Check(TimelineFrameCache.TryInstall(host, harmony, out var reason), reason);
-            source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
-                Instance, null, [context, scene, null], null)!;
-            source.GetType().GetProperty("NeedTimelineItemRects")!.SetValue(source, false);
+            source = CreateSource(host, context, scene);
             var viewport = new TimelineFrameCache.PreviewViewport(Width, Height, Matrix3x2.Identity,
                 new Vector2(Width / 2f, Height / 2f), 96, 96, target.PixelFormat,
                 dc.AntialiasMode, dc.TextAntialiasMode, dc.PrimitiveBlend, dc.UnitMode,
@@ -70,28 +68,11 @@ internal static class PreviewPerformanceChecks
             TimelineFrameCache.TestViewport = value => ReferenceEquals(value, source) ? viewport : null;
 
             void Update(int frame) => source.Update(timeline.VideoInfo.GetTimeFrom(frame), TimelineSourceUsage.Playing);
-            void Draw()
-            {
-                using var oldTarget = dc.Target;
-                var transform = dc.Transform;
-                try
-                {
-                    dc.Target = target; dc.Transform = viewport.Transform;
-                    dc.BeginDraw(); dc.Clear(new Color4(0, 0, 0, 1));
-                    dc.DrawImage(source.Output, viewport.TargetOffset);
-                    dc.EndDraw().CheckError();
-                }
-                finally { dc.Target = oldTarget; dc.Transform = transform; }
-            }
+            void Draw() => DrawView(dc, target, viewport, source);
 
             TimelineFrameCache.SetEnabled(true, false);
-            long warmed = TimelineFrameCache.PreviewStored;
-            var warmup = Stopwatch.StartNew();
-            while (TimelineFrameCache.PreviewStored == warmed && warmup.Elapsed < TimeSpan.FromSeconds(30))
-            {
-                Update(Frames - 1); Draw(); TimelineFrameCache.CompletePendingStore(source); Thread.Sleep(10);
-            }
-            Check(TimelineFrameCache.PreviewStored > warmed, "Warmup never stored a frame: " + TimelineFrameCache.Status);
+            Check(WarmUntilStored(source, () => { Update(Frames - 1); Draw(); }, TimeSpan.FromSeconds(30)),
+                "Warmup never stored a frame: " + TimelineFrameCache.Status);
             // JIT and frame-specific model keys are warmed independently of the measured cold store.
             for (int frame = 0; frame < Frames; frame++) { Update(frame); Draw(); }
             TimelineFrameCache.CompletePendingStore(source);
@@ -111,15 +92,7 @@ internal static class PreviewPerformanceChecks
             foreach (var view in new[] { plainView, plainView with { Transform = Matrix3x2.CreateTranslation(1.25f, -.75f) } })
             {
                 viewport = view;
-                for (int frame = 0; frame < 4; frame++)
-                {
-                    TimelineFrameCache.SetEnabled(false, false); Update(frame);
-                    var rendered = TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!;
-                    TimelineFrameCache.SetEnabled(true, false); TimelineFrameCache.Clear();
-                    UpdateShownOnce(source, frame, () => Update(frame));
-                    Check(rendered.SequenceEqual(TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!), $"Drawn-once frame {frame} pixel parity failed");
-                    TimelineFrameCache.CompletePendingStore(source);
-                }
+                CheckDrawnOnce(dc, source, Update, view, 4, "base");
             }
             viewport = plainView with { Transform = Matrix3x2.CreateScale(.5f) * Matrix3x2.CreateTranslation(13, 7) };
             var zoomedView = viewport;
@@ -373,6 +346,59 @@ internal static class PreviewPerformanceChecks
         return FormattableString.Invariant($"{At(.5):F3}/{At(.95):F3}/{At(.99):F3}/{sorted[^1]:F3}/{sorted.Average():F3}");
     }
 
+    // A real host TimelineSource for `scene`, without item rects (the player asks for them only around a selection).
+    private static ITimelineSource CreateSource(Assembly host, object context, Scene scene)
+    {
+        var source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
+            Instance, null, [context, scene, null], null)!;
+        source.GetType().GetProperty("NeedTimelineItemRects")!.SetValue(source, false);
+        return source;
+    }
+
+    // The stand-in for the player's Draw: a black target and the source's output drawn for the view.
+    private static void DrawView(ID2D1DeviceContext dc, ID2D1Bitmap1 target, TimelineFrameCache.PreviewViewport viewport, ITimelineSource source)
+    {
+        using var oldTarget = dc.Target;
+        var transform = dc.Transform;
+        try
+        {
+            dc.Target = target; dc.Transform = viewport.Transform;
+            dc.BeginDraw(); dc.Clear(new Color4(0, 0, 0, 1));
+            dc.DrawImage(source.Output, viewport.TargetOffset);
+            dc.EndDraw().CheckError();
+        }
+        finally { dc.Target = oldTarget; dc.Transform = transform; }
+    }
+
+    // Renders until the first frame is stored (a large project is described and its files hashed first).
+    private static bool WarmUntilStored(ITimelineSource source, Action updateAndDraw, TimeSpan limit)
+    {
+        long warmed = TimelineFrameCache.PreviewStored;
+        var warmup = Stopwatch.StartNew();
+        while (TimelineFrameCache.PreviewStored == warmed && warmup.Elapsed < limit)
+        {
+            updateAndDraw(); TimelineFrameCache.CompletePendingStore(source); Thread.Sleep(10);
+        }
+        return TimelineFrameCache.PreviewStored > warmed;
+    }
+
+    // For each of the first `frames` frames: the host's render with the cache off, then a stored miss after a purge,
+    // which shows the pixels drawn for the store; both must be equal.
+    private static void CheckDrawnOnce(ID2D1DeviceContext dc, ITimelineSource source, Action<int> update,
+        TimelineFrameCache.PreviewViewport viewport, int frames, string fixture)
+    {
+        for (int frame = 0; frame < frames; frame++)
+        {
+            TimelineFrameCache.SetEnabled(false, false); update(frame);
+            var rendered = TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!;
+            TimelineFrameCache.SetEnabled(true, false); TimelineFrameCache.Clear();
+            UpdateShownOnce(source, frame, () => update(frame));
+            Check(rendered.SequenceEqual(TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!),
+                $"Drawn-once {fixture} frame {frame} pixel parity failed");
+            TimelineFrameCache.CompletePendingStore(source);
+        }
+    }
+
     // A miss of `frame` after a purge, shown from the pixels drawn for its store. An update right after the purge can
     // still render normally while the tracker settles; the next one stores.
     private static void UpdateShownOnce(ITimelineSource source, int frame, Action update)
@@ -448,9 +474,7 @@ internal static class PreviewPerformanceChecks
         text.VideoEffects = text.VideoEffects.Add(new YukkuriMovieMaker.Project.Effects.GaussianBlurEffect());
         timeline.Items = timeline.Items.Add(text);
         var scene = new Scene(timeline, scenes, []);
-        var source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
-            Instance, null, [context, scene, null], null)!;
-        source.GetType().GetProperty("NeedTimelineItemRects")!.SetValue(source, false);
+        var source = CreateSource(host, context, scene);
         var viewport = baseViewport with { SceneId = scene.ID, TimelineId = timeline.ID, LastDrawTimestamp = Stopwatch.GetTimestamp() };
         // RAM for 16 frames: the cold passes only store (older frames are evicted), nothing is read back.
         var store = new FrameCacheStore(Path.Combine(root, "effects-store"), 16 * ((long)Width * Height * 4 + 32), 0);
@@ -460,43 +484,17 @@ internal static class PreviewPerformanceChecks
         try
         {
             void Update(int frame) => source.Update(timeline.VideoInfo.GetTimeFrom(frame), TimelineSourceUsage.Playing);
-            void Draw()
-            {
-                using var oldTarget = dc.Target;
-                var transform = dc.Transform;
-                try
-                {
-                    dc.Target = target; dc.Transform = viewport.Transform;
-                    dc.BeginDraw(); dc.Clear(new Color4(0, 0, 0, 1));
-                    dc.DrawImage(source.Output, viewport.TargetOffset);
-                    dc.EndDraw().CheckError();
-                }
-                finally { dc.Target = oldTarget; dc.Transform = transform; }
-            }
+            void Draw() => DrawView(dc, target, viewport, source);
             // Background description (> 200 items) before the first store; then JIT and per-frame keys.
             TimelineFrameCache.SetEnabled(true, false);
-            long warmed = TimelineFrameCache.PreviewStored;
-            var warmup = Stopwatch.StartNew();
-            while (TimelineFrameCache.PreviewStored == warmed && warmup.Elapsed < TimeSpan.FromSeconds(60))
-            {
-                Update(Frames - 1); Draw(); TimelineFrameCache.CompletePendingStore(source); Thread.Sleep(10);
-            }
-            if (TimelineFrameCache.PreviewStored == warmed)
+            if (!WarmUntilStored(source, () => { Update(Frames - 1); Draw(); }, TimeSpan.FromSeconds(60)))
             {
                 Console.WriteLine("PERF|effects|skipped|" + TimelineFrameCache.Status);
                 return measurements;
             }
             for (int frame = 0; frame < Frames; frame++) { Update(frame); Draw(); }
             TimelineFrameCache.CompletePendingStore(source);
-            for (int frame = 0; frame < 4; frame++)
-            {
-                TimelineFrameCache.SetEnabled(false, false); Update(frame);
-                var rendered = TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!;
-                TimelineFrameCache.SetEnabled(true, false); TimelineFrameCache.Clear();
-                UpdateShownOnce(source, frame, () => Update(frame));
-                Check(rendered.SequenceEqual(TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!), $"Drawn-once effects frame {frame} pixel parity failed");
-                TimelineFrameCache.CompletePendingStore(source);
-            }
+            CheckDrawnOnce(dc, source, Update, viewport, 4, "effects");
             TimelineFrameCache.Clear();
             measurements.Add(MeasureCore("effects", timeline, source, Draw, "off-paced", false, between: WaitForGpu(target)));
             // Unpaced, WARP queues blurred frames faster than it renders them and stalls for seconds at a time.
@@ -546,13 +544,7 @@ internal static class PreviewPerformanceChecks
             return (IItem)new AudioItem { FilePath = file, Frame = 0, Length = Frames, Layer = 10 + i };
         }));
         var scene = new Scene(timeline, scenes, []);
-        var sourceType = host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!;
-        ITimelineSource Create()
-        {
-            var created = (ITimelineSource)Activator.CreateInstance(sourceType, Instance, null, [context, scene, null], null)!;
-            created.GetType().GetProperty("NeedTimelineItemRects")!.SetValue(created, false);
-            return created;
-        }
+        ITimelineSource Create() => CreateSource(host, context, scene);
         var viewport = baseViewport with { SceneId = scene.ID, TimelineId = timeline.ID, LastDrawTimestamp = Stopwatch.GetTimestamp() };
         var store = new FrameCacheStore(Path.Combine(root, "files-store"), Frames * ((long)Width * Height * 4 + 32) + (1L << 20), 0);
         TimelineFrameCache.UseStore(store);
@@ -563,30 +555,13 @@ internal static class PreviewPerformanceChecks
             live = Create();
             var shown = live;
             TimelineFrameCache.TestViewport = value => ReferenceEquals(value, shown) ? viewport : null;
-            void Draw(ITimelineSource from)
-            {
-                using var oldTarget = dc.Target;
-                var transform = dc.Transform;
-                try
-                {
-                    dc.Target = target; dc.Transform = viewport.Transform;
-                    dc.BeginDraw(); dc.Clear(new Color4(0, 0, 0, 1));
-                    dc.DrawImage(from.Output, viewport.TargetOffset);
-                    dc.EndDraw().CheckError();
-                }
-                finally { dc.Target = oldTarget; dc.Transform = transform; }
-            }
+            void Draw(ITimelineSource from) => DrawView(dc, target, viewport, from);
             void Update(ITimelineSource on, int frame) => on.Update(timeline.VideoInfo.GetTimeFrom(frame), TimelineSourceUsage.Playing);
 
             // Background description (> 200 items) and fingerprinting of the files happen before the first store.
             TimelineFrameCache.SetEnabled(true, false);
-            long warmed = TimelineFrameCache.PreviewStored;
-            var warmup = Stopwatch.StartNew();
-            while (TimelineFrameCache.PreviewStored == warmed && warmup.Elapsed < TimeSpan.FromSeconds(60))
-            {
-                Update(live, Frames - 1); Draw(live); TimelineFrameCache.CompletePendingStore(live); Thread.Sleep(10);
-            }
-            Check(TimelineFrameCache.PreviewStored > warmed, "Files fixture warmup never stored a frame: " + TimelineFrameCache.Status);
+            Check(WarmUntilStored(live, () => { Update(live, Frames - 1); Draw(live); }, TimeSpan.FromSeconds(60)),
+                "Files fixture warmup never stored a frame: " + TimelineFrameCache.Status);
             for (int frame = 0; frame < Frames; frame++) { Update(live, frame); Draw(live); }
             TimelineFrameCache.CompletePendingStore(live);
             TimelineFrameCache.Clear();

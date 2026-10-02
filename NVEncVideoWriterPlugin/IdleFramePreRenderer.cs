@@ -15,7 +15,7 @@ using YukkuriMovieMaker.Project.Items;
 
 namespace NVEncVideoWriterPlugin;
 
-internal static class IdleFramePreRenderer
+internal static partial class IdleFramePreRenderer
 {
     private const int MaximumFrames = 30;
     private static double idleDelaySeconds = 8;
@@ -28,13 +28,6 @@ internal static class IdleFramePreRenderer
     private static int enabled;
     private static string status = "アイドル時の先読みは無効です。";
     private static bool inputSubscribed;
-    // Every batch runs on one worker thread, which creates, uses and disposes the batches' renderer (BatchRenderer).
-    // The renderer is kept from batch to batch and released once no batch has come for RendererIdleTime.
-    private static readonly BlockingCollection<Action> work = new();
-    private static Thread? worker;
-    private static readonly TimeSpan RendererIdleTime = TimeSpan.FromSeconds(2);
-    private static BatchRenderer? renderer; // worker thread only
-    private static Session? rendererSession; // worker thread only
 
     internal static bool Enabled
     {
@@ -187,7 +180,7 @@ internal static class IdleFramePreRenderer
             return;
         }
 
-        var normalizedView = viewport with { LastDrawTimestamp = 0, IsPlaying = false };
+        var normalizedView = viewport.Normalized;
         lock (gate)
         {
             long cacheGeneration = TimelineFrameCache.CacheGeneration;
@@ -330,95 +323,6 @@ internal static class IdleFramePreRenderer
     }
 
     internal enum IdleFrameResult { Rendered, Unavailable, Stored, Normal, NotKeyed, Stopped }
-
-    // The renderer of one batch's clone (tests drive batches through this and PrimeFrame). Its Updates skip the live
-    // preview's cache: PrimeFrame keys and stores its frames itself.
-    internal static TimelineSourceAndDevices CreateBatchSource(Scene cloneScene)
-    {
-        var source = new TimelineSourceAndDevices(cloneScene);
-        try { TimelineFrameCache.ExcludeFromPreviewCache(source); }
-        catch { ((IDisposable)source).Dispose(); throw; }
-        return source;
-    }
-
-    // A clone of the live model with its own tracker and renderer (CreateBatchSource), for idle batches of that model.
-    internal sealed class BatchRenderer : IDisposable
-    {
-        internal BatchRenderer(KeyDependencyTracker liveTracker, string model)
-        {
-            Model = model;
-            Fingerprints = liveTracker.VerifiedFingerprints;
-            CloneScene = CloneSceneFromModel(model);
-            CloneTracker = new KeyDependencyTracker(CloneScene, Fingerprints);
-            try { Source = CreateBatchSource(CloneScene); }
-            catch { CloneTracker.Dispose(); throw; }
-        }
-        internal string Model { get; }
-        // The live tracker's verified fingerprints the clone compares its files with (replaced, never changed, when
-        // the live tracker verifies files again).
-        internal IReadOnlyDictionary<string, FileFingerprint>? Fingerprints { get; }
-        internal Scene CloneScene { get; }
-        internal KeyDependencyTracker CloneTracker { get; }
-        internal TimelineSourceAndDevices Source { get; }
-        public void Dispose()
-        {
-            try { ((IDisposable)Source).Dispose(); }
-            finally { CloneTracker.Dispose(); }
-        }
-    }
-
-    // Worker thread: the last batch's renderer when it renders the same model for the same session with the same
-    // verified files, else a new one. The model is the whole drawing state, so an equal model is an equal clone;
-    // PrimeFrame still compares the live and clone keys of every frame.
-    internal static bool Reusable(BatchRenderer? kept, KeyDependencyTracker liveTracker, string model) =>
-        kept is not null && kept.Model == model && ReferenceEquals(kept.Fingerprints, liveTracker.VerifiedFingerprints);
-
-    private static BatchRenderer RendererFor(Session current, string model)
-    {
-        if (renderer is { } kept && ReferenceEquals(rendererSession, current) && Reusable(kept, current.Tracker, model)) return kept;
-        DropRenderer();
-        renderer = new BatchRenderer(current.Tracker, model);
-        rendererSession = current;
-        return renderer;
-    }
-
-    // Worker thread.
-    private static void DropRenderer()
-    {
-        var dropped = renderer;
-        renderer = null;
-        rendererSession = null;
-        try { dropped?.Dispose(); }
-        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException) { }
-    }
-
-    private static void Post(Action action)
-    {
-        lock (gate)
-        {
-            if (worker is null)
-            {
-                var thread = new Thread(WorkerLoop) { IsBackground = true, Name = "YMM4-RTX3060-NVENC idle pre-render" };
-                thread.Start();
-                Volatile.Write(ref worker, thread);
-            }
-        }
-        work.Add(action);
-    }
-
-    private static void WorkerLoop()
-    {
-        while (true)
-        {
-            if (!work.TryTake(out var action, RendererIdleTime))
-            {
-                DropRenderer(); // a pause in the work: give the renderer's GPU memory back
-                continue;
-            }
-            try { action(); }
-            catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException) { }
-        }
-    }
 
     // One frame of a batch: the live and clone keys must agree; a frame already stored (in RAM, or on disk where the
     // preview reads it ahead) is not rendered again; otherwise the clone renders it and it is primed for the view.

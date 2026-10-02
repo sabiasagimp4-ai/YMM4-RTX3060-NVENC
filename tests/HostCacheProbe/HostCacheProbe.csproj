@@ -16,6 +16,10 @@
     <Compile Include="..\..\NVEncVideoWriterPlugin\HostIntegration.cs" Link="HostIntegration.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\HostExportScope.cs" Link="HostExportScope.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\TimelineFrameCache.cs" Link="TimelineFrameCache.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\TimelineFrameCache.GpuRetention.cs" Link="TimelineFrameCache.GpuRetention.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\TimelineFrameCache.PreviewStore.cs" Link="TimelineFrameCache.PreviewStore.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\TimelineFrameCache.Readback.cs" Link="TimelineFrameCache.Readback.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\TimelineFrameCache.Viewport.cs" Link="TimelineFrameCache.Viewport.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\PreviewPerformance.cs" Link="PreviewPerformance.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\CacheMemoryPolicy.cs" Link="CacheMemoryPolicy.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\CacheMemoryController.cs" Link="CacheMemoryController.cs" />
@@ -38,6 +42,7 @@
     <!-- The performance harness drives idle batches with this assembly's TimelineFrameCache (IdleCacheOrder is the plugin's public type). -->
     <Compile Include="..\..\NVEncVideoWriterPlugin\IdleFramePlan.cs" Link="IdleFramePlan.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\IdleFramePreRenderer.cs" Link="IdleFramePreRenderer.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\IdleFramePreRenderer.Worker.cs" Link="IdleFramePreRenderer.Worker.cs" />
     <Reference Include="YukkuriMovieMaker"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="YukkuriMovieMaker.Plugin"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.Plugin.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="YukkuriMovieMaker.Settings"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.Settings.dll</HintPath><Private>false</Private></Reference>
