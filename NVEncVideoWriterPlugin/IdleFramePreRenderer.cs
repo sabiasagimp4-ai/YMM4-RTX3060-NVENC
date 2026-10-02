@@ -329,7 +329,7 @@ internal static class IdleFramePreRenderer
     {
         var source = new TimelineSourceAndDevices(cloneScene);
         try { TimelineFrameCache.ExcludeFromPreviewCache(source); }
-        catch { source.Dispose(); throw; }
+        catch { ((IDisposable)source).Dispose(); throw; }
         return source;
     }
 
