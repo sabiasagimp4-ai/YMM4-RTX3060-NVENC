@@ -18,10 +18,14 @@ internal sealed class FileDependencyLease : IDisposable
     private static readonly object SharedFingerprintGate = new();
     private static readonly Dictionary<string, FileFingerprint> SharedFingerprints = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Queue<string> SharedFingerprintOrder = new();
+    private static long fileOpens;
     private readonly Dictionary<string, FileStream> files = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, FileFingerprint> fingerprints = new(StringComparer.OrdinalIgnoreCase);
     private int disposed;
     public IReadOnlyDictionary<string, FileFingerprint> Fingerprints { get; }
+
+    // Files opened by leases and their verifications since start (measurements).
+    internal static long FileOpens => Interlocked.Read(ref fileOpens);
 
     private FileDependencyLease() => Fingerprints = new ReadOnlyDictionary<string, FileFingerprint>(fingerprints);
 
@@ -46,6 +50,7 @@ internal sealed class FileDependencyLease : IDisposable
                 if (candidate.files.Count == 256) { reason = "External file count exceeds 256."; return false; }
                 if (!IsLocalPlainPath(path)) { reason = "外部素材はリンクを含まないローカル固定ドライブ上にある必要があります。"; return false; }
                 var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
+                Interlocked.Increment(ref fileOpens);
                 candidate.files.Add(path, file);
                 if (!IsNtfs(file.SafeFileHandle) || !TryStamp(file.SafeFileHandle, out var stamp))
                 { reason = "外部素材はNTFS上の通常ファイルである必要があります。"; return false; }
@@ -126,6 +131,7 @@ internal sealed class FileDependencyLease : IDisposable
                 if (!IsLocalPlainPath(pair.Key)) return false;
                 // Also resolve the name again: a parent-directory rename must not alias a cached file.
                 using var current = File.OpenHandle(pair.Key, FileMode.Open, FileAccess.Read, FileShare.Read);
+                Interlocked.Increment(ref fileOpens);
                 if (!TryStamp(current, out var stamp) || stamp != fingerprints[pair.Key].Stamp) return false;
             }
             return Volatile.Read(ref disposed) == 0;

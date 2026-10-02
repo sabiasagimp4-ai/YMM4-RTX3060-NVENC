@@ -250,7 +250,7 @@ internal static class IdleFramePreRenderer
                     ?? throw new InvalidDataException("描画状態を読み込めませんでした。");
                 var cloneScene = CloneScene(snapshot);
                 using var cloneTracker = new KeyDependencyTracker(cloneScene, current.Tracker.VerifiedFingerprints);
-                using var source = new TimelineSourceAndDevices(cloneScene);
+                using var source = CreateBatchSource(cloneScene);
 
                 for (long ordinal = first; ordinal <= endOrdinal; ordinal++)
                 {
@@ -264,38 +264,31 @@ internal static class IdleFramePreRenderer
                         || !TimelineFrameCache.TryGetLatestPreviewViewport(current.Info.Timeline, current.Info.Scenes, out var latestViewport)
                         || !SameView(latestViewport, viewport) || latestViewport.IsPlaying)
                         return;
-                    if (!TryCapturePair(current.Tracker, cloneTracker, frame, out var liveCapture, out var cloneCapture, out reason))
+                    switch (PrimeFrame(current.Tracker, current.LiveScene, cloneTracker, cloneScene, source,
+                        time => source.Update(time, TimelineSourceUsage.Playing), frame, latestViewport,
+                        () => CanContinue(current, job.Token, anchorFrame), job.Token, out reason))
                     {
-                        if (current.Tracker.RendersNormally(frame) && cloneTracker.RendersNormally(frame))
-                        {
+                        case IdleFrameResult.Normal:
                             normal++;
                             Advance(current, job, ordinal + 1);
                             continue;
-                        }
-                        SetStatus(reason);
-                        return;
-                    }
-                    using (liveCapture)
-                    using (cloneCapture)
-                    {
-                        if (!CanContinue(current, job.Token, anchorFrame) || !liveCapture!.Validate() || !cloneCapture!.Validate()) return;
-                        // Same conversion as TimelineVideoPlayer, so the primed frame is rendered at the exact time
-                        // the player will request (a one-tick difference can select another video sample).
-                        var time = cloneScene.Timeline.VideoInfo.GetTimeFrom(frame);
-                        // Stored frames (in RAM, or on disk where the preview reads them ahead) are not rendered again.
-                        if (TimelineFrameCache.IsPreviewStored(source, time, cloneCapture, latestViewport))
-                        {
+                        case IdleFrameResult.Stored:
                             skipped++;
                             Advance(current, job, ordinal + 1);
                             continue;
-                        }
-                        source.Update(time, TimelineSourceUsage.Playing);
-                        if (!CanContinue(current, job.Token, anchorFrame)) return;
-                        if (TryPrimeIfCurrent(job.Token, current.LiveScene, cloneScene, source, time, latestViewport, liveCapture, cloneCapture))
+                        case IdleFrameResult.NotKeyed:
+                            SetStatus(reason);
+                            return;
+                        case IdleFrameResult.Stopped:
+                            return;
+                        case IdleFrameResult.Rendered:
                             rendered++;
-                        else unavailable++;
-                        Advance(current, job, ordinal + 1);
+                            break;
+                        default:
+                            unavailable++;
+                            break;
                     }
+                    Advance(current, job, ordinal + 1);
                     Thread.Yield();
                 }
             }
@@ -315,6 +308,34 @@ internal static class IdleFramePreRenderer
         {
             lock (gate) if (ReferenceEquals(activeJob, job)) activeJob = null;
             job.Dispose();
+        }
+    }
+
+    internal enum IdleFrameResult { Rendered, Unavailable, Stored, Normal, NotKeyed, Stopped }
+
+    // The renderer of one batch's clone (tests drive batches through this and PrimeFrame).
+    internal static TimelineSourceAndDevices CreateBatchSource(Scene cloneScene) => new(cloneScene);
+
+    // One frame of a batch: the live and clone keys must agree; a frame already stored (in RAM, or on disk where the
+    // preview reads it ahead) is not rendered again; otherwise the clone renders it and it is primed for the view.
+    internal static IdleFrameResult PrimeFrame(KeyDependencyTracker liveTracker, Scene liveScene, KeyDependencyTracker cloneTracker,
+        Scene cloneScene, object source, Action<TimeSpan> render, int frame, TimelineFrameCache.PreviewViewport viewport,
+        Func<bool> canContinue, CancellationToken token, out string reason)
+    {
+        if (!TryCapturePair(liveTracker, cloneTracker, frame, out var liveCapture, out var cloneCapture, out reason))
+            return liveTracker.RendersNormally(frame) && cloneTracker.RendersNormally(frame) ? IdleFrameResult.Normal : IdleFrameResult.NotKeyed;
+        using (liveCapture)
+        using (cloneCapture)
+        {
+            if (!canContinue() || !liveCapture!.Validate() || !cloneCapture!.Validate()) return IdleFrameResult.Stopped;
+            // Same conversion as TimelineVideoPlayer, so the primed frame is rendered at the exact time
+            // the player will request (a one-tick difference can select another video sample).
+            var time = cloneScene.Timeline.VideoInfo.GetTimeFrom(frame);
+            if (TimelineFrameCache.IsPreviewStored(source, time, cloneCapture, viewport)) return IdleFrameResult.Stored;
+            render(time);
+            if (!canContinue()) return IdleFrameResult.Stopped;
+            return TryPrimeIfCurrent(token, liveScene, cloneScene, source, time, viewport, liveCapture, cloneCapture)
+                ? IdleFrameResult.Rendered : IdleFrameResult.Unavailable;
         }
     }
 
@@ -342,7 +363,7 @@ internal static class IdleFramePreRenderer
     }
 
     internal static bool TryPrimeIfCurrent(CancellationToken token, Scene liveScene, Scene cloneScene,
-        TimelineSourceAndDevices source, TimeSpan time, TimelineFrameCache.PreviewViewport viewport,
+        object source, TimeSpan time, TimelineFrameCache.PreviewViewport viewport,
         KeyCapture liveCapture, KeyCapture cloneCapture)
     {
         if (token.IsCancellationRequested || liveCapture.Key != cloneCapture.Key

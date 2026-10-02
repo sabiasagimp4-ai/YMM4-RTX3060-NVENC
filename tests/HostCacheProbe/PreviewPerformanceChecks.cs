@@ -95,40 +95,8 @@ internal static class PreviewPerformanceChecks
             TimelineFrameCache.CompletePendingStore(source);
             TimelineFrameCache.Clear();
 
-            object Measure(string mode, bool enabled, Func<int, int>? sequence = null)
-            {
-                TimelineFrameCache.SetEnabled(enabled, false);
-                PreviewPerformance.Reset();
-                long hits = TimelineFrameCache.RamHits, gpuHits = TimelineFrameCache.GpuHits, stored = TimelineFrameCache.PreviewStored;
-                long allocated = GC.GetTotalAllocatedBytes(precise: true);
-                var collections = Enumerable.Range(0, 3).Select(GC.CollectionCount).ToArray();
-                var wall = Stopwatch.StartNew();
-                for (int frame = 0; frame < Frames; frame++)
-                {
-                    long started = PreviewPerformance.Timestamp;
-                    Update(sequence?.Invoke(frame) ?? frame);
-                    using (PreviewPerformance.Measure(PreviewStage.PreviewDraw)) Draw();
-                    PreviewPerformance.End(PreviewStage.TotalPreview, started);
-                }
-                wall.Stop();
-                var flush = Stopwatch.StartNew();
-                TimelineFrameCache.CompletePendingStore(source);
-                flush.Stop();
-                long gpuHitCount = TimelineFrameCache.GpuHits - gpuHits;
-                long ramHits = TimelineFrameCache.RamHits - hits, saved = TimelineFrameCache.PreviewStored - stored;
-                var stages = PreviewPerformance.Snapshot();
-                Check(stages.Single(s => s.Stage == PreviewStage.TotalUpdate).SampleCount == Frames, mode + " did not measure all updates");
-                Check(stages.Single(s => s.Stage == PreviewStage.TotalPreview).SampleCount == Frames, mode + " did not measure all previews");
-                if (mode == "cold-store") Check(saved > 0 && saved <= Frames && ramHits == 0, $"Cold-store counts: saved={saved}, hits={ramHits}");
-                if (mode.StartsWith("ram-hit", StringComparison.Ordinal)) Check(ramHits == Frames && saved == 0, $"RAM-hit counts: hits={ramHits}, saved={saved}");
-                if (mode.StartsWith("gpu-hit", StringComparison.Ordinal)) Check(gpuHitCount == Frames && ramHits == 0 && saved == 0,
-                    $"GPU-hit counts: gpu={gpuHitCount}, ram={ramHits}, saved={saved}");
-                if (mode == "off") Check(saved == 0 && ramHits == 0, "OFF used the cache");
-                long bytes = GC.GetTotalAllocatedBytes(precise: true) - allocated;
-                Console.WriteLine($"{mode}: {wall.Elapsed.TotalMilliseconds / Frames:F3} ms/frame, final flush {flush.Elapsed.TotalMilliseconds:F3} ms, GPU hits {gpuHitCount}, RAM hits {ramHits}, stored {saved}");
-                return new { Mode = mode, WallMilliseconds = wall.Elapsed.TotalMilliseconds, FinalFlushMilliseconds = flush.Elapsed.TotalMilliseconds,
-                    AllocatedBytes = bytes, GcCollections = Enumerable.Range(0, 3).Select(i => GC.CollectionCount(i) - collections[i]).ToArray(), GpuHits = gpuHitCount, RamHits = ramHits, Stored = saved, Stages = stages };
-            }
+            object Measure(string mode, bool enabled, Func<int, int>? sequence = null) =>
+                MeasureCore("base", timeline, source, Draw, mode, enabled, sequence);
 
             var measurements = new List<object> { Measure("off", false), Measure("cold-store", true) };
             // Nonblocking cold playback may skip captures while a previous GPU copy is busy. Prime all
@@ -249,12 +217,13 @@ internal static class PreviewPerformanceChecks
                 Console.WriteLine("GPU retention: 8-frame pixel parity, active-borrow eviction, viewport/edit/purge invalidation and source disposal OK");
             }
             finally { TimelineFrameCache.GpuRetentionEnabled = false; TimelineFrameCache.GpuRetentionBudget = oldGpuBudget; }
+            var filesMeasurements = MeasureFilesFixture(host, harmony, context, dc, target, viewport, root);
             var report = new { HostVersion = host.GetName().Version!.ToString(), HostMvid = host.ManifestModule.ModuleVersionId,
                 HostSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(host.Location))),
                 Adapter = description.Description, description.VendorId, description.DeviceId, Driver = driver,
                 Frames, Width, Height, HotWorkingSetFrames = 8, CounterbalancedHotPasses = 6, DiskEnabled = false, PixelParityFrames = Frames,
                 TimingScope = "Real TimelineSource.Update + stand-in source-only Draw; no GUI/audio/Present/pacing. Final readback flush separate. Cache OFF still has measurement hooks.",
-                Measurements = measurements };
+                Measurements = measurements, FilesFixture = filesMeasurements };
             var options = new JsonSerializerOptions { WriteIndented = true, Converters = { new JsonStringEnumConverter() } };
             string output = Path.GetFullPath("dist/preview-performance.json");
             Directory.CreateDirectory(Path.GetDirectoryName(output)!);
@@ -270,6 +239,272 @@ internal static class PreviewPerformanceChecks
             harmony.UnpatchAll(harmony.Id);
         }
         Check(TimelineFrameCache.GpuBytes == 0, "Performance fixture leaked GPU reservations");
+    }
+
+
+    // One measured pass of `Frames` Update+Draw pairs on `source`. Prints a PERF line (parsed from CI logs) with
+    // per-frame wall time percentiles and the plugin's stage percentiles (p50/p95/mean, ms).
+    private static object MeasureCore(string fixture, Timeline timeline, ITimelineSource source, Action draw, string mode, bool enabled,
+        Func<int, int>? sequence = null, bool checkCounts = true)
+    {
+        TimelineFrameCache.SetEnabled(enabled, false);
+        PreviewPerformance.Reset();
+        long hits = TimelineFrameCache.RamHits, gpuHits = TimelineFrameCache.GpuHits, stored = TimelineFrameCache.PreviewStored;
+        long allocated = GC.GetTotalAllocatedBytes(precise: true);
+        var collections = Enumerable.Range(0, 3).Select(GC.CollectionCount).ToArray();
+        var perFrame = new long[Frames];
+        long opens = FileDependencyLease.FileOpens;
+        var wall = Stopwatch.StartNew();
+        for (int frame = 0; frame < Frames; frame++)
+        {
+            long started = PreviewPerformance.Timestamp;
+            source.Update(timeline.VideoInfo.GetTimeFrom(sequence?.Invoke(frame) ?? frame), TimelineSourceUsage.Playing);
+            using (PreviewPerformance.Measure(PreviewStage.PreviewDraw)) draw();
+            PreviewPerformance.End(PreviewStage.TotalPreview, started);
+            perFrame[frame] = PreviewPerformance.Timestamp - started;
+        }
+        wall.Stop();
+        opens = FileDependencyLease.FileOpens - opens;
+        var flush = Stopwatch.StartNew();
+        TimelineFrameCache.CompletePendingStore(source);
+        flush.Stop();
+        long gpuHitCount = TimelineFrameCache.GpuHits - gpuHits;
+        long ramHits = TimelineFrameCache.RamHits - hits, saved = TimelineFrameCache.PreviewStored - stored;
+        var stages = PreviewPerformance.Snapshot();
+        if (checkCounts)
+        {
+            Check(stages.Single(s => s.Stage == PreviewStage.TotalUpdate).SampleCount == Frames, mode + " did not measure all updates");
+            Check(stages.Single(s => s.Stage == PreviewStage.TotalPreview).SampleCount == Frames, mode + " did not measure all previews");
+            if (mode == "cold-store") Check(saved > 0 && saved <= Frames && ramHits == 0, $"Cold-store counts: saved={saved}, hits={ramHits}");
+            if (mode.StartsWith("ram-hit", StringComparison.Ordinal)) Check(ramHits == Frames && saved == 0, $"RAM-hit counts: hits={ramHits}, saved={saved}");
+            if (mode.StartsWith("gpu-hit", StringComparison.Ordinal)) Check(gpuHitCount == Frames && ramHits == 0 && saved == 0,
+                $"GPU-hit counts: gpu={gpuHitCount}, ram={ramHits}, saved={saved}");
+            if (mode == "off") Check(saved == 0 && ramHits == 0, "OFF used the cache");
+        }
+        long bytes = GC.GetTotalAllocatedBytes(precise: true) - allocated;
+        var gc = Enumerable.Range(0, 3).Select(i => GC.CollectionCount(i) - collections[i]).ToArray();
+        Console.WriteLine($"{mode}: {wall.Elapsed.TotalMilliseconds / Frames:F3} ms/frame, final flush {flush.Elapsed.TotalMilliseconds:F3} ms, GPU hits {gpuHitCount}, RAM hits {ramHits}, stored {saved}");
+        string Stage(PreviewStage stage)
+        {
+            var row = stages.Single(s => s.Stage == stage);
+            return row.SampleCount == 0 ? "-" : FormattableString.Invariant($"{row.P50Milliseconds:F3}/{row.P95Milliseconds:F3}/{row.MeanMilliseconds:F3}");
+        }
+        Console.WriteLine(FormattableString.Invariant($"PERF|{fixture}|{mode}|frame={FrameStats(perFrame)}|update={Stage(PreviewStage.TotalUpdate)}|key={Stage(PreviewStage.KeyGeneration)}")
+            + FormattableString.Invariant($"|lookup={Stage(PreviewStage.CacheLookup)}|host={Stage(PreviewStage.HostRender)}|copy={Stage(PreviewStage.BeginGpuCopy)}|alloc={Stage(PreviewStage.CpuAllocation)}")
+            + FormattableString.Invariant($"|memcpy={Stage(PreviewStage.CpuMemcpy)}|map={Stage(PreviewStage.MapWait)}|draw={Stage(PreviewStage.PreviewDraw)}|bytes={bytes}|gc={gc[0]}/{gc[1]}/{gc[2]}")
+            + FormattableString.Invariant($"|gpuhits={gpuHitCount}|ramhits={ramHits}|stored={saved}|opens/frame={opens / (double)Frames:F1}"));
+        return new { Fixture = fixture, Mode = mode, WallMilliseconds = wall.Elapsed.TotalMilliseconds, FinalFlushMilliseconds = flush.Elapsed.TotalMilliseconds,
+            AllocatedBytes = bytes, GcCollections = gc, GpuHits = gpuHitCount, RamHits = ramHits, Stored = saved,
+            FileOpensPerFrame = opens / (double)Frames, FrameMilliseconds = perFrame.Select(Milliseconds).ToArray(), Stages = stages };
+    }
+
+    private static double Milliseconds(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;
+
+    // p50/p95/p99/max/mean of per-frame wall times (ms).
+    private static string FrameStats(long[] ticks)
+    {
+        var sorted = ticks.Select(Milliseconds).Order().ToArray();
+        double At(double p) => sorted[Math.Clamp((int)Math.Ceiling(p * sorted.Length) - 1, 0, sorted.Length - 1)];
+        return FormattableString.Invariant($"{At(.5):F3}/{At(.95):F3}/{At(.99):F3}/{sorted[^1]:F3}/{sorted.Average():F3}");
+    }
+
+    // A project closer to real ones: every frame depends on many material files (voice/BGM/SE files are frame
+    // dependencies of the cache key) and the project has more than 200 items, so that the preview describes it in
+    // the background as it does for large projects. Also measures the idle pre-renderer's per-frame work on its own
+    // source and the cost of the hooks themselves (cache off with hooks vs. no hooks).
+    private static object MeasureFilesFixture(Assembly host, Harmony harmony, object context, ID2D1DeviceContext dc, ID2D1Bitmap1 target,
+        TimelineFrameCache.PreviewViewport baseViewport, string root)
+    {
+        const int AudioFiles = 24, ExtraShapes = 120;
+        string folder = Path.Combine(root, "materials");
+        Directory.CreateDirectory(folder);
+        var timeline = new Timeline();
+        timeline.VideoInfo.Width = Width; timeline.VideoInfo.Height = Height; timeline.VideoInfo.FPS = 30;
+        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, Frames).Select(frame =>
+        {
+            var item = new ShapeItem { Frame = frame, Length = 1 };
+            item.X.SetFirstValue(-600 + frame * 12.25); item.Y.SetFirstValue(frame % 7 * 20 - 70);
+            item.Opacity.SetFirstValue(43);
+            return (IItem)item;
+        }));
+        timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, ExtraShapes).Select(i =>
+        {
+            var item = new ShapeItem { Frame = i % Frames, Length = 1, Layer = 2 };
+            item.Y.SetFirstValue(200 + i % 5 * 10);
+            return (IItem)item;
+        }));
+        timeline.Items = timeline.Items.Add(new TextItem { Frame = 0, Length = Frames, Layer = 3, Text = "Many material files", Font = "Arial" });
+        timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, AudioFiles).Select(i =>
+        {
+            string file = Path.Combine(folder, $"voice{i:00}.wav");
+            WriteSilence(file, i);
+            return (IItem)new AudioItem { FilePath = file, Frame = 0, Length = Frames, Layer = 10 + i };
+        }));
+        var scene = new Scene(timeline, scenes, []);
+        var sourceType = host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!;
+        ITimelineSource Create()
+        {
+            var created = (ITimelineSource)Activator.CreateInstance(sourceType, Instance, null, [context, scene, null], null)!;
+            created.GetType().GetProperty("NeedTimelineItemRects")!.SetValue(created, false);
+            return created;
+        }
+        var viewport = baseViewport with { SceneId = scene.ID, TimelineId = timeline.ID, LastDrawTimestamp = Stopwatch.GetTimestamp() };
+        var store = new FrameCacheStore(Path.Combine(root, "files-store"), Frames * ((long)Width * Height * 4 + 32) + (1L << 20), 0);
+        TimelineFrameCache.UseStore(store);
+        var measurements = new List<object>();
+        ITimelineSource? live = null;
+        try
+        {
+            live = Create();
+            var shown = live;
+            TimelineFrameCache.TestViewport = value => ReferenceEquals(value, shown) ? viewport : null;
+            void Draw(ITimelineSource from)
+            {
+                using var oldTarget = dc.Target;
+                var transform = dc.Transform;
+                try
+                {
+                    dc.Target = target; dc.Transform = viewport.Transform;
+                    dc.BeginDraw(); dc.Clear(new Color4(0, 0, 0, 1));
+                    dc.DrawImage(from.Output, viewport.TargetOffset);
+                    dc.EndDraw().CheckError();
+                }
+                finally { dc.Target = oldTarget; dc.Transform = transform; }
+            }
+            void Update(ITimelineSource on, int frame) => on.Update(timeline.VideoInfo.GetTimeFrom(frame), TimelineSourceUsage.Playing);
+
+            // Background description (> 200 items) and fingerprinting of the files happen before the first store.
+            TimelineFrameCache.SetEnabled(true, false);
+            long warmed = TimelineFrameCache.PreviewStored;
+            var warmup = Stopwatch.StartNew();
+            while (TimelineFrameCache.PreviewStored == warmed && warmup.Elapsed < TimeSpan.FromSeconds(60))
+            {
+                Update(live, Frames - 1); Draw(live); TimelineFrameCache.CompletePendingStore(live); Thread.Sleep(10);
+            }
+            Check(TimelineFrameCache.PreviewStored > warmed, "Files fixture warmup never stored a frame: " + TimelineFrameCache.Status);
+            for (int frame = 0; frame < Frames; frame++) { Update(live, frame); Draw(live); }
+            TimelineFrameCache.CompletePendingStore(live);
+            TimelineFrameCache.Clear();
+
+            measurements.Add(MeasureCore("files24", timeline, live, () => Draw(live), "off", false));
+            measurements.Add(MeasureCore("files24", timeline, live, () => Draw(live), "cold-store", true));
+            for (int frame = 0; frame < Frames; frame++) { Update(live, frame); Draw(live); TimelineFrameCache.CompletePendingStore(live); }
+            measurements.Add(MeasureCore("files24", timeline, live, () => Draw(live), "ram-hit", true));
+            const int HotFrames = 8;
+            long oldBudget = TimelineFrameCache.GpuRetentionBudget;
+            TimelineFrameCache.GpuRetentionBudget = HotFrames * (long)Width * Height * 4;
+            try
+            {
+                TimelineFrameCache.GpuRetentionEnabled = true;
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    for (int frame = 0; frame < HotFrames; frame++) { Update(live, frame); Draw(live); }
+                    measurements.Add(MeasureCore("files24", timeline, live, () => Draw(live), "gpu-hit-hot-" + pass, true, frame => frame % HotFrames));
+                }
+            }
+            finally { TimelineFrameCache.GpuRetentionEnabled = false; TimelineFrameCache.GpuRetentionBudget = oldBudget; }
+
+            // The idle pre-renderer's batches, driven through its own code (IdleFramePreRenderer.PrimeFrame and
+            // CreateBatchSource) as RenderBatch does: per batch of 30 a clone of the live model with its own tracker and
+            // renderer, per frame the live/clone keys, the stored check, the clone's Update and the synchronous prime.
+            // Not included: the UI timer, input checks and the gap between batches.
+            TimelineFrameCache.Clear();
+            TimelineFrameCache.SetEnabled(true, false);
+            measurements.Add(MeasureIdleBatches(scene, timeline, viewport with { IsPlaying = false, LastDrawTimestamp = Stopwatch.GetTimestamp() }));
+            live.Dispose(); live = null;
+
+            // Hooks with every cache off vs. no hooks at all (plugin not installed), on fresh sources.
+            TimelineFrameCache.SetEnabled(false, false);
+            long[] Loop(ITimelineSource on)
+            {
+                var ticks = new long[Frames];
+                for (int frame = 0; frame < Frames; frame++)
+                {
+                    long started = Stopwatch.GetTimestamp();
+                    Update(on, frame); Draw(on);
+                    ticks[frame] = Stopwatch.GetTimestamp() - started;
+                }
+                return ticks;
+            }
+            long[] Passes(ITimelineSource on)
+            {
+                Loop(on); // warm
+                return Enumerable.Range(0, 3).SelectMany(_ => Loop(on)).ToArray();
+            }
+            using (var hooked = Create())
+            {
+                var ticks = Passes(hooked);
+                Console.WriteLine($"PERF|files24|hooks-off|frame={FrameStats(ticks)}");
+                measurements.Add(new { Fixture = "files24", Mode = "hooks-off", FrameMilliseconds = ticks.Select(Milliseconds).ToArray() });
+            }
+            FrameRenderReadiness.Uninstall(harmony);
+            harmony.UnpatchAll(harmony.Id);
+            using (var bare = Create())
+            {
+                var ticks = Passes(bare);
+                Console.WriteLine($"PERF|files24|no-hooks|frame={FrameStats(ticks)}");
+                measurements.Add(new { Fixture = "files24", Mode = "no-hooks", FrameMilliseconds = ticks.Select(Milliseconds).ToArray() });
+            }
+        }
+        finally
+        {
+            live?.Dispose();
+            TimelineFrameCache.TestViewport = null;
+            store.Dispose();
+        }
+        return measurements;
+    }
+
+    private static object MeasureIdleBatches(Scene scene, Timeline timeline, TimelineFrameCache.PreviewViewport view)
+    {
+        const int Batch = 30;
+        using var liveTracker = new KeyDependencyTracker(scene); // the idle session's tracker of the live scene
+        var ready = Stopwatch.StartNew();
+        KeyCapture? probe;
+        while (!liveTracker.TryCapture(0, out probe, out _) && ready.Elapsed < TimeSpan.FromSeconds(60)) Thread.Sleep(20);
+        Check(probe is not null, "Idle fixture: the live tracker never keyed frame 0");
+        probe!.Dispose();
+        var ticks = new long[Frames];
+        var outcomes = new SortedDictionary<string, int>(StringComparer.Ordinal);
+        long opens = FileDependencyLease.FileOpens;
+        var wall = Stopwatch.StartNew();
+        for (int start = 0; start < Frames; start += Batch)
+        {
+            long batchStarted = Stopwatch.GetTimestamp();
+            Check(liveTracker.TryCapture(start, out var initial, out var why), "Idle fixture: " + why);
+            Scene cloneScene;
+            using (initial) cloneScene = IdleFramePreRenderer.CloneSceneFromModel(initial!.Model);
+            using var cloneTracker = new KeyDependencyTracker(cloneScene, liveTracker.VerifiedFingerprints);
+            using var source = IdleFramePreRenderer.CreateBatchSource(cloneScene);
+            for (int frame = start; frame < Math.Min(Frames, start + Batch); frame++)
+            {
+                long started = frame == start ? batchStarted : Stopwatch.GetTimestamp();
+                var result = IdleFramePreRenderer.PrimeFrame(liveTracker, scene, cloneTracker, cloneScene, source,
+                    time => source.Update(time, TimelineSourceUsage.Playing), frame, view, () => true, CancellationToken.None, out _);
+                outcomes[result.ToString()] = outcomes.GetValueOrDefault(result.ToString()) + 1;
+                ticks[frame] = Stopwatch.GetTimestamp() - started;
+            }
+        }
+        wall.Stop();
+        opens = FileDependencyLease.FileOpens - opens;
+        string summary = string.Join(",", outcomes.Select(pair => $"{pair.Key}={pair.Value}"));
+        Console.WriteLine(FormattableString.Invariant($"PERF|files24|idle-batches|frame={FrameStats(ticks)}|fps={Frames * 1000.0 / wall.Elapsed.TotalMilliseconds:F1}|opens/frame={opens / (double)Frames:F1}|{summary}"));
+        return new { Fixture = "files24", Mode = "idle-batches", WallMilliseconds = wall.Elapsed.TotalMilliseconds, Outcomes = outcomes,
+            FileOpensPerFrame = opens / (double)Frames, FrameMilliseconds = ticks.Select(Milliseconds).ToArray() };
+    }
+
+    // A short, valid 16-bit PCM WAV (distinct content per file).
+    private static void WriteSilence(string path, int seed)
+    {
+        const int SampleRate = 48000, Samples = 4800;
+        using var stream = new FileStream(path, FileMode.Create, FileAccess.Write);
+        using var writer = new BinaryWriter(stream);
+        writer.Write("RIFF"u8); writer.Write(36 + Samples * 2); writer.Write("WAVE"u8);
+        writer.Write("fmt "u8); writer.Write(16); writer.Write((short)1); writer.Write((short)1);
+        writer.Write(SampleRate); writer.Write(SampleRate * 2); writer.Write((short)2); writer.Write((short)16);
+        writer.Write("data"u8); writer.Write(Samples * 2);
+        for (int i = 0; i < Samples; i++) writer.Write((short)(i == 0 ? seed : 0));
     }
 
     private static void CheckRestoreTrace(string path)

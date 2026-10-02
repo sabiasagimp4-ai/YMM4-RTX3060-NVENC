@@ -35,6 +35,9 @@
     <Compile Include="..\..\NVEncVideoWriterPlugin\KeyDependencyTracker.cs" Link="KeyDependencyTracker.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameDependencyIndex.cs" Link="FrameDependencyIndex.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FileDependencyLease.cs" Link="FileDependencyLease.cs" />
+    <!-- The performance harness drives idle batches with this assembly's TimelineFrameCache. -->
+    <Compile Include="..\..\NVEncVideoWriterPlugin\IdleFramePlan.cs" Link="IdleFramePlan.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\IdleFramePreRenderer.cs" Link="IdleFramePreRenderer.cs" />
     <Reference Include="YukkuriMovieMaker"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="YukkuriMovieMaker.Plugin"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.Plugin.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="YukkuriMovieMaker.Settings"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.Settings.dll</HintPath><Private>false</Private></Reference>
