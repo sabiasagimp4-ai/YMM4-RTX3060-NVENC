@@ -102,28 +102,6 @@ internal static class PreviewPerformanceChecks
             // Stored misses drawn once (the player blits the pixels drawn for the store) and, as before, twice;
             // alternated in this run so that the runner's speed does not decide the comparison.
             measurements.AddRange(MeasureColdPair("base", timeline, source, Draw));
-            // Nonblocking cold playback may skip captures while a previous GPU copy is busy. Prime all
-            // frames explicitly outside the measured loop before asserting a 100% RAM-hit workload.
-            for (int frame = 0; frame < Frames; frame++)
-            {
-                Update(frame); Draw(); TimelineFrameCache.CompletePendingStore(source);
-            }
-            measurements.Add(Measure("ram-hit", true));
-            CacheTrace.Start(Path.GetFullPath("dist/performance-trace.jsonl"), "ram-hit-trace");
-            ProcessingTraceHooks.Start();
-            ProcessingTraceHooks.Discover(); // Installation cost is outside the measured loop.
-            try { measurements.Add(Measure("ram-hit-trace", true)); }
-            finally { ProcessingTraceHooks.Stop(); CacheTrace.StopAsync().GetAwaiter().GetResult(); }
-            CheckRestoreTrace(Path.GetFullPath("dist/performance-trace.jsonl"));
-            // Every frame, with no captures in the preceding measurements.
-            for (int frame = 0; frame < Frames; frame++)
-            {
-                TimelineFrameCache.SetEnabled(false, false); Update(frame);
-                var baseline = TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!;
-                TimelineFrameCache.SetEnabled(true, false); Update(frame);
-                var cached = TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!;
-                Check(baseline.SequenceEqual(cached), $"Frame {frame} pixel parity failed");
-            }
             // A stored miss shows the pixels drawn for the store: equal to the host's own render, also at a fractional
             // view offset. A Draw with another view (zoom, pan, resize) shows the host's output again.
             var plainView = viewport;
@@ -156,6 +134,28 @@ internal static class PreviewPerformanceChecks
                 "After a view change the host's output was not shown");
             TimelineFrameCache.CompletePendingStore(source);
             Console.WriteLine("Drawn once: stored misses show their stored pixels (8 frames, fractional offset), a view change shows the host's output again");
+            // Nonblocking cold playback may skip captures while a previous GPU copy is busy. Prime all
+            // frames explicitly outside the measured loop before asserting a 100% RAM-hit workload.
+            for (int frame = 0; frame < Frames; frame++)
+            {
+                Update(frame); Draw(); TimelineFrameCache.CompletePendingStore(source);
+            }
+            measurements.Add(Measure("ram-hit", true));
+            CacheTrace.Start(Path.GetFullPath("dist/performance-trace.jsonl"), "ram-hit-trace");
+            ProcessingTraceHooks.Start();
+            ProcessingTraceHooks.Discover(); // Installation cost is outside the measured loop.
+            try { measurements.Add(Measure("ram-hit-trace", true)); }
+            finally { ProcessingTraceHooks.Stop(); CacheTrace.StopAsync().GetAwaiter().GetResult(); }
+            CheckRestoreTrace(Path.GetFullPath("dist/performance-trace.jsonl"));
+            // Every frame, with no captures in the preceding measurements.
+            for (int frame = 0; frame < Frames; frame++)
+            {
+                TimelineFrameCache.SetEnabled(false, false); Update(frame);
+                var baseline = TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!;
+                TimelineFrameCache.SetEnabled(true, false); Update(frame);
+                var cached = TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!;
+                Check(baseline.SequenceEqual(cached), $"Frame {frame} pixel parity failed");
+            }
             // Counterbalanced hot-set comparison; retain the preceding 100-frame sequential baseline.
             const int HotFrames = 8;
             Func<int, int> hot = frame => frame % HotFrames;
@@ -286,7 +286,7 @@ internal static class PreviewPerformanceChecks
         TimelineFrameCache.SetEnabled(enabled, false);
         PreviewPerformance.Reset();
         long hits = TimelineFrameCache.RamHits, gpuHits = TimelineFrameCache.GpuHits, stored = TimelineFrameCache.PreviewStored;
-        long drawnOnce = TimelineFrameCache.DrawnOnce;
+        long drawnOnce = TimelineFrameCache.DrawnOnce, busy = TimelineFrameCache.ReadbackBusySkips;
         long allocated = GC.GetTotalAllocatedBytes(precise: true);
         var collections = Enumerable.Range(0, 3).Select(GC.CollectionCount).ToArray();
         var perFrame = new long[Frames];
@@ -308,6 +308,7 @@ internal static class PreviewPerformanceChecks
         long gpuHitCount = TimelineFrameCache.GpuHits - gpuHits;
         long ramHits = TimelineFrameCache.RamHits - hits, saved = TimelineFrameCache.PreviewStored - stored;
         long once = TimelineFrameCache.DrawnOnce - drawnOnce;
+        busy = TimelineFrameCache.ReadbackBusySkips - busy;
         var stages = PreviewPerformance.Snapshot();
         if (checkCounts)
         {
@@ -332,9 +333,9 @@ internal static class PreviewPerformanceChecks
         Console.WriteLine(FormattableString.Invariant($"PERF|{fixture}|{mode}|frame={FrameStats(perFrame)}|update={Stage(PreviewStage.TotalUpdate)}|key={Stage(PreviewStage.KeyGeneration)}")
             + FormattableString.Invariant($"|lookup={Stage(PreviewStage.CacheLookup)}|host={Stage(PreviewStage.HostRender)}|copy={Stage(PreviewStage.BeginGpuCopy)}|alloc={Stage(PreviewStage.CpuAllocation)}")
             + FormattableString.Invariant($"|memcpy={Stage(PreviewStage.CpuMemcpy)}|map={Stage(PreviewStage.MapWait)}|draw={Stage(PreviewStage.PreviewDraw)}|bytes={bytes}|gc={gc[0]}/{gc[1]}/{gc[2]}")
-            + FormattableString.Invariant($"|gpuhits={gpuHitCount}|ramhits={ramHits}|stored={saved}|opens/frame={opens / (double)Frames:F1}|once={once}"));
+            + FormattableString.Invariant($"|gpuhits={gpuHitCount}|ramhits={ramHits}|stored={saved}|opens/frame={opens / (double)Frames:F1}|once={once}|busy={busy}"));
         return new { Fixture = fixture, Mode = mode, WallMilliseconds = wall.Elapsed.TotalMilliseconds, FinalFlushMilliseconds = flush.Elapsed.TotalMilliseconds,
-            AllocatedBytes = bytes, GcCollections = gc, GpuHits = gpuHitCount, RamHits = ramHits, Stored = saved, DrawnOnce = once,
+            AllocatedBytes = bytes, GcCollections = gc, GpuHits = gpuHitCount, RamHits = ramHits, Stored = saved, DrawnOnce = once, ReadbackBusy = busy,
             FileOpensPerFrame = opens / (double)Frames, FrameMilliseconds = perFrame.Select(Milliseconds).ToArray(), Stages = stages };
     }
 

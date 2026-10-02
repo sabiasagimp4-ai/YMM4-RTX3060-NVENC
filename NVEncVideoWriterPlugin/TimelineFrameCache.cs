@@ -54,7 +54,7 @@ internal static class TimelineFrameCache
     private static Type pickerType = null!;
     private static long hits, misses, gpuBytes, generation;
     private static long gpuHits, liveReuses, ramHits, diskHits, bypasses, previewStored, previewStoreTicks, readAheads;
-    private static long drawnOnce, shownCopiesDropped;
+    private static long drawnOnce, shownCopiesDropped, readbackBusySkips;
     private static string status = "自動キャッシュは停止中です";
     private static bool previewEnabled, exportEnabled, previewSupported, rectsSupported, refreshSupported;
     private static bool drawOnce = true;
@@ -123,6 +123,8 @@ internal static class TimelineFrameCache
     // the player drew another view.
     internal static long DrawnOnce => Interlocked.Read(ref drawnOnce);
     internal static long ShownCopiesDropped => Interlocked.Read(ref shownCopiesDropped);
+    // Rendered preview frames not stored because the previous frame's readback was still on the GPU.
+    internal static long ReadbackBusySkips => Interlocked.Read(ref readbackBusySkips);
     // Tests only: false shows the host's output of stored frames, which the player's Draw evaluates again (A/B).
     internal static bool DrawOnce
     {
@@ -591,6 +593,7 @@ internal static class TimelineFrameCache
         {
             using var trace = CacheTrace.Measure("cache-admission", "policy");
             if (trace is not null) trace.Outcome = "readback-busy";
+            Interlocked.Increment(ref readbackBusySkips);
             return false;
         }
         if (!pending.State.Economics.ShouldAdmit(pending.CacheKey!, (long)viewport.Width * viewport.Height * 4 + PreviewRecordHeader, gpuRetentionEnabled))
