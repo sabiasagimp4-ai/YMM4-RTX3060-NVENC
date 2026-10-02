@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Collections;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Numerics;
 using System.Reflection;
@@ -194,7 +195,7 @@ internal static partial class TimelineFrameCache
     // playback. False when the target is not one view-sized texture. The textures are the caller's as soon as they
     // are assigned.
     private static bool QueueStagingCopy(ID2D1Bitmap1 target, PreviewViewport viewport, ReadbackPool? pool,
-        ref ID3D11Texture2D? readable, ref ID3D11DeviceContext? immediate)
+        [NotNullWhen(true)] ref ID3D11Texture2D? readable, [NotNullWhen(true)] ref ID3D11DeviceContext? immediate)
     {
         using var surface = target.Surface;
         using var texture = surface.QueryInterface<ID3D11Texture2D>();
