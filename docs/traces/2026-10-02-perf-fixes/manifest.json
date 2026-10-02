@@ -48,5 +48,59 @@
     "Fixtures": {
       "effects": "per frame three blurred shapes at 600% zoom and one blurred Arial text item"
     }
+  },
+  "Stabilize": {
+    "Note": "readback ring (3 per source), pooled readback textures, reused display command list, at least two rotating targets, persistent idle renderer; the harness collects the heap before each pass from cf7f4e1 on. Each run alternates drawn-once (cold-store*) and drawn-twice (cold-store-twice*) passes in three pairs; WALL lines are the console ms/frame including the paced GPU wait",
+    "Runs": {
+      "stabilize-55ec3e4-run1.txt": {
+        "SourceCommit": "55ec3e449768c6d79b7b475473866f4e7e61909d",
+        "RunId": 37073903924,
+        "Attempt": 1,
+        "JobId": 111059503455
+      },
+      "stabilize-55ec3e4-run2.txt": {
+        "SourceCommit": "55ec3e449768c6d79b7b475473866f4e7e61909d",
+        "RunId": 37073903924,
+        "Attempt": 2,
+        "JobId": 111061284410
+      },
+      "stabilize-cf7f4e1-run1.txt": {
+        "SourceCommit": "cf7f4e1ecbd685d099aff3e0f2f521c5ad28df48",
+        "RunId": 37075173231,
+        "Attempt": 1,
+        "JobId": 111063439154
+      },
+      "stabilize-cf7f4e1-run2.txt": {
+        "SourceCommit": "cf7f4e1ecbd685d099aff3e0f2f521c5ad28df48",
+        "RunId": 37075173231,
+        "Attempt": 2,
+        "JobId": 111065451139
+      },
+      "stabilize-5a3f222-run1.txt": {
+        "SourceCommit": "5a3f222a55dd28753bea08e530373953d711177f",
+        "RunId": 37076472955,
+        "Attempt": 1,
+        "JobId": 111067529521
+      },
+      "stabilize-5a3f222-run2.txt": {
+        "SourceCommit": "5a3f222a55dd28753bea08e530373953d711177f",
+        "RunId": 37076472955,
+        "Attempt": 2,
+        "JobId": 111069133046
+      }
+    },
+    "Missing": "stabilize-55ec3e4-run1.txt lacks the first four base passes (off, cold-store, cold-store-twice, cold-store-twice-2): the log was read from its tail",
+    "Fields": "once=frames shown drawn once, busy=frames not stored because every readback slot was waiting on the GPU, created=readback textures created in the pass, gcpause=ms of GC pause in the pass, ws=working set MB, pool=pooled readback MB"
+  },
+  "Refactor": {
+    "SourceCommit": "2dfbd5234b2bdc9a224e6972d21abe169fe32ea3",
+    "RunId": 37077648455,
+    "JobId": 111071101455,
+    "File": "refactor-2dfbd52-run1.txt",
+    "Note": "no behavior change; the fastest runner of the series (base/off p50 0.66 ms): unpaced base passes skipped 6-15 stores in both modes because every readback slot was waiting on WARP, paced passes stored every frame",
+    "WarningFix": {
+      "SourceCommit": "648ee8ebce256f8629b71fb8ef72ee7807689610",
+      "RunId": 37078458949
+    }
   }
 }
