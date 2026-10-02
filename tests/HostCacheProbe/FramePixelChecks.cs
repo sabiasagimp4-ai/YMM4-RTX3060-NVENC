@@ -329,6 +329,26 @@ internal static class FramePixelChecks
             dc.AntialiasMode, dc.TextAntialiasMode, dc.PrimitiveBlend, dc.UnitMode,
             Guid.NewGuid(), Guid.NewGuid(), System.Diagnostics.Stopwatch.GetTimestamp(), false);
         var saved = TimelineFrameCache.CapturePreview(dc, original, viewport)!;
+        var accounted = TimelineFrameCache.GpuBytes;
+        using (var readback = TimelineFrameCache.BeginPreviewReadback(dc, original, viewport))
+        {
+            Check(readback is not null, "Explicit preview staging readback unavailable");
+            Check(TimelineFrameCache.GpuBytes == accounted + (long)width * height * 4, "Pending staging allocation not accounted");
+            byte[]? polled = null;
+            var deadline = System.Diagnostics.Stopwatch.StartNew();
+            while (!TimelineFrameCache.TryFinishPreviewReadback(readback!, out polled))
+            {
+                Check(polled is null, "Busy GPU allocated/returned an incomplete record");
+                Check(deadline.Elapsed < TimeSpan.FromSeconds(10), "Nonblocking staging copy never completed");
+                Thread.Sleep(1); // test harness only; live playback polls on subsequent player updates
+            }
+            Check(saved.SequenceEqual(polled!), "Nonblocking staging pixels differ from explicit capture");
+            Check(TimelineFrameCache.TryFinishPreviewReadback(readback!, out var again) && saved.SequenceEqual(again!),
+                "Staging resource was not unmapped after completion");
+            readback!.Dispose(); // repeated disposal must be harmless
+        }
+        Check(TimelineFrameCache.GpuBytes == accounted, "Staging reservation leaked after disposal");
+        Console.WriteLine("Nonblocking preview staging: eventual exact pixels, remap and reservation release OK");
         using var savedImage = TimelineFrameCache.UploadPreview(dc, saved, viewport);
         var direct = CapturePreview(dc, original, width, height, transform);
         var cached = CapturePreview(dc, savedImage, width, height, transform);
