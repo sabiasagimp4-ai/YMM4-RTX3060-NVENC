@@ -353,12 +353,28 @@ internal static class FramePixelChecks
         var direct = CapturePreview(dc, original, width, height, transform);
         var cached = CapturePreview(dc, savedImage, width, height, transform);
         Check(direct.SequenceEqual(cached), "Viewport cache changed pixels under TimelineVideoPlayer's late zoom/pan transform");
+        // Drawn once: the copy a stored frame shows (the pixels drawn for the store) draws what the host's output draws.
+        long beforeShown = TimelineFrameCache.GpuBytes;
+        var shownReadback = TimelineFrameCache.BeginPreviewReadback(dc, original, viewport, true, out var shown);
+        try
+        {
+            Check(shownReadback is not null && shown is not null, "Drawn-once preview copy unavailable");
+            Check(TimelineFrameCache.GpuBytes == beforeShown + 2L * width * height * 4, "Drawn-once copy and staging were not both accounted");
+            Check(direct.SequenceEqual(CapturePreview(dc, shown!, width, height, transform)),
+                "Drawn-once copy changed pixels under TimelineVideoPlayer's late zoom/pan transform");
+        }
+        finally
+        {
+            shownReadback?.Dispose();
+            if (shown is not null) TimelineFrameCache.DisposeShownCopy(shown, viewport);
+        }
+        Check(TimelineFrameCache.GpuBytes == beforeShown, "Drawn-once copy reservation leaked");
         var makeKey = typeof(TimelineFrameCache).GetMethod("MakeKey", BindingFlags.NonPublic | BindingFlags.Static)!;
         var key = (string)makeKey.Invoke(null, ["model", TimeSpan.Zero, 30, "Preview", dc, viewport])!;
         var changed = (string)makeKey.Invoke(null, ["model", TimeSpan.Zero, 30, "Preview", dc,
             viewport with { Transform = Matrix3x2.CreateTranslation(1, 0) * transform }])!;
         Check(key != changed, "Preview cache key ignored the view transform");
-        Console.WriteLine("Late preview zoom/pan parity and transform-key invalidation OK");
+        Console.WriteLine("Late preview zoom/pan parity (cached and drawn-once copies) and transform-key invalidation OK");
     }
 
     private static byte[] CapturePreview(ID2D1DeviceContext dc, ID2D1Image source, int width, int height, Matrix3x2 transform)

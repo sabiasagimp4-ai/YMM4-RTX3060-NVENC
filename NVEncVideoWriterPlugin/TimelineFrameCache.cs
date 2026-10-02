@@ -54,8 +54,10 @@ internal static class TimelineFrameCache
     private static Type pickerType = null!;
     private static long hits, misses, gpuBytes, generation;
     private static long gpuHits, liveReuses, ramHits, diskHits, bypasses, previewStored, previewStoreTicks, readAheads;
+    private static long drawnOnce, shownCopiesDropped;
     private static string status = "自動キャッシュは停止中です";
     private static bool previewEnabled, exportEnabled, previewSupported, rectsSupported, refreshSupported;
+    private static bool drawOnce = true;
 
     // The preview (TimelineVideoPlayer: playing, paused, idle pre-rendering, cache bars) and export (any writer) are
     // switched separately. Enabled: either; setting it switches both.
@@ -116,6 +118,17 @@ internal static class TimelineFrameCache
     }
     // Disk reads queued ahead of the playhead.
     internal static long ReadAheads => Interlocked.Read(ref readAheads);
+    // Rendered preview frames shown from the pixels drawn for storing them (the player's Draw blits them instead of
+    // evaluating the composition a second time), and those shown copies replaced by the host's output again because
+    // the player drew another view.
+    internal static long DrawnOnce => Interlocked.Read(ref drawnOnce);
+    internal static long ShownCopiesDropped => Interlocked.Read(ref shownCopiesDropped);
+    // Tests only: false shows the host's output of stored frames, which the player's Draw evaluates again (A/B).
+    internal static bool DrawOnce
+    {
+        get => Volatile.Read(ref drawOnce);
+        set => Volatile.Write(ref drawOnce, value);
+    }
     // Full Update time by path, including deferred work, storing and finalizer cleanup.
     internal static readonly FrameTimeSamples RenderTimes = new(), RamTimes = new(), DiskTimes = new(), LiveTimes = new(), GpuTimes = new();
     internal static FrameCacheStore? StoreIfCreated => store.IsValueCreated ? store.Value : null;
@@ -285,11 +298,17 @@ internal static class TimelineFrameCache
         // gains one frame per update, so the others are not composed and hashed again.
         internal readonly Dictionary<(string FrameKey, int Frame), string> ReadAheadKeys = [];
         internal string ReadAheadStamp = string.Empty;
+        // While the output is the copy ShowRendered made of this update's render: the host's own output, which the
+        // host's disposer still owns, and the view the copy is exact for.
+        internal ID2D1CommandList? HostOutput;
+        internal PreviewViewport ShownViewport;
+        // When the host's update or disposal has released the outputs (callers replacing the output themselves
+        // dispose HostOutput first).
         internal void Released()
         {
             var released = Interlocked.Exchange(ref Bytes, 0);
             if (released != 0) Interlocked.Add(ref gpuBytes, -released);
-            lock (cacheGate) { ActiveGpuFrame?.Release(); ActiveGpuFrame = null; }
+            lock (cacheGate) { ActiveGpuFrame?.Release(); ActiveGpuFrame = null; HostOutput = null; }
             LastKey = null;
             LastViewportKey = null;
             LastOutput = null;
@@ -555,7 +574,7 @@ internal static class TimelineFrameCache
                 if (rects is not null) current.Rects.Remember(__state.LiveKey, rects, __state.Generation, __state.Capture.Revision);
             }
             // Last: storing may finish (and dispose) the capture at once.
-            if (__state.CacheKey is not null && __state.Viewport is { } view) deferred = StorePreview(__state, output, view);
+            if (__state.CacheKey is not null && __state.Viewport is { } view) deferred = StorePreview(__instance, __state, output, view);
         }
         catch (Exception error) { status = "フレームの保存に失敗しました: " + error.GetType().Name; }
         finally { if (!deferred) __state.Dispose(); }
@@ -564,7 +583,8 @@ internal static class TimelineFrameCache
     // A preview frame the host rendered (playing, paused, seeking) is stored for its view, like an idle pre-rendered
     // one. Completion is polled on the render thread without waiting for the GPU. At most one copy per source
     // remains pending; newer captures are skipped while it is busy. True when it took over `pending`.
-    private static bool StorePreview(Pending pending, ID2D1CommandList output, PreviewViewport viewport)
+    // The frame is drawn once: the pixels drawn for the store are also what the player shows (ShowRendered).
+    private static bool StorePreview(object source, Pending pending, ID2D1CommandList output, PreviewViewport viewport)
     {
         CompleteDeferred(pending.State);
         lock (cacheGate) if (pending.State.Deferred is not null)
@@ -580,17 +600,87 @@ internal static class TimelineFrameCache
             return false;
         }
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
-        var readback = BeginPreviewReadback(pending.Devices.DeviceContext, output, viewport);
+        var readback = BeginPreviewReadback(pending.Devices.DeviceContext, output, viewport, DrawOnce, out var shown);
         if (readback is null) return false;
-        lock (cacheGate)
+        try
         {
-            if (!StillCurrent(pending) || pending.State.Deferred is not null) { readback.Dispose(); return false; }
-            pending.HandOver();
-            pending.State.Deferred = new DeferredStore(pending, readback);
+            lock (cacheGate)
+            {
+                if (!StillCurrent(pending) || pending.State.Deferred is not null) { readback.Dispose(); return false; }
+                pending.HandOver();
+                pending.State.Deferred = new DeferredStore(pending, readback);
+                if (shown is not null && ShowRendered(source, pending, shown, (long)viewport.Width * viewport.Height * 4, output, viewport))
+                    shown = null;
+            }
+        }
+        finally
+        {
+            if (shown is not null) DisposeShownCopy(shown, viewport);
         }
         Interlocked.Add(ref previewStoreTicks, System.Diagnostics.Stopwatch.GetTimestamp() - started);
         if (!pending.Playing && !refreshSupported) CompleteDeferred(pending.State);
         return true;
+    }
+
+    // Under cacheGate, on the render thread, after the host's update of `pending` (CachePostfix). `shown` draws the
+    // pixels BeginPreviewReadback drew from the host's output for `viewport`; the player's Draw then blits them
+    // instead of evaluating the composition a second time. Pixels and accounting as for a hit (CommitReplacement),
+    // but the host's output is kept, still owned by the host's disposer, for a Draw with another view.
+    private static bool ShowRendered(object source, Pending pending, ID2D1CommandList shown, long bytes,
+        ID2D1CommandList hostOutput, PreviewViewport viewport)
+    {
+        if (!StillCurrent(pending) || !sources.TryGetValue(source, out var state) || !ReferenceEquals(state, pending.State)
+            || !ReferenceEquals(outputField.GetValue(source), hostOutput) || state.HostOutput is { NativePointer: not 0 }
+            || state.Bytes != 0 || state.ActiveGpuFrame is not null) return false;
+        var collector = (DisposeCollector)collectorField.GetValue(source)!;
+        collector.Collect(shown);
+        outputField.SetValue(source, shown);
+        state.HostOutput = hostOutput;
+        state.ShownViewport = viewport;
+        state.LastOutput = shown;
+        state.LastViewportKey = pending.CacheKey;
+        state.Bytes = bytes;
+        Interlocked.Increment(ref drawnOnce);
+        return true;
+    }
+
+    // Before the player draws (its Draw prefix, on the render thread): a copy shown by ShowRendered is exact only for
+    // the view it was drawn for. After a zoom, pan or resize the host's output is shown again, as without the copy.
+    private static void ShowHostOutputIfViewChanged(object source, SourceState state, PreviewViewport viewport)
+    {
+        if (state.HostOutput is null) return; // every Draw: nothing shown from a copy
+        lock (cacheGate)
+        {
+            if (state.HostOutput is not { NativePointer: not 0 } host
+                || viewport with { LastDrawTimestamp = 0, IsPlaying = false } == state.ShownViewport with { LastDrawTimestamp = 0, IsPlaying = false })
+                return;
+            if (outputField.GetValue(source) is not ID2D1CommandList shown || !ReferenceEquals(shown, state.LastOutput)) return;
+            using var trace = CacheTrace.Measure("shown-copy", "state");
+            if (trace is not null) trace.Outcome = "view-changed";
+            var collector = (DisposeCollector)collectorField.GetValue(source)!;
+            outputField.SetValue(source, host);
+            collector.Remove(shown);
+            shown.Dispose();
+            var released = Interlocked.Exchange(ref state.Bytes, 0);
+            if (released != 0) Interlocked.Add(ref gpuBytes, -released);
+            state.HostOutput = null;
+            state.LastOutput = host;
+            state.LastViewportKey = null;
+            Interlocked.Increment(ref shownCopiesDropped);
+        }
+    }
+
+    // A copy from BeginPreviewReadback(show: true) that is not shown, with its part of the reservation.
+    internal static void DisposeShownCopy(ID2D1CommandList shown, PreviewViewport viewport)
+    {
+        shown.Dispose();
+        Interlocked.Add(ref gpuBytes, -(long)viewport.Width * viewport.Height * 4);
+    }
+
+    // Tests only: the player's Draw prefix with `viewport` as its view.
+    internal static void ObserveDrawView(object source, PreviewViewport viewport)
+    {
+        if (sources.TryGetValue(source, out var state)) ShowHostOutputIfViewChanged(source, state, viewport);
     }
 
     // On the source's render thread. The frame is stored only if its capture is still current: an edit, purge or
@@ -985,6 +1075,7 @@ internal static class TimelineFrameCache
                 if (measurement.Trace is { } previous) __state.Trace?.Relate(previous);
             }
             if (source is null || !TryGetPreviewViewportForPlayer(__instance, source, out var viewport)) return;
+            if (sources.TryGetValue(source, out var shownState)) ShowHostOutputIfViewChanged(source, shownState, viewport);
             using (var viewTrace = CacheTrace.Measure("viewport", "state"))
                 if (viewTrace is not null) viewTrace.Detail = $"{viewport.Width}x{viewport.Height};playing={viewport.IsPlaying};"
                     + $"dpi={Bits(viewport.DpiX)},{Bits(viewport.DpiY)};"
@@ -1223,7 +1314,15 @@ internal static class TimelineFrameCache
 
     // Draws the frame as the player would and queues its copy to a CPU-readable bitmap, without waiting for the GPU.
     internal static PreviewReadback? BeginPreviewReadback(ID2D1DeviceContext context, ID2D1Image output, PreviewViewport viewport)
+        => BeginPreviewReadback(context, output, viewport, false, out _);
+
+    // show: also record `shown`, a command list that draws the drawn pixels for the view (as UploadPreview does), so
+    // that the frame need not be drawn again. It holds the drawing target and `bytes` of the GPU reservation, both
+    // the caller's from then on. Null when show is false or recording failed (the readback is still returned).
+    internal static PreviewReadback? BeginPreviewReadback(ID2D1DeviceContext context, ID2D1Image output, PreviewViewport viewport,
+        bool show, out ID2D1CommandList? shown)
     {
+        shown = null;
         using var measurement = PreviewPerformance.Measure(PreviewStage.BeginGpuCopy);
         long bytes = checked((long)viewport.Width * viewport.Height * 4);
         if (!IsValidViewport(viewport, context.MaximumBitmapSize) || bytes > FrameCacheStore.MaxFrameBytes - PreviewRecordHeader
@@ -1274,6 +1373,12 @@ internal static class TimelineFrameCache
             immediate = device.ImmediateContext.QueryInterface<ID3D11DeviceContext>();
             immediate.CopyResource(readable, texture);
             immediate.Flush(); // submit the copy, including paused frames; does not wait for completion
+            if (show)
+            {
+                // The target is never drawn to again: like UploadPreview's bitmap, an unchanging image.
+                try { shown = RecordPreviewImage(context, target, viewport); }
+                catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException) { shown = null; }
+            }
             var result = new PreviewReadback(readable, immediate, viewport, bytes);
             readable = null;
             immediate = null;
@@ -1298,8 +1403,9 @@ internal static class TimelineFrameCache
             finally
             {
                 oldTarget?.Dispose();
-                // The drawing target is gone; a returned readback keeps the other half until it is disposed.
-                Interlocked.Add(ref gpuBytes, returned ? -bytes : -bytes * 2);
+                if (!returned) { shown?.Dispose(); shown = null; }
+                // A returned readback keeps the staging half until it is disposed, a shown copy the target half.
+                Interlocked.Add(ref gpuBytes, returned ? (shown is null ? -bytes : 0) : -bytes * 2);
                 readable?.Dispose();
                 immediate?.Dispose();
             }
@@ -1468,6 +1574,8 @@ internal static class TimelineFrameCache
         collector.Collect(replacement);
         outputField.SetValue(source, replacement);
         if (previous != null) { collector.Remove(previous); previous.Dispose(); }
+        // No host update runs: the host's output kept behind a shown copy (ShowRendered) is released here.
+        if (pending.State.HostOutput is { NativePointer: not 0 } host && !ReferenceEquals(host, previous)) { collector.Remove(host); host.Dispose(); }
         pending.State.Released();
         pending.State.LastOutput = replacement;
         pending.State.LastKey = pending.LiveKey;
@@ -1563,6 +1671,13 @@ internal static class TimelineFrameCache
         using var bitmap = allocated;
         using (CacheTrace.Measure("restore-copy-from-memory")) bitmap.CopyFromMemory(record[PreviewRecordHeader..], width * 4).CheckError();
         using var recording = CacheTrace.Measure("restore-command-recording");
+        return RecordPreviewImage(context, bitmap, viewport);
+    }
+
+    // A command list that draws `image`, the view's pixels (viewport size), 1:1 onto the player's target when the
+    // player draws it with the view's transform and offset.
+    private static ID2D1CommandList RecordPreviewImage(ID2D1DeviceContext context, ID2D1Image image, PreviewViewport viewport)
+    {
         var command = context.CreateCommandList();
         using var oldTarget = context.Target;
         var oldTransform = context.Transform;
@@ -1582,7 +1697,7 @@ internal static class TimelineFrameCache
             context.PrimitiveBlend = viewport.PrimitiveBlend;
             context.UnitMode = viewport.UnitMode;
             context.BeginDraw(); drawing = true;
-            context.DrawImage(bitmap, Vector2.Zero, null, InterpolationMode.NearestNeighbor, CompositeMode.SourceOver);
+            context.DrawImage(image, Vector2.Zero, null, InterpolationMode.NearestNeighbor, CompositeMode.SourceOver);
             context.EndDraw().CheckError(); drawing = false;
             context.Target = null;
             command.Close().CheckError();
