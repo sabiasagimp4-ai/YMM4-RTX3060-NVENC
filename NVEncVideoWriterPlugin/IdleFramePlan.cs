@@ -1,7 +1,5 @@
 namespace NVEncVideoWriterPlugin;
 
-public enum IdleCacheOrder { FromCurrentTime, AroundCurrentTime, FromStart }
-
 // A bounded, allocation-free traversal. Every frame appears once, including frames before the CTI.
 internal static class IdleFramePlan
 {
