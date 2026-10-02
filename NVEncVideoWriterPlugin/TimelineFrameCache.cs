@@ -1835,9 +1835,11 @@ internal static class TimelineFrameCache
     // textures stay reserved (readbackPoolBytes). A new view size or format, and the source's disposal, release them.
     internal sealed class ReadbackPool
     {
-        private const int MaxTargets = 2, MaxStagings = ReadbacksInFlight;
+        // Targets rotate oldest first through at least two: the one shown last (its copy may still be drawn by the
+        // GPU) is not drawn to again in the very next frame.
+        private const int MaxTargets = 3, MinRotation = 2, MaxStagings = ReadbacksInFlight;
         private readonly object gate = new();
-        private readonly Stack<PooledTarget> targets = new();
+        private readonly Queue<PooledTarget> targets = new();
         private readonly Stack<ID3D11Texture2D> stagings = new();
         private (int Width, int Height, Format Format, Vortice.DCommon.AlphaMode Alpha, float DpiX, float DpiY) shape;
         private bool cleared;
@@ -1848,7 +1850,7 @@ internal static class TimelineFrameCache
 
         internal PooledTarget? TakeTarget(PreviewViewport viewport)
         {
-            lock (gate) return Fits(viewport) && targets.TryPop(out var target) ? Taken(target) : null;
+            lock (gate) return Fits(viewport) && targets.Count >= MinRotation && targets.TryDequeue(out var target) ? Taken(target) : null;
         }
         internal ID3D11Texture2D? TakeStaging(PreviewViewport viewport)
         {
@@ -1857,11 +1859,21 @@ internal static class TimelineFrameCache
         // False when the texture is not kept (the caller disposes it).
         internal bool Return(PooledTarget target, PreviewViewport viewport)
         {
-            lock (gate) return Keep(viewport, targets, target, MaxTargets);
+            lock (gate)
+            {
+                if (!Admit(viewport, targets.Count, MaxTargets)) return false;
+                targets.Enqueue(target);
+                return true;
+            }
         }
         internal bool Return(ID3D11Texture2D staging, PreviewViewport viewport)
         {
-            lock (gate) return Keep(viewport, stagings, staging, MaxStagings);
+            lock (gate)
+            {
+                if (!Admit(viewport, stagings.Count, MaxStagings)) return false;
+                stagings.Push(staging);
+                return true;
+            }
         }
         internal void Clear()
         {
@@ -1877,16 +1889,17 @@ internal static class TimelineFrameCache
             Interlocked.Add(ref readbackPoolBytes, -Bytes);
             return texture;
         }
-        private bool Keep<T>(PreviewViewport viewport, Stack<T> pooled, T texture, int maximum) where T : IDisposable
+        // Whether a texture of `viewport` is kept (counted as pooled); a new shape drops the others first.
+        private bool Admit(PreviewViewport viewport, int count, int maximum)
         {
             if (cleared) return false;
             if (!Fits(viewport))
             {
                 Drop();
                 shape = ShapeOf(viewport);
+                count = 0;
             }
-            if (pooled.Count >= maximum) return false;
-            pooled.Push(texture);
+            if (count >= maximum) return false;
             Interlocked.Add(ref readbackPoolBytes, Bytes);
             return true;
         }
@@ -1894,7 +1907,7 @@ internal static class TimelineFrameCache
         private void Drop()
         {
             int count = targets.Count + stagings.Count;
-            while (targets.TryPop(out var target)) target.Dispose();
+            while (targets.TryDequeue(out var target)) target.Dispose();
             while (stagings.TryPop(out var staging)) staging.Dispose();
             if (count != 0) Interlocked.Add(ref readbackPoolBytes, -count * Bytes);
         }
