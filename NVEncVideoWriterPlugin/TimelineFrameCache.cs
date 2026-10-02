@@ -315,7 +315,7 @@ internal static class TimelineFrameCache
         // once the copy is gone).
         internal ID2D1CommandList? HostOutput;
         internal PreviewViewport ShownViewport;
-        internal ID2D1Bitmap1? ShownTarget;
+        internal PooledTarget? ShownTarget;
         // When the host's update or disposal has released the outputs (callers replacing the output themselves
         // dispose HostOutput first).
         internal void Released()
@@ -667,9 +667,10 @@ internal static class TimelineFrameCache
     // `target` (null without a pool) is the drawing target `shown` draws; the source returns it to its pool when the
     // copy is gone.
     private static bool ShowRendered(object source, Pending pending, ID2D1CommandList shown, long bytes,
-        ID2D1CommandList hostOutput, PreviewViewport viewport, ID2D1Bitmap1? target)
+        ID2D1CommandList hostOutput, PreviewViewport viewport, PooledTarget? target)
     {
-        if (!StillCurrent(pending) || !sources.TryGetValue(source, out var state) || !ReferenceEquals(state, pending.State)
+        // StorePreview has just checked StillCurrent under the same lock.
+        if (!sources.TryGetValue(source, out var state) || !ReferenceEquals(state, pending.State)
             || !ReferenceEquals(outputField.GetValue(source), hostOutput) || state.HostOutput is { NativePointer: not 0 }
             || state.Bytes != 0 || state.ActiveGpuFrame is not null || state.ShownTarget is not null) return false;
         var collector = (DisposeCollector)collectorField.GetValue(source)!;
@@ -714,7 +715,7 @@ internal static class TimelineFrameCache
 
     // A copy from BeginPreviewReadback(show: true) that is not shown, with its part of the reservation and, with a
     // pool, its drawing target.
-    internal static void DisposeShownCopy(ID2D1CommandList shown, PreviewViewport viewport, ReadbackPool? pool = null, ID2D1Bitmap1? target = null)
+    internal static void DisposeShownCopy(ID2D1CommandList shown, PreviewViewport viewport, ReadbackPool? pool = null, PooledTarget? target = null)
     {
         shown.Dispose();
         Interlocked.Add(ref gpuBytes, -(long)viewport.Width * viewport.Height * 4);
@@ -1390,7 +1391,7 @@ internal static class TimelineFrameCache
     // pool: the drawing target and staging texture come from it and go back to it (the target only once nothing
     // draws it: with `shown`, `shownTarget` is the caller's to return).
     internal static PreviewReadback? BeginPreviewReadback(ID2D1DeviceContext context, ID2D1Image output, PreviewViewport viewport,
-        bool show, ReadbackPool? pool, out ID2D1CommandList? shown, out ID2D1Bitmap1? shownTarget)
+        bool show, ReadbackPool? pool, out ID2D1CommandList? shown, out PooledTarget? shownTarget)
     {
         shown = null;
         shownTarget = null;
@@ -1400,6 +1401,7 @@ internal static class TimelineFrameCache
             || !Reserve(bytes * 2)) return null;
         ID2D1Image? oldTarget = null;
         ID2D1Bitmap1? target = null;
+        PooledTarget? pooled = null;
         ID3D11Texture2D? readable = null;
         ID3D11DeviceContext? immediate = null;
         var oldTransform = Matrix3x2.Identity;
@@ -1415,12 +1417,14 @@ internal static class TimelineFrameCache
             oldTarget = context.Target;
             oldTransform = context.Transform;
             saved = true;
-            target = pool?.TakeTarget(viewport);
+            pooled = pool?.TakeTarget(viewport);
+            target = pooled?.Bitmap;
             if (target is null)
             {
                 target = context.CreateBitmap(new SizeI(viewport.Width, viewport.Height), new BitmapProperties1(
                     viewport.BackBufferFormat, viewport.DpiX, viewport.DpiY, BitmapOptions.Target));
                 Interlocked.Increment(ref readbackTexturesCreated);
+                if (pool is not null) pooled = new PooledTarget(target);
             }
             context.Target = target;
             context.Transform = viewport.Transform;
@@ -1459,7 +1463,7 @@ internal static class TimelineFrameCache
             {
                 // The target is not drawn to again while the copy is shown: like UploadPreview's bitmap, an unchanging
                 // image (pooled, it is drawn to only after the copy is gone).
-                try { shown = RecordPreviewImage(context, target, viewport); }
+                try { shown = pooled is not null ? pooled.Show(context, viewport) : RecordPreviewImage(context, target, viewport); }
                 catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException) { shown = null; }
             }
             var result = new PreviewReadback(readable, immediate, viewport, bytes, pool);
@@ -1489,9 +1493,10 @@ internal static class TimelineFrameCache
                 if (!returned) { shown?.Dispose(); shown = null; }
                 // A returned readback keeps the staging half until it is disposed, a shown copy the target half.
                 Interlocked.Add(ref gpuBytes, returned ? (shown is null ? -bytes : 0) : -bytes * 2);
-                if (shown is not null && pool is not null) shownTarget = target;
+                if (shown is not null && pooled is not null) shownTarget = pooled;
                 // Copies queued from the target run before anything drawn to it next: it can be reused at once.
-                else if (target is not null && pool?.Return(target, viewport) != true) target.Dispose();
+                else if (pooled is not null) { if (!pool!.Return(pooled, viewport)) pooled.Dispose(); }
+                else target?.Dispose();
                 if (readable is not null && pool?.Return(readable, viewport) != true) readable.Dispose();
                 immediate?.Dispose();
             }
@@ -1832,7 +1837,7 @@ internal static class TimelineFrameCache
     {
         private const int MaxTargets = 2, MaxStagings = ReadbacksInFlight;
         private readonly object gate = new();
-        private readonly Stack<ID2D1Bitmap1> targets = new();
+        private readonly Stack<PooledTarget> targets = new();
         private readonly Stack<ID3D11Texture2D> stagings = new();
         private (int Width, int Height, Format Format, Vortice.DCommon.AlphaMode Alpha, float DpiX, float DpiY) shape;
         private bool cleared;
@@ -1841,7 +1846,7 @@ internal static class TimelineFrameCache
             (viewport.Width, viewport.Height, viewport.BackBufferFormat.Format, viewport.BackBufferFormat.AlphaMode, viewport.DpiX, viewport.DpiY);
         private long Bytes => (long)shape.Width * shape.Height * 4;
 
-        internal ID2D1Bitmap1? TakeTarget(PreviewViewport viewport)
+        internal PooledTarget? TakeTarget(PreviewViewport viewport)
         {
             lock (gate) return Fits(viewport) && targets.TryPop(out var target) ? Taken(target) : null;
         }
@@ -1850,7 +1855,7 @@ internal static class TimelineFrameCache
             lock (gate) return Fits(viewport) && stagings.TryPop(out var staging) ? Taken(staging) : null;
         }
         // False when the texture is not kept (the caller disposes it).
-        internal bool Return(ID2D1Bitmap1 target, PreviewViewport viewport)
+        internal bool Return(PooledTarget target, PreviewViewport viewport)
         {
             lock (gate) return Keep(viewport, targets, target, MaxTargets);
         }
@@ -1892,6 +1897,36 @@ internal static class TimelineFrameCache
             while (targets.TryPop(out var target)) target.Dispose();
             while (stagings.TryPop(out var staging)) staging.Dispose();
             if (count != 0) Interlocked.Add(ref readbackPoolBytes, -count * Bytes);
+        }
+    }
+
+    // A pooled drawing target and the command list that shows it 1:1 for a view (RecordPreviewImage), recorded once
+    // and shown again whenever the target is reused for that view: the copy draws whatever the target holds now.
+    internal sealed class PooledTarget(ID2D1Bitmap1 bitmap) : IDisposable
+    {
+        internal ID2D1Bitmap1 Bitmap { get; } = bitmap;
+        private ID2D1CommandList? display;
+        private PreviewViewport displayView;
+
+        // A new reference to the target's copy for `viewport` (the caller owns it), recorded only for a new view.
+        internal ID2D1CommandList Show(ID2D1DeviceContext context, PreviewViewport viewport)
+        {
+            var view = viewport with { LastDrawTimestamp = 0, IsPlaying = false };
+            if (display is not { NativePointer: not 0 } recorded || displayView != view)
+            {
+                display?.Dispose();
+                display = null;
+                recorded = RecordPreviewImage(context, Bitmap, viewport);
+                display = recorded;
+                displayView = view;
+            }
+            return recorded.QueryInterface<ID2D1CommandList>();
+        }
+
+        public void Dispose()
+        {
+            try { display?.Dispose(); }
+            finally { Bitmap.Dispose(); }
         }
     }
 

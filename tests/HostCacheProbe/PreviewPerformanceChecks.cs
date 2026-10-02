@@ -289,6 +289,11 @@ internal static class PreviewPerformanceChecks
         Func<int, int>? sequence = null, bool checkCounts = true, Action? between = null)
     {
         TimelineFrameCache.SetEnabled(enabled, false);
+        // Each pass starts from a collected heap: frames stored by earlier passes (8 MB each) are not collected, or
+        // paged out on a small runner, during this one. Collections caused by this pass's own frames still count.
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
         PreviewPerformance.Reset();
         long hits = TimelineFrameCache.RamHits, gpuHits = TimelineFrameCache.GpuHits, stored = TimelineFrameCache.PreviewStored;
         long drawnOnce = TimelineFrameCache.DrawnOnce, busy = TimelineFrameCache.ReadbackBusySkips;
