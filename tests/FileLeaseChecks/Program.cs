@@ -103,6 +103,20 @@ try
         }
         Console.WriteLine($"Per-frame lease + verify with {count} files: {elapsed.Elapsed.TotalMilliseconds / 10:F2}ms (10 runs; no threshold)");
     }
+    // Between a capture and its commit the render path relies on the lease's open handles rather than resolving every
+    // path again. Whether NTFS also refuses to rename a parent directory of a leased file (informational).
+    string parent = Path.Combine(dir, "parent");
+    Directory.CreateDirectory(parent);
+    string inner = Path.Combine(parent, "inner.dat");
+    File.WriteAllText(inner, "x");
+    Check(Acquire([inner], null, out var held), "parent rename lease");
+    bool renameRefused;
+    try { Directory.Move(parent, parent + "-renamed"); renameRefused = false; }
+    catch (Exception error) when (error is IOException or UnauthorizedAccessException) { renameRefused = true; }
+    if (!renameRefused) Check(!held!.VerifyPaths(), "a renamed parent directory passed verification");
+    held!.Dispose();
+    if (!renameRefused) Directory.Move(parent + "-renamed", parent);
+    Console.WriteLine($"Parent directory rename while a file in it is leased: {(renameRefused ? "refused" : "allowed (caught by VerifyPaths)")}");
     Console.WriteLine("FileLeaseChecks: passed (write exclusion, parallel leases, restored mtime, replacement, failure cleanup, limits, cancellation, UNC, ancestor junction)");
 }
 finally { Directory.Delete(dir, true); }

@@ -370,6 +370,9 @@ internal sealed class FrameCacheStore : IDisposable
             foreach (var operation in _operations.GetConsumingEnumerable())
             {
                 active = operation;
+                // Reads feed the preview; writes (compression, hashing, file I/O) yield the CPU to decoding and rendering.
+                var priority = operation.Kind == OperationKind.Read ? ThreadPriority.Normal : ThreadPriority.BelowNormal;
+                if (Thread.CurrentThread.Priority != priority) Thread.CurrentThread.Priority = priority;
                 var trace = CacheTrace.Measure("disk-" + operation.Kind.ToString().ToLowerInvariant(), "io-wall",
                     frameTimeTicks: operation.TraceTime, usage: operation.TraceUsage, operation: operation.TraceOperation);
                 try
@@ -485,7 +488,8 @@ internal sealed class FrameCacheStore : IDisposable
                 // I/O is checked again by AddRam; the read's temporary array is bounded by MaxFrameBytes.
                 lock (_gate)
                     if (_disposed || operation.Generation != _generation || length > _ramBudget) return;
-                using (CacheTrace.Measure("disk-allocation")) pixels = new byte[length];
+                // Fully overwritten by the read or the decoder (both are checked for the exact length).
+                using (CacheTrace.Measure("disk-allocation")) pixels = GC.AllocateUninitializedArray<byte>(length);
                 if (header[..8].SequenceEqual(CompressedMagic))
                 {
                     int compressedLength = checked((int)(file.Length - HeaderBytes));

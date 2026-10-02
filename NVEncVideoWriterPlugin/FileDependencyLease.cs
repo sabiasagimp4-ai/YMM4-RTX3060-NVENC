@@ -42,17 +42,18 @@ internal sealed class FileDependencyLease : IDisposable
         try
         {
             long bytes = 0;
+            bool hashed = false;
             foreach (string suppliedPath in paths)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 string path = Path.GetFullPath(suppliedPath);
                 if (candidate.files.ContainsKey(path)) continue;
                 if (candidate.files.Count == 256) { reason = "External file count exceeds 256."; return false; }
-                if (!IsLocalPlainPath(path)) { reason = "外部素材はリンクを含まないローカル固定ドライブ上にある必要があります。"; return false; }
+                if (!IsLocalPlainFile(path)) { reason = "外部素材はリンクを含まないローカル固定ドライブ上にある必要があります。"; return false; }
                 var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
                 Interlocked.Increment(ref fileOpens);
                 candidate.files.Add(path, file);
-                if (!IsNtfs(file.SafeFileHandle) || !TryStamp(file.SafeFileHandle, out var stamp))
+                if (!TryStamp(file.SafeFileHandle, out var stamp) || !IsNtfsVolume(stamp.Volume, file.SafeFileHandle))
                 { reason = "外部素材はNTFS上の通常ファイルである必要があります。"; return false; }
                 string hash;
                 FileFingerprint? previous = null;
@@ -74,13 +75,17 @@ internal sealed class FileDependencyLease : IDisposable
                         digest.AppendData(buffer, 0, count);
                     }
                     hash = Convert.ToHexString(digest.GetHashAndReset());
+                    hashed = true;
+                    // Reading took time: the content must not have changed while it was hashed.
+                    if (!TryStamp(file.SafeFileHandle, out var after) || after != stamp) return false;
                 }
-                if (!TryStamp(file.SafeFileHandle, out var after) || after != stamp) return false;
                 var fingerprint = new FileFingerprint(stamp, hash);
                 candidate.fingerprints.Add(path, fingerprint);
                 RememberSharedFingerprint(path, fingerprint);
             }
-            if (!candidate.VerifyPaths()) return false;
+            // Each handle was opened by its path a moment ago and denies writes, deletes and renames; resolve the names
+            // again only after hashing took time.
+            if (hashed && !candidate.VerifyPaths()) return false;
             lease = candidate;
             reason = string.Empty;
             return true;
@@ -138,6 +143,32 @@ internal sealed class FileDependencyLease : IDisposable
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { return false; }
     }
+
+    // Directories whose chain to the root was last seen local, fixed and without reparse points, until when (ms).
+    // Leases are taken for every frame; the directories of a project's files rarely change. VerifyPaths (the check
+    // right before a commit) always walks the whole chain.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> plainDirectories = new(StringComparer.OrdinalIgnoreCase);
+    private const long PlainDirectoryMilliseconds = 1000;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<ulong, bool> ntfsVolumes = new();
+
+    // As IsLocalPlainPath, with the parent directory chain remembered for a second. The file itself is always checked:
+    // opening it would follow a link.
+    private static bool IsLocalPlainFile(string path)
+    {
+        if (!OperatingSystem.IsWindows() || path.Length < 3 || path[1] != ':' || path[2] != '\\') return false;
+        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) return false;
+        if (Path.GetDirectoryName(path) is not { } directory) return false;
+        long now = Environment.TickCount64;
+        if (plainDirectories.TryGetValue(directory, out long until) && now < until) return true;
+        if (!IsLocalPlainPath(directory)) return false;
+        if (plainDirectories.Count >= 4096) plainDirectories.Clear();
+        plainDirectories[directory] = now + PlainDirectoryMilliseconds;
+        return true;
+    }
+
+    // A volume's file system does not change while it is mounted; its serial (FILE_ID_INFO) identifies it.
+    private static bool IsNtfsVolume(ulong volume, SafeFileHandle handle) =>
+        ntfsVolumes.TryGetValue(volume, out bool ntfs) ? ntfs : ntfsVolumes[volume] = IsNtfs(handle);
 
     private static bool IsLocalPlainPath(string path)
     {

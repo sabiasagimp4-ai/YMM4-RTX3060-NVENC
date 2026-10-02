@@ -547,7 +547,11 @@ internal sealed class KeyCapture : IDisposable
         try { return dynamicSnapshots.All(pair => pair.Provider.CanCaptureOnCurrentThread && pair.Provider.IsCurrent(pair.Snapshot)); }
         catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException) { return false; }
     }
-    public bool Validate() => Volatile.Read(ref disposed) == 0 && tracker.ValidateRevision(Revision)
-        && tracker.HasParents(parents) && DynamicCurrent() && (lease?.VerifyPaths() ?? true) && Volatile.Read(ref disposed) == 0;
+    // files: also resolve the leased paths again. The lease's open handles (FileShare.Read, no delete sharing) deny
+    // writes, deletes and renames of the files themselves while it is held, so only the last check before a result
+    // becomes visible (a store commit, an output swap made after the capture's Update) needs it. Every other check
+    // (edits, settings, scene parents, dynamic inputs) stays on every call.
+    public bool Validate(bool files = true) => Volatile.Read(ref disposed) == 0 && tracker.ValidateRevision(Revision)
+        && tracker.HasParents(parents) && DynamicCurrent() && (!files || (lease?.VerifyPaths() ?? true)) && Volatile.Read(ref disposed) == 0;
     public void Dispose() { if (Interlocked.Exchange(ref disposed, 1) == 0) lease?.Dispose(); }
 }

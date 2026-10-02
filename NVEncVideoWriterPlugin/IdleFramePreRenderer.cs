@@ -220,6 +220,7 @@ internal static class IdleFramePreRenderer
         int anchorFrame, long startOrdinal, long endOrdinal)
     {
         int rendered = 0, skipped = 0, normal = 0, unavailable = 0;
+        bool finished = false;
         try
         {
             if (!CanContinue(current, job.Token, anchorFrame)) return;
@@ -292,6 +293,7 @@ internal static class IdleFramePreRenderer
                     Thread.Yield();
                 }
             }
+            finished = true;
             string stored = (skipped == 0 ? string.Empty : $"（保存済みの {skipped} フレームは描画せず）")
                 + (normal == 0 ? string.Empty : $"（通常描画の {normal} フレームは対象外）")
                 + (unavailable == 0 ? string.Empty : $"（保存できない {unavailable} フレームは見送り）");
@@ -306,15 +308,30 @@ internal static class IdleFramePreRenderer
         }
         finally
         {
-            lock (gate) if (ReferenceEquals(activeJob, job)) activeJob = null;
+            bool next;
+            lock (gate)
+            {
+                next = finished && ReferenceEquals(activeJob, job) && !job.Token.IsCancellationRequested;
+                if (ReferenceEquals(activeJob, job)) activeJob = null;
+            }
             job.Dispose();
+            // A batch that ran to its end continues with the next one now instead of on the next timer tick (up to
+            // 250 ms later). Tick checks every idle condition again.
+            if (next) OnUi(() => Tick(null, EventArgs.Empty));
         }
     }
 
     internal enum IdleFrameResult { Rendered, Unavailable, Stored, Normal, NotKeyed, Stopped }
 
-    // The renderer of one batch's clone (tests drive batches through this and PrimeFrame).
-    internal static TimelineSourceAndDevices CreateBatchSource(Scene cloneScene) => new(cloneScene);
+    // The renderer of one batch's clone (tests drive batches through this and PrimeFrame). Its Updates skip the live
+    // preview's cache: PrimeFrame keys and stores its frames itself.
+    internal static TimelineSourceAndDevices CreateBatchSource(Scene cloneScene)
+    {
+        var source = new TimelineSourceAndDevices(cloneScene);
+        try { TimelineFrameCache.ExcludeFromPreviewCache(source); }
+        catch { source.Dispose(); throw; }
+        return source;
+    }
 
     // One frame of a batch: the live and clone keys must agree; a frame already stored (in RAM, or on disk where the
     // preview reads it ahead) is not rendered again; otherwise the clone renders it and it is primed for the view.
@@ -327,7 +344,7 @@ internal static class IdleFramePreRenderer
         using (liveCapture)
         using (cloneCapture)
         {
-            if (!canContinue() || !liveCapture!.Validate() || !cloneCapture!.Validate()) return IdleFrameResult.Stopped;
+            if (!canContinue() || !liveCapture!.Validate(files: false) || !cloneCapture!.Validate(files: false)) return IdleFrameResult.Stopped;
             // Same conversion as TimelineVideoPlayer, so the primed frame is rendered at the exact time
             // the player will request (a one-tick difference can select another video sample).
             var time = cloneScene.Timeline.VideoInfo.GetTimeFrom(frame);
@@ -351,7 +368,7 @@ internal static class IdleFramePreRenderer
             return false;
         }
         if (liveCapture!.Model != cloneCapture!.Model || liveCapture.Key != cloneCapture.Key
-            || !liveCapture.Validate() || !cloneCapture.Validate())
+            || !liveCapture.Validate(files: false) || !cloneCapture.Validate(files: false))
         {
             liveCapture.Dispose();
             cloneCapture.Dispose();
@@ -367,11 +384,13 @@ internal static class IdleFramePreRenderer
         KeyCapture liveCapture, KeyCapture cloneCapture)
     {
         if (token.IsCancellationRequested || liveCapture.Key != cloneCapture.Key
-            || liveCapture.Model != cloneCapture.Model || !liveCapture.Validate() || !cloneCapture.Validate()
+            || liveCapture.Model != cloneCapture.Model || !liveCapture.Validate(files: false) || !cloneCapture.Validate(files: false)
             || liveScene.ID != cloneScene.ID || liveScene.Timeline.ID != cloneScene.Timeline.ID
             || viewport.SceneId != cloneScene.ID || viewport.TimelineId != cloneScene.Timeline.ID)
             return false;
-        return TimelineFrameCache.TryPrimePreviewIfCurrent(source, time, TimelineSourceUsage.Playing, viewport, liveCapture.Key, token);
+        // The clone's capture keys the frame (its key is the live one's): no third tracker describes and verifies the
+        // clone per batch. Its files are resolved again once, right before the store commit.
+        return TimelineFrameCache.TryPrimePreviewIfCurrent(source, time, TimelineSourceUsage.Playing, viewport, liveCapture.Key, token, cloneCapture);
     }
 
     private static bool CanContinue(Session current, CancellationToken token, int anchorFrame) =>

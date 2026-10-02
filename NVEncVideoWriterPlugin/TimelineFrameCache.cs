@@ -36,6 +36,7 @@ internal static class TimelineFrameCache
     private static readonly ConditionalWeakTable<object, SourceState> sources = new();
     private static readonly ConditionalWeakTable<object, UpdateMeasurement> updateMeasurements = new();
     private static readonly ConditionalWeakTable<object, PlayerAssociation> sourcePlayers = new();
+    private static readonly ConditionalWeakTable<object, object?> privateSources = new();
     private static readonly ConditionalWeakTable<Timeline, LatestViewport> latestViewports = new();
     private static readonly ConditionalWeakTable<ID2D1DeviceContext, string> renderEnvironments = new();
     private static readonly object cacheGate = new();
@@ -280,6 +281,10 @@ internal static class TimelineFrameCache
         // A rendered preview frame whose GPU readback is still running; finished on this source's render thread.
         internal DeferredStore? Deferred;
         internal int ReadAheadFrame = int.MinValue;
+        // Read-ahead keys by (frame key, frame) for one environment/usage/view (render thread only): a playing window
+        // gains one frame per update, so the others are not composed and hashed again.
+        internal readonly Dictionary<(string FrameKey, int Frame), string> ReadAheadKeys = [];
+        internal string ReadAheadStamp = string.Empty;
         internal void Released()
         {
             var released = Interlocked.Exchange(ref Bytes, 0);
@@ -308,8 +313,12 @@ internal static class TimelineFrameCache
 
     private sealed class Pending(SourceState state, Scene scene, IGraphicsDevicesAndContext devices,
         ID2D1CommandList? previousOutput, KeyCapture capture, string liveKey, string? cacheKey,
-        long generation, TimeSpan time, string usageKey, PreviewViewport? viewport, bool wantRects, bool rectsReusable, bool playing) : IDisposable
+        long generation, TimeSpan time, string usageKey, PreviewViewport? viewport, bool wantRects, bool rectsReusable, bool playing,
+        string environment, int fps) : IDisposable
     {
+        // The render-thread state and frame rate LiveKey/CacheKey were composed with (StillCurrent compares them).
+        internal readonly string Environment = environment;
+        internal readonly int Fps = fps;
         internal readonly bool Playing = playing;
         internal readonly long TraceOperation = CacheTrace.OperationId;
         private int disposed;
@@ -364,9 +373,9 @@ internal static class TimelineFrameCache
     private static bool Prefix(object __instance, TimeSpan time, object usage, out UpdateMeasurement __state)
     {
         string name = usage.ToString() ?? string.Empty;
-        __state = new UpdateMeasurement(name is "Playing" or "Paused", time, name);
-        updateMeasurements.Remove(__instance);
-        updateMeasurements.Add(__instance, __state);
+        // Idle pre-rendering is not the preview's frame time.
+        __state = new UpdateMeasurement(name is "Playing" or "Paused" && !privateSources.TryGetValue(__instance, out _), time, name);
+        updateMeasurements.AddOrUpdate(__instance, __state);
         __state.RunsHost = CachePrefix(__instance, time, usage, out var pending);
         __state.Pending = pending;
         __state.HostStarted = PreviewPerformance.Timestamp;
@@ -376,6 +385,8 @@ internal static class TimelineFrameCache
     private static bool CachePrefix(object __instance, TimeSpan time, object usage, out Pending? __state)
     {
         __state = null;
+        // The idle pre-renderer's own source: primed explicitly (TryPrimePreviewIfCurrent), never served or stored here.
+        if (privateSources.TryGetValue(__instance, out _)) return true;
         if (sources.TryGetValue(__instance, out var existing)) CompleteDeferred(existing);
         if (!Enabled) return true;
         long keyStarted = PreviewPerformance.Timestamp;
@@ -400,19 +411,21 @@ internal static class TimelineFrameCache
             var context = devices.DeviceContext;
             if (!ValidContext(context)) return Bypass("描画コンテキストの状態が対象外のため、通常描画を使用します。");
             var state = sources.GetValue(__instance, _ => new SourceState(scene));
-            state.Environment = KeyEnvironment(context);
+            string environment = KeyEnvironment(context);
+            state.Environment = environment;
             if (!state.Tracker.TryCapture(FrameOf(time, scene), out capture, out var reason, settle: true, background: preview)) return Bypass(reason);
             var traits = modelTraits.GetValue(capture!.Model, static model => new ModelTraits(model));
             string usageKey = exporting ? usageName : PreviewUsage.KeyFor(usageName, traits.ShowOnlyPreview);
             PreviewViewport? viewport = preview && TryGetPreviewViewportForSource(__instance, out var currentViewport)
                 && currentViewport.SceneId == scene.ID && currentViewport.TimelineId == scene.Timeline.ID ? currentViewport : null;
-            string liveKey = MakeKey(capture.Key, time, scene.FPS, usageKey, context, null);
-            string? cacheKey = exporting ? liveKey : viewport is { } value ? MakeKey(capture.Key, time, scene.FPS, usageKey, context, value) : null;
+            int fps = scene.FPS;
+            string liveKey = ComposeKey(capture.Key, time, fps, usageKey, environment, null);
+            string? cacheKey = exporting ? liveKey : viewport is { } value ? ComposeKey(capture.Key, time, fps, usageKey, environment, value) : null;
             long currentGeneration = Interlocked.Read(ref generation);
             long revision = capture.Revision;
             var previousOutput = (ID2D1CommandList?)outputField.GetValue(__instance);
             pending = new Pending(state, scene, devices, previousOutput, capture, liveKey, cacheKey,
-                currentGeneration, time, usageKey, viewport, wantRects, traits.RectsReusable, usageName == "Playing");
+                currentGeneration, time, usageKey, viewport, wantRects, traits.RectsReusable, usageName == "Playing", environment, fps);
             capture = null;
             if (preview) PreviewPerformance.End(PreviewStage.KeyGeneration, keyStarted);
             keyMeasured = true;
@@ -455,8 +468,10 @@ internal static class TimelineFrameCache
                     }
                 }
             }
-            if (stored is not null && cacheKey is not null && viewport is not null && TryRestoreGpu(__instance, pending))
+            if (stored is not null && cacheKey is not null && viewport is { } resident && TryRestoreGpu(__instance, pending))
             {
+                // A run of GPU-resident frames still reads the frames after it ahead from disk.
+                ReadAhead(state, scene, time, usageKey, resident, !paused);
                 Hit(__instance, pending, stored.Value, recalled);
                 Interlocked.Increment(ref gpuHits);
                 pending.Path = GpuTimes;
@@ -522,10 +537,9 @@ internal static class TimelineFrameCache
             if (__state.CacheKey is not null && __state.Viewport is null)
             {
                 var record = CaptureScene(__state.Devices.DeviceContext, output, __state.Scene);
-                lock (cacheGate) if (record != null && StillCurrent(__state))
-                {
-                    if (store.Value.PutOwned(__state.CacheKey, record)) status = "描画したフレームを保存しました。";
-                }
+                if (record != null && StillCurrent(__state, files: true)) // file I/O, outside cacheGate
+                    lock (cacheGate)
+                        if (StillCurrent(__state) && store.Value.PutOwned(__state.CacheKey, record)) status = "描画したフレームを保存しました。";
             }
             // Rects of a frame whose decoding was not confirmed are never remembered (returned above).
             var rects = __state.WantRects && __state.RectsReusable ? SnapshotRects(__instance) : null;
@@ -609,6 +623,7 @@ internal static class TimelineFrameCache
                 if (trace is not null) trace.Outcome = retained ? "gpu-busy" : "cancelled";
                 return;
             }
+            if (!StillCurrent(deferred.Pending, files: true)) return; // file I/O, outside cacheGate
             lock (cacheGate) if (StillCurrent(deferred.Pending))
             {
                 if (!deferred.Pending.State.Economics.ShouldAdmit(deferred.Pending.CacheKey!, record!.LongLength, gpuRetentionEnabled)) return;
@@ -651,9 +666,21 @@ internal static class TimelineFrameCache
             var frameKeys = new string?[frames.Count];
             if (frames.Count == 0 || !state.Tracker.TryPeekFrameKeys(frames, frameKeys, out _)) return;
             var keys = new string?[frames.Count];
+            var view = viewport with { LastDrawTimestamp = 0, IsPlaying = false };
+            string stamp = $"{environment}|{usage}|{scene.FPS}|{view}";
+            if (state.ReadAheadStamp != stamp || state.ReadAheadKeys.Count > 4096)
+            {
+                state.ReadAheadKeys.Clear();
+                state.ReadAheadStamp = stamp;
+            }
             for (int i = 0; i < frames.Count; i++)
-                if (frameKeys[i] is { } frameKey)
-                    keys[i] = ComposeKey(frameKey, scene.Timeline.VideoInfo.GetTimeFrom(frames[i]), scene.FPS, usage, environment, viewport);
+            {
+                if (frameKeys[i] is not { } frameKey) continue;
+                if (!state.ReadAheadKeys.TryGetValue((frameKey, frames[i]), out var key))
+                    state.ReadAheadKeys[(frameKey, frames[i])] = key =
+                        ComposeKey(frameKey, scene.Timeline.VideoInfo.GetTimeFrom(frames[i]), scene.FPS, usage, environment, viewport);
+                keys[i] = key;
+            }
             int queued = store.Value.Prefetch(keys);
             if (queued != 0) Interlocked.Add(ref readAheads, queued);
         }
@@ -683,16 +710,20 @@ internal static class TimelineFrameCache
         return __exception;
     }
 
-    private static bool StillCurrent(Pending value)
+    // files: resolve the captured files' paths again (FileDependencyLease.VerifyPaths). Only the checks right before
+    // a result outlives the Update that captured it (a store commit, an export store) pass true; within the capture's
+    // own Update its lease has just opened every file, and the open handles deny writes, deletes and renames.
+    private static bool StillCurrent(Pending value, bool files = false)
     {
         using var validation = CacheTrace.Measure("cache-state-validation");
         if (!EnabledFor(value.UsageKey == "Exporting") || value.Generation != Interlocked.Read(ref generation)) return false;
         bool valid;
-        using (CacheTrace.Measure("capture-dependency-validation")) valid = value.Capture.Validate();
+        using (CacheTrace.Measure(files ? "capture-dependency-validation" : "capture-state-validation")) valid = value.Capture.Validate(files);
         if (!valid) return false;
+        // The keys are functions of the capture, time, usage and viewport (fixed in Pending), the frame rate and the
+        // context's render state: comparing those two is the same check as composing both keys again.
         using var keys = CacheTrace.Measure("render-environment-key-validation");
-        return MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.UsageKey, value.Devices.DeviceContext, null) == value.LiveKey
-            && (value.Viewport is null || value.CacheKey == MakeKey(value.Capture.Key, value.Time, value.Scene.FPS, value.UsageKey, value.Devices.DeviceContext, value.Viewport.Value));
+        return value.Scene.FPS == value.Fps && KeyEnvironment(value.Devices.DeviceContext) == value.Environment;
     }
 
     // usage: "Exporting", or the preview key from PreviewUsage.KeyFor ("Preview" unless ShowOnlyPreviewEffect is used).
@@ -828,12 +859,18 @@ internal static class TimelineFrameCache
         PreviewViewport viewport, string? expectedModelKey = null) =>
         TryPrimeCore(timelineSource, time, usage, viewport, expectedModelKey);
 
+    // capture: a capture of this frame from a tracker of the source's own scene that the caller holds (the idle
+    // pre-renderer's clone capture); without it the source's tracker captures the frame here.
     internal static bool TryPrimePreviewIfCurrent(object timelineSource, TimeSpan time, object usage,
-        PreviewViewport viewport, string? expectedModelKey, CancellationToken cancellation) =>
-        TryPrimeCore(timelineSource, time, usage, viewport, expectedModelKey, cancellation);
+        PreviewViewport viewport, string? expectedModelKey, CancellationToken cancellation, KeyCapture? capture = null) =>
+        TryPrimeCore(timelineSource, time, usage, viewport, expectedModelKey, cancellation, capture);
+
+    // The idle pre-renderer's own renderer: Updates of it skip the live preview's cache (lookups, keys, stores).
+    internal static void ExcludeFromPreviewCache(object sourceOrOwner) =>
+        privateSources.AddOrUpdate(GetTimelineSource(sourceOrOwner), null);
 
     private static bool TryPrimeCore(object timelineSource, TimeSpan time, object usage,
-        PreviewViewport? viewport, string? expectedModelKey, CancellationToken cancellation = default)
+        PreviewViewport? viewport, string? expectedModelKey, CancellationToken cancellation = default, KeyCapture? provided = null)
     {
         if (!Enabled || cancellation.IsCancellationRequested) return false;
         long captureGeneration = Interlocked.Read(ref generation);
@@ -856,9 +893,11 @@ internal static class TimelineFrameCache
             var devices = (IGraphicsDevicesAndContext)devicesField.GetValue(timelineSource)!;
             var context = devices.DeviceContext;
             if (!ValidContext(context)) return false;
-            var state = sources.GetValue(timelineSource, _ => new SourceState(scene));
-            if (!state.Tracker.TryCapture(FrameOf(time, scene), out var capture, out _)) return false;
-            using (capture)
+            KeyCapture? owned = null;
+            if (provided is null && !sources.GetValue(timelineSource, _ => new SourceState(scene)).Tracker.TryCapture(FrameOf(time, scene), out owned, out _))
+                return false;
+            var capture = provided ?? owned;
+            using (owned)
             {
                 if (expectedModelKey is not null && capture!.Key != expectedModelKey) return false;
                 var traits = modelTraits.GetValue(capture!.Model, static model => new ModelTraits(model));
@@ -866,10 +905,11 @@ internal static class TimelineFrameCache
                 var key = MakeKey(capture.Key, time, scene.FPS, usageKey, context, viewport);
                 var output = (ID2D1CommandList)outputField.GetValue(timelineSource)!;
                 var record = viewport is { } view ? CapturePreview(context, output, view) : CaptureScene(context, output, scene);
+                if (record is null || !capture.Validate()) return false; // resolves the files again: outside cacheGate
                 lock (cacheGate)
                 {
-                    if (record is null || cancellation.IsCancellationRequested || captureGeneration != generation
-                        || !capture.Validate() || !EnabledFor(exporting)) return false;
+                    if (cancellation.IsCancellationRequested || captureGeneration != generation
+                        || !capture.Validate(files: false) || !EnabledFor(exporting)) return false;
                     if (!store.Value.PutOwned(key, record)) return false;
                     status = viewport is null ? "出力フレームを先読みしました。" : "プレビューのフレームを先読みしました。";
                     return true;
@@ -1133,7 +1173,7 @@ internal static class TimelineFrameCache
             context.EndDraw().CheckError(); drawing = false;
             context.Target = null;
             readable.CopyFromBitmap(target).CheckError();
-            var record = new byte[checked((int)bytes + RecordHeader)];
+            var record = GC.AllocateUninitializedArray<byte>(checked((int)bytes + RecordHeader)); // fully written below
             "YMPX"u8.CopyTo(record);
             BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(4), width);
             BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(8), height);
@@ -1295,7 +1335,8 @@ internal static class TimelineFrameCache
             if (mapped.DataPointer == IntPtr.Zero || mapped.RowPitch < checked(viewport.Width * 4))
                 throw new InvalidDataException("Invalid preview staging layout");
             long allocationStarted = PreviewPerformance.Timestamp;
-            record = new byte[checked(viewport.Width * viewport.Height * 4 + PreviewRecordHeader)];
+            // The header and every pixel row are written below; zeroing 8 MB first would only cost time.
+            record = GC.AllocateUninitializedArray<byte>(checked(viewport.Width * viewport.Height * 4 + PreviewRecordHeader));
             PreviewPerformance.End(PreviewStage.CpuAllocation, allocationStarted);
             "YMPX"u8.CopyTo(record);
             BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(4), viewport.Width);

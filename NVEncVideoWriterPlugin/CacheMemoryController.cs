@@ -68,9 +68,18 @@ internal static class CacheMemoryController
         var memory = new MemoryStatus { Length = (uint)Marshal.SizeOf<MemoryStatus>() };
         if (!GlobalMemoryStatusEx(ref memory) || memory.TotalPhysical > long.MaxValue || memory.AvailablePhysical > long.MaxValue) return null;
         var gc = GC.GetGCMemoryInfo();
-        using var process = Process.GetCurrentProcess();
-        return new((long)memory.TotalPhysical, (long)memory.AvailablePhysical, process.PrivateMemorySize64,
+        return new((long)memory.TotalPhysical, (long)memory.AvailablePhysical, PrivateBytes(),
             Math.Max(GC.GetTotalMemory(false), gc.HeapSizeBytes), gc.TotalAvailableMemoryBytes);
+    }
+
+    // This process's commit charge. Process.PrivateMemorySize64 reads a snapshot of every process and thread on the
+    // system each time; GetProcessMemoryInfo reads only this process.
+    private static long PrivateBytes()
+    {
+        var counters = new ProcessMemoryCounters { Size = (uint)Marshal.SizeOf<ProcessMemoryCounters>() };
+        if (GetProcessMemoryInfo(GetCurrentProcess(), ref counters, counters.Size)) return (long)counters.PrivateUsage;
+        using var process = Process.GetCurrentProcess();
+        return process.PrivateMemorySize64;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -83,4 +92,20 @@ internal static class CacheMemoryController
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GlobalMemoryStatusEx(ref MemoryStatus status);
+
+    // PROCESS_MEMORY_COUNTERS_EX
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ProcessMemoryCounters
+    {
+        public uint Size, PageFaultCount;
+        public nuint PeakWorkingSetSize, WorkingSetSize, QuotaPeakPagedPoolUsage, QuotaPagedPoolUsage,
+            QuotaPeakNonPagedPoolUsage, QuotaNonPagedPoolUsage, PagefileUsage, PeakPagefileUsage, PrivateUsage;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "K32GetProcessMemoryInfo", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetProcessMemoryInfo(IntPtr process, ref ProcessMemoryCounters counters, uint size);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentProcess();
 }
