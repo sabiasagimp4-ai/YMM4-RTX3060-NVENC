@@ -38,5 +38,15 @@
     }
   },
   "LineFormat": "PERF|fixture|mode|frame=p50/p95/p99/max/mean (ms, Update+Draw on the test's render thread)|stage=p50/p95/mean ...|opens/frame=files opened by the plugin per frame",
-  "Extraction": "lines copied from the job logs, timestamps removed; the parent-directory-rename line exists only after the fix (the check was added with it)"
+  "Extraction": "lines copied from the job logs, timestamps removed; the parent-directory-rename line exists only after the fix (the check was added with it)",
+  "DrawOnce": {
+    "SourceCommit": "22b63d6cddf912e70c1e7f48330abd810acc19ca",
+    "RunId": 37034031191,
+    "JobId": 110927850507,
+    "File": "draw-once-run.txt",
+    "Note": "one run, drawn-once (cold-store*) and drawn-twice (cold-store-twice*) passes alternated via TimelineFrameCache.DrawOnce; -paced passes wait for the GPU after each frame; WALL lines are the console ms/frame including that wait",
+    "Fixtures": {
+      "effects": "per frame three blurred shapes at 600% zoom and one blurred Arial text item"
+    }
+  }
 }
