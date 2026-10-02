@@ -52,6 +52,7 @@ Windows、.NET 10 SDK、Visual Studio 2022のC++ツール、Windows SDKが必要
 - [詳細ログの採取と集計](docs/CACHE_DIAGNOSTICS.md)
 - [GPU保持の設計](docs/GPU_FRAME_RETENTION.md)
 - [処理ログの実測](docs/CACHE_TRACE_RESULTS_2026-10-01.md)・[GPU保持の実測](docs/GPU_FRAME_RETENTION_RESULTS_2026-10-01.md)
+- [30秒・421アイテムの実YMM4負荷試験](docs/STRESS_GUI_RESULTS_2026-10-02.md)
 - [実ホスト検証の実行方法](tests/HostCacheProbe/README.md)
 
 統合時の [main CI](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/36878854622) は成功しました。WARPの8枚反復ではRAM復元平均8.264 ms／枚、GPU再利用1.731 ms／枚でした。実プロジェクト全体やRTX 3060の速度倍率ではありません。過去のRTX 3060上のオフラインNVENC試験と、現在のWARPキャッシュ試験も区別して扱います。

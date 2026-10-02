@@ -47,6 +47,11 @@
 
 D2D `Map(Read)` にDoNotWaitはなく、1フレーム遅延やreadbackリングだけで非ブロックとは言えない。D3D11 query等を使う場合もD2D flushとの順序とdevice一致を確認する。現在のGPU保持は復元画像が対象であり、cold renderのreadbackは残る。
 
+30秒・動画120／文字300／音声1の [実GUI負荷試験](STRESS_GUI_RESULTS_2026-10-02.md) では、ホストの動画更新とMap待ちが支配的だった。
+フレーム落ちで2回目にも未描画時刻を要求するため、キー生成の軽量化だけでは再生を速くできない。
+同じ時刻への再訪ではRAM／ディスク／GPU復元が動き、64MiBのRAM上限も確認した。
+重い動画の次の重点は安全な非待機readbackと音声時計を含むCache Before Playback。CIの結果をRTX3060のFPSとして扱わない。
+
 SingleFlightではidleが不要になってもlive／exportのjobを巻き添えにしない。保存価値と画像の有効性を分け、容量不足だけで要求された有効結果を捨てない。採用直前の依存・取消・世代・予算確認から公開まで既存guardを使う。同じTimelineSourceや描画contextを複数Taskから同時UpdateするだけのMFRは行わない。
 
 ## 検証の基準
@@ -58,13 +63,14 @@ SingleFlightではidleが不要になってもlive／exportのjobを巻き添え
 - [実ホストprobeと実行コマンド](../tests/HostCacheProbe/README.md)
 - [動的計測の実測と生ログ](CACHE_TRACE_RESULTS_2026-10-01.md)
 - [GPU保持の実測と生ログ](GPU_FRAME_RETENTION_RESULTS_2026-10-01.md)
+- [30秒・421アイテムの実GUI検証と生ログ](STRESS_GUI_RESULTS_2026-10-02.md)
 - [統合前のRTX 3060 source-only測定](preview-performance-rtx3060.json): `e60c4552` 時点、100フレーム、1080p、shape＋Arial、disk無効。GUI／audio／Present／pacingを含まない歴史的データ
 
 ユーザーのRTX 3060上の最新ビルドでのGUI・実プロジェクト速度・長時間NVENC出力は未確認。VFR、実device loss、実disk full、UI操作から表示までのp50／p95・frame dropの検証も残る。CI成功や過去のNVENC smokeをこれらの代用にしない。
 
 ## AEの参照
 
-`sabiasagimp4-ai/aesdk` の [固定版AE_ComputeCacheSuite.h](https://github.com/sabiasagimp4-ai/aesdk/blob/390a34d0cedba002814bd1879ec4c604bff46bc2/AfterEffectsSDK_26.5_win/Examples/Headers/AE_ComputeCacheSuite.h) を確認した。入力状態をキーに含め、checkout／checkinで借用寿命を管理し、計算中は待機または即時missを選ぶ契約を参考にする。段単位receipt・計算single-flightはまだ実装していない。
+`sabiasagimp4-ai/aesdk` の [固定版AE_ComputeCacheSuite.h](https://github.com/sabiasagimp4-ai/aesdk/blob/390a34d0cedba002814bd1879ec4c604bff46bc2/AfterEffectsSDK_26.5_win/Examples/Headers/AE_ComputeCacheSuite.h) を確認した。入力状態をキーに含め、checkout／checkinで借用寿命を管理し、計算中は待機または即時missを選ぶ契約を参考にする。汎用APIのreceipt・計算single-flightは実装済みだが、ホスト標準のitem／effect段にはまだ接続していない。
 
 `AE_CacheOnLoadSuite.h` は起動時のプラグインロードのAPIで、フレームのディスク供給APIではない。SDKは契約確認に使い、コードを転載しない。SDKだけではAE本体の再生・音声時計を再現できない。
 

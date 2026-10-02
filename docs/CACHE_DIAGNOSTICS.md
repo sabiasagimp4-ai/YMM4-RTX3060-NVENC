@@ -104,3 +104,6 @@ python tools/analyze-stress-trace.py dist/gui-trace.jsonl --projects dist --outp
 キャッシュ消去後は直後の描画で再登録され得るため、表示が永続的に0であることを要件にしない。
 プロジェクトの同梱版は `prepare-stress-project.ps1` で展開先の絶対素材パスへ書き換えてから開く。
 CIの基本adapter／ソフトウェア描画の時間をRTX3060実機のFPSとして報告しない。
+
+256MiB／64MiBでの実測と完全なraw traceは [STRESS_GUI_RESULTS_2026-10-02.md](STRESS_GUI_RESULTS_2026-10-02.md)。
+再生・編集・消去に加え、RAM・GPU・ディスクからの復元を確認した。全900フレームのwarm化やRTX3060実機のFPSは未検証。

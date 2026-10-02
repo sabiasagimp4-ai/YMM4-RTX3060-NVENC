@@ -1,0 +1,49 @@
+{
+  "Host": "YMM4 Lite 4.56.1.0",
+  "HostReleaseSha256": "49c0ed689f545737b7ce939971bfc625962e00791c57883dc8e6f058aa336c5a",
+  "Environment": "GitHub hosted Windows 2022; no RTX3060 measurement",
+  "Runs": [
+    {
+      "RamLimitMiB": 256,
+      "SourceCommit": "abb648900c40af3734a20bd06364121a181a5e11",
+      "MirrorCommit": "a8e05fd2980eb8ccdd1e7087ebbaab4772b2a278",
+      "RunId": 36941205236,
+      "RunUrl": "https://github.com/sabiasagimp4-ai/YMM4-dlls/actions/runs/36941205236",
+      "RawSha256": "29aaa0020c5f9e6c309533f43f9b773ae44b0390dff3dbc5205236a106738f7d",
+      "RawBytes": 3738434,
+      "GzipSha256": "148488273cbccbb19941ad964a512a3bd6a6c19d392f2dcb5234d052dc6da92d",
+      "Accepted": 10495,
+      "Dropped": 0,
+      "OpenSpans": 0,
+      "StressPassed": true,
+      "FrameRoutes": {
+        "render": 43,
+        "live": 4,
+        "bypass": 33,
+        "ram": 10,
+        "gpu": 6
+      }
+    },
+    {
+      "RamLimitMiB": 64,
+      "SourceCommit": "426dc5d360174f811461823773d34af5d92c4c8c",
+      "MirrorCommit": "d61ec61a8bba586c8bff1632f5d34775bfd7ee92",
+      "RunId": 36982351471,
+      "RunUrl": "https://github.com/sabiasagimp4-ai/YMM4-dlls/actions/runs/36982351471",
+      "RawSha256": "c191836e4b415abe55048bdfd2446cd99d5c50fae89948e3749abcaab3b3bb1f",
+      "RawBytes": 3995053,
+      "GzipSha256": "a5fbb569bf39f9bd8c416578fad16369708ab3443335e7000d8b1d223d7ab133",
+      "Accepted": 11328,
+      "Dropped": 0,
+      "OpenSpans": 0,
+      "StressPassed": true,
+      "FrameRoutes": {
+        "render": 46,
+        "live": 3,
+        "bypass": 35,
+        "disk": 8,
+        "gpu": 7
+      }
+    }
+  ]
+}
