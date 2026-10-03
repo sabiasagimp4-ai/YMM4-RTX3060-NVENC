@@ -26,8 +26,14 @@ namespace NVEncVideoWriterPlugin;
 // stored record again, the textures reused for that, and the GPU memory budget.
 internal static partial class TimelineFrameCache
 {
-    private static byte[]? CaptureScene(ID2D1DeviceContext context, ID2D1Image output, Scene scene)
+    private static byte[]? CaptureScene(ID2D1DeviceContext context, ID2D1Image output, Scene scene) =>
+        TrySceneBounds(context, output, scene, out int width, out int height, out var origin) ? Capture(context, output, width, height, origin) : null;
+
+    // All of the output's pixels (not just the scene rectangle), on the scene's pixel grid.
+    private static bool TrySceneBounds(ID2D1DeviceContext context, ID2D1Image output, Scene scene, out int width, out int height, out Vector2 origin)
     {
+        width = height = 0;
+        origin = default;
         var bounds = context.GetImageLocalBounds(output);
         var half = new Vector2(scene.Width / 2f, scene.Height / 2f);
         var left = MathF.Floor(bounds.Left + half.X) - half.X;
@@ -36,8 +42,23 @@ internal static partial class TimelineFrameCache
         var bottom = MathF.Ceiling(bounds.Bottom + half.Y) - half.Y;
         if (!float.IsFinite(left) || !float.IsFinite(top) || !float.IsFinite(right) || !float.IsFinite(bottom)
             || right <= left || bottom <= top || right - left > context.MaximumBitmapSize || bottom - top > context.MaximumBitmapSize)
-            return null;
-        return Capture(context, output, checked((int)(right - left)), checked((int)(bottom - top)), new Vector2(left, top));
+            return false;
+        width = checked((int)(right - left));
+        height = checked((int)(bottom - top));
+        origin = new Vector2(left, top);
+        return true;
+    }
+
+    // An export frame (the record CaptureScene makes) drawn and queued for copying to a CPU-readable texture, without
+    // waiting for the GPU: the export renders the next frames meanwhile. The frame's size and format are given to the
+    // pool and the copy as a view's (96 DPI, no transform; the context's drawing modes are kept, as by Capture).
+    private static PreviewReadback? BeginSceneReadback(ID2D1DeviceContext context, ID2D1Image output, Scene scene, ReadbackPool? pool)
+    {
+        if (!TrySceneBounds(context, output, scene, out int width, out int height, out var origin)) return null;
+        var shape = new PreviewViewport(width, height, Matrix3x2.Identity, Vector2.Zero, 96, 96,
+            new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),
+            context.AntialiasMode, context.TextAntialiasMode, context.PrimitiveBlend, context.UnitMode, Guid.Empty, Guid.Empty, 0, false);
+        return BeginReadback(context, output, shape, origin, false, pool, out _, out _);
     }
 
     // Includes all image bounds, not just the scene rectangle. Origin matches the caller's pixel phase.
@@ -91,14 +112,16 @@ internal static partial class TimelineFrameCache
     }
 
     // A CPU-readable copy of a preview frame that the GPU may still be producing. Holds its GPU reservation; its staging
-    // texture goes back to `pool`, if any, when it is disposed.
+    // texture goes back to `pool`, if any, when it is disposed. With a scene origin, an export frame (BeginSceneReadback):
+    // its record is CaptureScene's.
     internal sealed class PreviewReadback(ID3D11Texture2D readable, ID3D11DeviceContext immediate, PreviewViewport viewport, long bytes,
-        ReadbackPool? pool = null) : IDisposable
+        ReadbackPool? pool = null, Vector2? sceneOrigin = null) : IDisposable
     {
         private int disposed;
         internal readonly ID3D11Texture2D Readable = readable;
         internal readonly ID3D11DeviceContext Immediate = immediate;
         internal readonly PreviewViewport Viewport = viewport;
+        internal readonly Vector2? SceneOrigin = sceneOrigin;
         public void Dispose()
         {
             if (Interlocked.Exchange(ref disposed, 1) != 0) return;
@@ -121,44 +144,68 @@ internal static partial class TimelineFrameCache
     // draws it: with `shown`, `shownTarget` is the caller's to return).
     internal static PreviewReadback? BeginPreviewReadback(ID2D1DeviceContext context, ID2D1Image output, PreviewViewport viewport,
         bool show, ReadbackPool? pool, out ID2D1CommandList? shown, out PooledTarget? shownTarget)
+        => BeginReadback(context, output, viewport, null, show, pool, out shown, out shownTarget);
+
+    // sceneOrigin: an export frame (BeginSceneReadback) instead of the view's.
+    private static PreviewReadback? BeginReadback(ID2D1DeviceContext context, ID2D1Image output, PreviewViewport viewport, Vector2? sceneOrigin,
+        bool show, ReadbackPool? pool, out ID2D1CommandList? shown, out PooledTarget? shownTarget)
     {
         shown = null;
         shownTarget = null;
-        using var measurement = PreviewPerformance.Measure(PreviewStage.BeginGpuCopy);
+        using var measurement = sceneOrigin is null ? PreviewPerformance.Measure(PreviewStage.BeginGpuCopy) : default;
         long bytes = viewport.FrameBytes;
-        if (!IsValidViewport(viewport, context.MaximumBitmapSize) || bytes > FrameCacheStore.MaxFrameBytes - PreviewRecordHeader
+        if (!IsValidViewport(viewport, context.MaximumBitmapSize)
+            || bytes > FrameCacheStore.MaxFrameBytes - (sceneOrigin is null ? PreviewRecordHeader : RecordHeader)
             || !Reserve(bytes * 2)) return null;
         ContextScope? scope = null;
         ID2D1Bitmap1? target = null;
         PooledTarget? pooled = null;
         ID3D11Texture2D? readable = null;
         ID3D11DeviceContext? immediate = null;
-        var returned = false;
+        bool returned = false, failed = false;
         try
         {
             scope = new ContextScope(context);
             target = TargetFor(context, viewport, pool, out pooled);
             context.Target = target;
-            context.Transform = viewport.Transform;
-            ApplyModes(context, viewport);
-            scope.BeginDraw();
-            context.Clear(new Color4(0, 0, 0, 1));
-            context.DrawImage(output, viewport.TargetOffset);
+            if (sceneOrigin is { } origin)
+            {
+                context.Transform = Matrix3x2.Identity;
+                scope.BeginDraw();
+                context.Clear(new Color4(0, 0, 0, 0));
+                context.DrawImage(output, -origin);
+            }
+            else
+            {
+                context.Transform = viewport.Transform;
+                ApplyModes(context, viewport);
+                scope.BeginDraw();
+                context.Clear(new Color4(0, 0, 0, 1));
+                context.DrawImage(output, viewport.TargetOffset);
+            }
             scope.EndDraw();
             context.Target = null;
             if (!QueueStagingCopy(target, viewport, pool, ref readable, ref immediate)) return null;
-            if (show)
+            if (show && sceneOrigin is null)
             {
                 // The target is not drawn to again while the copy is shown: like UploadPreview's bitmap, an unchanging
                 // image (pooled, it is drawn to only after the copy is gone).
                 try { shown = pooled is not null ? pooled.Show(context, viewport) : RecordPreviewImage(context, target, viewport); }
                 catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException) { shown = null; }
             }
-            var result = new PreviewReadback(readable, immediate, viewport, bytes, pool);
+            var result = new PreviewReadback(readable, immediate, viewport, bytes, pool, sceneOrigin);
             readable = null;
             immediate = null;
             returned = true;
             return result;
+        }
+        catch when (pool is not null)
+        {
+            // Pooled textures may be what failed (made on a device the source no longer draws with): drop them all,
+            // so that the next frame creates its own instead of failing the same way for as long as the source lives.
+            failed = true;
+            pool.Reset();
+            throw;
         }
         finally
         {
@@ -170,9 +217,9 @@ internal static partial class TimelineFrameCache
                 Interlocked.Add(ref gpuBytes, returned ? (shown is null ? -bytes : 0) : -bytes * 2);
                 if (shown is not null && pooled is not null) shownTarget = pooled;
                 // Copies queued from the target run before anything drawn to it next: it can go back at once.
-                else if (pooled is not null) { if (!pool!.Return(pooled, viewport)) pooled.Dispose(); }
+                else if (pooled is not null) { if (failed || !pool!.Return(pooled, viewport)) pooled.Dispose(); }
                 else target?.Dispose();
-                if (readable is not null && pool?.Return(readable, viewport) != true) readable.Dispose();
+                if (readable is not null && (failed || pool?.Return(readable, viewport) != true)) readable.Dispose();
                 immediate?.Dispose();
             }
         }
@@ -209,6 +256,13 @@ internal static partial class TimelineFrameCache
         description.CPUAccessFlags = CpuAccessFlags.Read;
         description.MiscFlags = ResourceOptionFlags.None;
         readable = pool?.TakeStaging(viewport);
+        if (readable is not null && !OnDevice(readable, device))
+        {
+            // The source draws with another device now: none of the pooled textures can be used.
+            readable.Dispose();
+            readable = null;
+            pool!.Reset();
+        }
         if (readable is null)
         {
             readable = device.CreateTexture2D(description);
@@ -218,6 +272,12 @@ internal static partial class TimelineFrameCache
         immediate.CopyResource(readable, texture);
         immediate.Flush(); // submit the copy, including paused frames; does not wait for completion
         return true;
+    }
+
+    private static bool OnDevice(ID3D11Texture2D texture, ID3D11Device device)
+    {
+        using var owner = texture.Device;
+        return owner.NativePointer == device.NativePointer;
     }
 
     // Blocking completion is reserved for explicit capture and test helpers, never live cache updates.
@@ -233,10 +293,11 @@ internal static partial class TimelineFrameCache
     private static bool ReadPreviewReadback(PreviewReadback readback, MapFlags flags, out byte[]? record)
     {
         record = null;
+        bool preview = readback.SceneOrigin is null; // export frames are not the preview's measurements
         using var trace = CacheTrace.Measure("readback-poll", "gpu-copy");
         long mapStarted = PreviewPerformance.Timestamp;
         var result = readback.Immediate.Map(readback.Readable, 0, MapMode.Read, flags, out var mapped);
-        PreviewPerformance.End(PreviewStage.MapWait, mapStarted);
+        if (preview) PreviewPerformance.End(PreviewStage.MapWait, mapStarted);
         if (result.Code == unchecked((int)0x887A000A)) // DXGI_ERROR_WAS_STILL_DRAWING
         {
             if (trace is not null) trace.Outcome = "gpu-busy";
@@ -249,21 +310,26 @@ internal static partial class TimelineFrameCache
             if (mapped.DataPointer == IntPtr.Zero || mapped.RowPitch < checked(viewport.Width * 4))
                 throw new InvalidDataException("Invalid preview staging layout");
             long allocationStarted = PreviewPerformance.Timestamp;
+            int header = preview ? PreviewRecordHeader : RecordHeader;
             // The header and every pixel row are written below; zeroing 8 MB first would only cost time.
-            record = GC.AllocateUninitializedArray<byte>(checked(viewport.Width * viewport.Height * 4 + PreviewRecordHeader));
-            PreviewPerformance.End(PreviewStage.CpuAllocation, allocationStarted);
+            record = GC.AllocateUninitializedArray<byte>(checked(viewport.Width * viewport.Height * 4 + header));
+            if (preview) PreviewPerformance.End(PreviewStage.CpuAllocation, allocationStarted);
             "YMPX"u8.CopyTo(record);
             BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(4), viewport.Width);
             BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(8), viewport.Height);
-            BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(12), 0);
-            BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(16), 0);
-            BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(20), 2);
-            BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(24), viewport.DpiX);
-            BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(28), viewport.DpiY);
-            using var measurement = PreviewPerformance.Measure(PreviewStage.CpuMemcpy);
+            var origin = readback.SceneOrigin ?? Vector2.Zero;
+            BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(12), origin.X);
+            BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(16), origin.Y);
+            BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(20), preview ? 2 : 1);
+            if (preview)
+            {
+                BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(24), viewport.DpiX);
+                BinaryPrimitives.WriteSingleLittleEndian(record.AsSpan(28), viewport.DpiY);
+            }
+            using var measurement = preview ? PreviewPerformance.Measure(PreviewStage.CpuMemcpy) : default;
             for (var row = 0; row < viewport.Height; row++)
                 Marshal.Copy(mapped.DataPointer + row * mapped.RowPitch, record,
-                    PreviewRecordHeader + row * viewport.Width * 4, viewport.Width * 4);
+                    header + row * viewport.Width * 4, viewport.Width * 4);
             if (trace is not null) trace.Outcome = "ready";
             return true;
         }
@@ -466,6 +532,11 @@ internal static partial class TimelineFrameCache
                 cleared = true;
                 Drop();
             }
+        }
+        // Drops the pooled textures; the pool keeps taking new ones (unlike Clear, for a source that is gone).
+        internal void Reset()
+        {
+            lock (gate) Drop();
         }
 
         private T Taken<T>(T texture)

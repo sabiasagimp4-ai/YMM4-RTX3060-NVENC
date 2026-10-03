@@ -18,6 +18,12 @@ internal sealed class CacheStatusBar : FrameworkElement
     private readonly Func<Timeline?> timeline;
     private readonly Func<Timeline, double, (double Offset, double PixelsPerFrame)?> mapping;
     private readonly DispatcherTimer timer = new(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(250) };
+    // What the bar shows was computed for these frames and this state; it is computed again only when they change, and
+    // at least every FullPollMilliseconds (keys the cache adopts lazily, files verified in the background).
+    private const long FullPollMilliseconds = 2000;
+    private TimelineFrameCache.ResidencyStamp? shownStamp;
+    private int[] shownFrames = [];
+    private long shownAt;
     private List<(int X, int Width, byte State)> runs = [];
     private bool busy;
 
@@ -43,27 +49,39 @@ internal sealed class CacheStatusBar : FrameworkElement
             int width = (int)Math.Ceiling(ActualWidth);
             if (current is null || !TimelineFrameCache.PreviewEnabled || width <= 0 || mapping(current, ActualWidth) is not { } view)
             {
+                shownStamp = null;
                 Show([]);
                 return;
             }
             int[] frames = CacheBarLayout.SampleFrames(view.Offset, view.PixelsPerFrame, width, current.Length, out int[] starts);
+            var stamp = TimelineFrameCache.PreviewResidencyStamp(current);
+            long now = Environment.TickCount64;
+            if (stamp is not null && stamp == shownStamp && now - shownAt < FullPollMilliseconds && frames.AsSpan().SequenceEqual(shownFrames))
+                return;
             busy = true;
             Task.Run(() =>
             {
                 List<(int, int, byte)> result = [];
+                bool known = false;
                 try
                 {
                     var residency = new byte[frames.Length];
-                    if (TimelineFrameCache.TryGetPreviewResidency(current, frames, residency))
+                    if (known = TimelineFrameCache.TryGetPreviewResidency(current, frames, residency))
                         result = CacheBarLayout.Runs(CacheBarLayout.ColumnStates(residency, starts));
                 }
                 catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { }
-                Dispatcher.BeginInvoke(() => { busy = false; Show(result); });
+                Dispatcher.BeginInvoke(() =>
+                {
+                    busy = false;
+                    (shownStamp, shownFrames, shownAt) = known ? (stamp, frames, now) : (null, [], 0);
+                    Show(result);
+                });
             });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             busy = false;
+            shownStamp = null;
             Show([]);
         }
     }

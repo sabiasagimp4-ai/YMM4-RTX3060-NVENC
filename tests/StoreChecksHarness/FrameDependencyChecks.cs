@@ -77,6 +77,19 @@ internal static class FrameDependencyChecks
         var nestedShaking = new FrameDependencyIndex("G", [], "N", [], [a, d], nestedSession: true);
         Check(!nestedShaking.For(10).Session && nestedShaking.For(105).Session, "A session nested timeline must only mark scene frames");
 
+        // The segment range: every frame in [start, end) has the same dependencies, and the frames just outside do not.
+        foreach (int frame in new[] { -5, 0, 10, 19, 20, 29, 30, 55, 60, 65, 69, 70, 105, 110, 5000 })
+        {
+            var dependencies = index.For(frame, out int start, out int end);
+            Check(start <= frame && frame < end && dependencies == index.For(frame), $"Frame {frame} must lie in its own segment [{start}, {end})");
+            Check(index.For(start == int.MinValue ? -1_000_000 : start) == dependencies && index.For(end == int.MaxValue ? 1_000_000 : end - 1) == dependencies,
+                $"The segment of frame {frame} [{start}, {end}) must share its dependencies");
+            Check(start == int.MinValue || index.For(start - 1) != dependencies, $"Frame {start - 1} must start another segment than {frame}");
+            Check(end == int.MaxValue || index.For(end) != dependencies, $"Frame {end} must start another segment than {frame}");
+        }
+        index.For(25, out int from, out int to);
+        Check(from == 20 && to == 30, $"Frames 20-29 must be one segment, not [{from}, {to})");
+
         long frames = 0;
         var big = Index(Enumerable.Range(0, 5000).Select(i => new Entry(i * 10, 15, false, false, "I" + i, [])).ToArray());
         var clock = System.Diagnostics.Stopwatch.StartNew();

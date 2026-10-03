@@ -64,6 +64,9 @@ internal sealed class FrameCacheStore : IDisposable
         _diskWorker.Start();
     }
 
+    // Tests only: runs on the disk worker before it loads the index (a slow disk).
+    internal static Action? IndexLoadingForTests { get; set; }
+
     // Changes whenever a frame enters or leaves RAM or disk (for the cache status bars).
     internal long Version => Interlocked.Read(ref _version);
 
@@ -166,7 +169,10 @@ internal sealed class FrameCacheStore : IDisposable
                     if (DiskReadable() && (!_indexReady || _disk.ContainsKey(key))) QueueRead(key, _generation);
                 }
                 long remaining = deadline - Stopwatch.GetTimestamp();
-                if (remaining <= 0 || _disposed || !_pendingReads.Contains(new PendingKey(_generation, key))) break;
+                // Reads run only after the index is loaded (seconds for a full cache): until then a wait would delay
+                // every paused frame, stored or not, by the whole wait. A key the index already holds is read soon.
+                if (remaining <= 0 || _disposed || !(_indexReady || _disk.ContainsKey(key))
+                    || !_pendingReads.Contains(new PendingKey(_generation, key))) break;
                 Monitor.Wait(_gate, TimeSpan.FromSeconds(remaining / (double)Stopwatch.Frequency));
             }
             _misses++;
@@ -352,6 +358,7 @@ internal sealed class FrameCacheStore : IDisposable
             try
             {
                 InitializeDisk();
+                IndexLoadingForTests?.Invoke();
                 if (_owner is not null) LoadDiskIndex();
             }
             catch (Exception)
@@ -528,6 +535,7 @@ internal sealed class FrameCacheStore : IDisposable
                 _diskReadTicks += Stopwatch.GetTimestamp() - started;
             }
         }
+        TouchRecord(operation.Key); // after the delivery: a waiting request never waits for it
     }
 
     private void ProcessWrite(DiskOperation operation, CacheTrace.Span? trace)
@@ -672,11 +680,15 @@ internal sealed class FrameCacheStore : IDisposable
         }
     }
 
+    // The disk LRU outlives the process through the records' write times (a disk read refreshes it, TouchRecord):
+    // the most recently used records are kept within the budget and the rest deleted, and the LRU starts from the
+    // least recently used, not in file name (key hash) order.
     private void ScanDirectory(string directory, bool current, Span<byte> header)
     {
-        foreach (string path in Directory.EnumerateFiles(directory))
+        var records = new List<(string Key, string Path, long Length, int RawBytes, DateTime Written)>();
+        foreach (var info in new DirectoryInfo(directory).EnumerateFiles())
         {
-            string name = Path.GetFileName(path);
+            string name = info.Name, path = info.FullName;
             bool record = name.Length == 73 && name.EndsWith(".ymmframe", StringComparison.Ordinal) && ValidKey(name[..64]);
             if (!record && !IsOwnedTemp(name)) continue;
             if (!current || !record || name[..64] != name[..64].ToLowerInvariant()) { DeleteOrAccount(path); continue; }
@@ -685,19 +697,35 @@ internal sealed class FrameCacheStore : IDisposable
             {
                 using var file = OpenRecord(key);
                 file.ReadExactly(header);
-                if (!ValidHeader(header, file.Length, out int rawBytes) || file.Length > _diskBudget ||
-                    _diskBytes > _diskBudget - file.Length || _disk.Count >= MaxDiskEntries)
+                if (!ValidHeader(header, file.Length, out int rawBytes) || file.Length > _diskBudget)
                 {
                     file.Dispose();
                     DeleteOrAccount(path);
                     continue;
                 }
-                lock (_gate) _disk.Add(key, (file.Length, rawBytes, _diskLru.AddLast(key)));
-                Interlocked.Increment(ref _version);
-                Interlocked.Add(ref _diskBytes, file.Length);
+                records.Add((key, path, file.Length, rawBytes, info.LastWriteTimeUtc));
             }
             catch (Exception error) when (IsFileFailure(error)) { DeleteOrAccount(path); }
         }
+        records.Sort((a, b) => b.Written.CompareTo(a.Written));
+        int kept = 0;
+        for (int i = 0; i < records.Count; i++)
+        {
+            var entry = records[i];
+            if (_diskBytes > _diskBudget - entry.Length || _disk.Count + kept >= MaxDiskEntries) { DeleteOrAccount(entry.Path); continue; }
+            Interlocked.Add(ref _diskBytes, entry.Length);
+            records[kept++] = entry;
+        }
+        lock (_gate)
+            for (int i = kept - 1; i >= 0; i--) _disk.Add(records[i].Key, (records[i].Length, records[i].RawBytes, _diskLru.AddLast(records[i].Key)));
+        if (kept != 0) Interlocked.Increment(ref _version);
+    }
+
+    // Disk worker: marks a record as used now for the next start (ScanDirectory). Optional.
+    private void TouchRecord(string key)
+    {
+        try { File.SetLastWriteTimeUtc(RecordPath(key), DateTime.UtcNow); }
+        catch (Exception error) when (IsFileFailure(error)) { }
     }
 
     private string? ReadEpoch()
@@ -765,9 +793,12 @@ internal sealed class FrameCacheStore : IDisposable
         return length != 0 && (header[..8].SequenceEqual(Magic) && fileLength == size + HeaderBytes
             || header[..8].SequenceEqual(CompressedMagic) && fileLength > HeaderBytes && fileLength < size + HeaderBytes);
     }
-    private static bool ValidKey(string? key) => key is { Length: 64 } && key.All(char.IsAsciiHexDigit);
+    // Every lookup checks its key (the cache bars ask for thousands of frames at a time): no enumerator per call.
+    private static readonly SearchValues<char> HexDigits = SearchValues.Create("0123456789ABCDEFabcdef");
+    private static bool IsHex(ReadOnlySpan<char> text) => !text.ContainsAnyExcept(HexDigits);
+    private static bool ValidKey(string? key) => key is { Length: 64 } && IsHex(key);
     private static bool IsOwnedTemp(string name) => name.Length == 104 && name[64] == '.' &&
-        ValidKey(name[..64]) && name[65..97].All(char.IsAsciiHexDigit) && name.EndsWith(".ymmtmp", StringComparison.Ordinal);
+        IsHex(name.AsSpan(0, 64)) && IsHex(name.AsSpan(65, 32)) && name.EndsWith(".ymmtmp", StringComparison.Ordinal);
     private static void Touch(LinkedList<string> list, LinkedListNode<string> node) { list.Remove(node); list.AddLast(node); }
     private static bool IsFileFailure(Exception error) => error is IOException or InvalidDataException or UnauthorizedAccessException or System.Security.SecurityException;
     private static bool TryDelete(string path)

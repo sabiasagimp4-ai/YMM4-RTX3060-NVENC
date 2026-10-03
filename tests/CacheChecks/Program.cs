@@ -46,6 +46,7 @@ internal static class Program
         CheckFramePreparesOwnFiles();
         CheckFingerprintCancellation();
         CheckUnverifiableFiles();
+        CheckPeekedKeys();
         CheckIdentitySeeds();
         CheckCommunity();
         CheckDynamicDependencies();
@@ -916,6 +917,38 @@ internal static class Program
             if (Directory.Exists(link)) Directory.Delete(link);
             Directory.Delete(folder, recursive: true);
         }
+    }
+
+    // The cache bars' keys (TryPeekFrameKeys: a segment's frames decided once, keys hashed outside the tracker's gate)
+    // are the keys captures use, for frames in any order and repeated; its key stamp changes with an edit only.
+    private static void CheckPeekedKeys()
+    {
+        var timeline = new Timeline();
+        for (int i = 0; i < 40; i++)
+            timeline.Items = timeline.Items.Add(new ShapeItem { Frame = i * 7, Length = 11 + i % 5, Layer = i % 3 + 1 });
+        var scenes = new Scenes(false);
+        scenes.AddScene(timeline);
+        using var tracker = new KeyDependencyTracker(new Scene(timeline, scenes, []));
+        int[] frames = [.. Enumerable.Range(0, 320), .. Enumerable.Range(0, 320).Reverse(), 5, 300, 5, 17, 17, 400];
+        var expected = frames.Distinct().ToDictionary(frame => frame, frame => WaitForFrameKey(tracker, frame));
+        var peeked = new string?[frames.Length];
+        for (int pass = 0; pass < 2; pass++) // composed, then from the tracker's cache
+        {
+            long stamp = tracker.KeyStamp;
+            Array.Clear(peeked);
+            Check(tracker.TryPeekFrameKeys(frames, peeked, out _), "The cache bars' keys were unavailable");
+            for (int i = 0; i < frames.Length; i++)
+                Check(peeked[i] == expected[frames[i]], $"The cache bars' key of frame {frames[i]} (pass {pass}) differs from its capture's");
+            Check(tracker.KeyStamp == stamp, "Asking for keys changed the key stamp");
+        }
+        Check(expected[5] != expected[300] && expected[17] != expected[5], "Frames of different items shared a key");
+        long before = tracker.KeyStamp;
+        ((ShapeItem)timeline.Items[3]).X.SetFirstValue(5); // frames 21-34
+        Check(tracker.KeyStamp != before, "An edit did not change the key stamp");
+        Check(WaitForFrameKey(tracker, 25) != expected[25] && WaitForFrameKey(tracker, 300) == expected[300], "The edit changed the wrong frames");
+        Check(tracker.TryPeekFrameKeys([25, 300], peeked, out _) && peeked[0] == WaitForFrameKey(tracker, 25) && peeked[1] == expected[300],
+            "The cache bars' keys after an edit differ from the captures'");
+        Console.WriteLine("Cache bar keys: equal to the captures' keys in any frame order, cached per segment, stamp follows edits OK");
     }
 
     // A frame only waits for its own files: with 150 large files in the project, a frame whose small file comes last

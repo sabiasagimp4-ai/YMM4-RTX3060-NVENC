@@ -564,13 +564,6 @@ internal static partial class TimelineFrameCache
             }
             if (!StillCurrent(__state)) return;
             var output = (ID2D1CommandList)outputField.GetValue(__instance)!;
-            if (__state.CacheKey is not null && __state.Viewport is null)
-            {
-                var record = CaptureScene(__state.Devices.DeviceContext, output, __state.Scene);
-                if (record != null && StillCurrent(__state, files: true)) // file I/O, outside cacheGate
-                    lock (cacheGate)
-                        if (StillCurrent(__state) && store.Value.PutOwned(__state.CacheKey, record)) status = "描画したフレームを保存しました。";
-            }
             // Rects of a frame whose decoding was not confirmed are never remembered (returned above).
             var rects = __state.WantRects && __state.RectsReusable ? SnapshotRects(__instance) : null;
             lock (cacheGate) if (StillCurrent(__state) && sources.TryGetValue(__instance, out var current) && ReferenceEquals(current, __state.State))
@@ -585,7 +578,8 @@ internal static partial class TimelineFrameCache
                 if (rects is not null) current.Rects.Remember(__state.LiveKey, rects, __state.Generation, __state.Capture.Revision);
             }
             // Last: storing may finish (and dispose) the capture at once.
-            if (__state.CacheKey is not null && __state.Viewport is { } view) deferred = StorePreview(__instance, __state, output, view);
+            if (__state.CacheKey is not null)
+                deferred = __state.Viewport is { } view ? StorePreview(__instance, __state, output, view) : StoreExport(__state, output);
         }
         catch (Exception error) { status = "フレームの保存に失敗しました: " + error.GetType().Name; }
         finally { if (!deferred) __state.Dispose(); }
@@ -683,7 +677,8 @@ internal static partial class TimelineFrameCache
         string value = $"pixels-v7|{environment}|{model}|{FrameTimeKey.For(time, fps)}|{usage}";
         if (viewport is { } view)
             value += $"|{view.SceneId:N}|{view.TimelineId:N}|{view.Width}|{view.Height}|{Bits(view.Transform.M11)}|{Bits(view.Transform.M12)}|{Bits(view.Transform.M21)}|{Bits(view.Transform.M22)}|{Bits(view.Transform.M31)}|{Bits(view.Transform.M32)}|{Bits(view.TargetOffset.X)}|{Bits(view.TargetOffset.Y)}|{Bits(view.DpiX)}|{Bits(view.DpiY)}|{view.BackBufferFormat.Format}|{view.BackBufferFormat.AlphaMode}|{view.AntialiasMode}|{view.TextAntialiasMode}|{view.PrimitiveBlend}|{view.UnitMode}";
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+        // Lower case, as the store keeps keys: its lookups then use the key as it is instead of a lowered copy.
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     }
 
     // Stored pixels outlive the process: rasterization may differ between GPUs, drivers and plugin builds.
@@ -724,6 +719,26 @@ internal static partial class TimelineFrameCache
             viewport = latest.Viewport;
         }
         return TryGetPreviewResidency(source, viewport, frames, residency);
+    }
+
+    // For the cache bars: changes whenever what TryGetPreviewResidency reports for the timeline may change (the store's
+    // contents, the frames' keys, the view or the player's source), except that keys described or verified in the
+    // background are adopted only when someone asks (a bar asks again after a while anyway). Null while unknown.
+    internal readonly record struct ResidencyStamp(long Store, long Keys, long Revision, int Source, PreviewViewport View, string Environment);
+
+    internal static ResidencyStamp? PreviewResidencyStamp(Timeline timeline)
+    {
+        if (!PreviewEnabled || StoreIfCreated is not { } created) return null;
+        object? source;
+        PreviewViewport viewport;
+        lock (cacheGate)
+        {
+            if (!latestViewports.TryGetValue(timeline, out var latest) || latest.Source is null
+                || !latest.Source.TryGetTarget(out source)) return null;
+            viewport = latest.Viewport;
+        }
+        if (!sources.TryGetValue(source, out var state) || state.Environment is not { } environment) return null;
+        return new(created.Version, state.Tracker.KeyStamp, state.Tracker.Revision, RuntimeHelpers.GetHashCode(state), viewport.Normalized, environment);
     }
 
     internal static bool TryGetPreviewResidency(object source, PreviewViewport viewport, IReadOnlyList<int> frames, Span<byte> residency)
@@ -928,6 +943,7 @@ internal static partial class TimelineFrameCache
     private static void Disposed(object __instance, bool disposing)
     {
         if (!disposing) return;
+        if (sources.TryGetValue(__instance, out var exported)) FinishExportStores(exported);
         lock (cacheGate)
         {
             if (privateSources.TryGetValue(__instance, out var privatePool)) privatePool.Clear();

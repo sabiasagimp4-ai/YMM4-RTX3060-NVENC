@@ -77,6 +77,10 @@ internal sealed class KeyDependencyTracker : IDisposable
 
     internal event Action? Invalidated;
     public long Revision => Interlocked.Read(ref revision);
+    // Changes whenever the keys TryPeekFrameKeys returns may change (an edit, a description, verified files), so that
+    // a cache bar need not ask again while it and the store are unchanged.
+    internal long KeyStamp => Interlocked.Read(ref keyStamp);
+    private long keyStamp;
     public long CaptureRevision() => Revision;
     public bool ValidateRevision(long capturedRevision) => !Volatile.Read(ref disposed) && Revision == capturedRevision;
 
@@ -283,6 +287,7 @@ internal sealed class KeyDependencyTracker : IDisposable
         catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
         { dynamicProviders = []; cachedEligible = false; cachedReason = "動的な入力依存の列挙に失敗しました: " + error.GetType().Name; }
         cachedRevision = current;
+        Interlocked.Increment(ref keyStamp);
         return true;
     }
 
@@ -305,8 +310,13 @@ internal sealed class KeyDependencyTracker : IDisposable
     // verifying or leasing files. False while an edit is not described yet; null for frames with unhashed files.
     // Frames another tracker stored (the idle pre-renderer, export) can be ones this tracker never captured, so
     // their files are verified here in the background too.
+    // A bar asks for thousands of frames while the render thread captures under the same gate: frames of one segment
+    // are decided once, and keys not composed yet are hashed outside the gate.
     internal bool TryPeekFrameKeys(IReadOnlyList<int> frames, string?[] keys, out string model)
     {
+        FrameDependencyIndex index;
+        IReadOnlyDictionary<string, FileFingerprint> known;
+        List<(int Position, FrameDependencyIndex.Dependencies Dependencies)>? missing = null;
         lock (gate)
         {
             model = string.Empty;
@@ -315,21 +325,59 @@ internal sealed class KeyDependencyTracker : IDisposable
             // Providers run on capture's owning render context. UI status/read-ahead cannot call them safely.
             if (dynamicProviders.Length != 0) return false;
             if (fingerprintTask is { IsCompleted: true }) AdoptFingerprints(cachedRevision);
-            bool unverified = false;
+            index = cachedFrames;
+            known = fingerprints ?? EmptyFingerprints;
+            bool unverified = false, keyMissing = false;
+            int start = 0, end = 0;
+            FrameDependencyIndex.Dependencies? dependencies = null;
+            string? key = null;
             for (int i = 0; i < frames.Count; i++)
             {
-                var dependencies = cachedFrames.For(frames[i]);
-                bool verified = dependencies.Files.Length == 0
-                    || (fingerprints is not null && dependencies.Files.All(fingerprints.ContainsKey));
-                // A file that failed verification is retried by captures only (Capture), not with the project.
-                unverified |= dependencies.Cacheable && !verified && dependencies.Files.Any(file =>
-                    (fingerprints is null || !fingerprints.ContainsKey(file)) && !unverifiable.ContainsKey(file));
-                keys[i] = dependencies.Cacheable && verified ? KeyFor(dependencies, dependencies.Files) : null;
+                int frame = frames[i];
+                if (dependencies is null || frame < start || frame >= end)
+                {
+                    dependencies = index.For(frame, out start, out end);
+                    bool verified = Verified(dependencies.Files, fingerprints);
+                    // A file that failed verification is retried by captures only (Capture), not with the project.
+                    unverified |= dependencies.Cacheable && !verified && Unhashed(dependencies.Files);
+                    key = null;
+                    keyMissing = dependencies.Cacheable && verified && !frameKeys.TryGetValue(dependencies, out key);
+                }
+                keys[i] = key;
+                if (keyMissing) (missing ??= []).Add((i, dependencies));
             }
             if (unverified && fingerprintTask is null) StartFingerprinting(cachedRevision, Environment.TickCount64);
             model = cachedModel;
-            return true;
+            if (missing is null) return true;
         }
+        // The keys depend only on the (immutable) dependencies and fingerprints read above.
+        var composed = new Dictionary<FrameDependencyIndex.Dependencies, string>(ReferenceEqualityComparer.Instance);
+        foreach (var (position, dependencies) in missing)
+        {
+            if (!composed.TryGetValue(dependencies, out var key)) composed[dependencies] = key = FrameKey(dependencies, known);
+            keys[position] = key;
+        }
+        lock (gate)
+            if (ReferenceEquals(cachedFrames, index) && ReferenceEquals(fingerprints ?? EmptyFingerprints, known))
+                foreach (var (dependencies, key) in composed)
+                    if (frameKeys.Count < MaximumFrameKeys) frameKeys.TryAdd(dependencies, key);
+        return true;
+    }
+
+    private static bool Verified(string[] files, IReadOnlyDictionary<string, FileFingerprint>? known)
+    {
+        if (files.Length == 0) return true;
+        if (known is null) return false;
+        foreach (string file in files) if (!known.ContainsKey(file)) return false;
+        return true;
+    }
+
+    // Under gate: a file of these neither verified nor known to fail verification.
+    private bool Unhashed(string[] files)
+    {
+        foreach (string file in files)
+            if ((fingerprints is null || !fingerprints.ContainsKey(file)) && !unverifiable.ContainsKey(file)) return true;
+        return false;
     }
 
     // Under gate, with a finished fingerprintTask: keeps its fingerprints if they describe this revision's files.
@@ -376,6 +424,7 @@ internal sealed class KeyDependencyTracker : IDisposable
         }
         fingerprintTask = null;
         fingerprintCancellation = null;
+        Interlocked.Increment(ref keyStamp);
     }
 
     // Under gate, with no fingerprintTask: verifies the project's files in the background (one tracker at a time),
@@ -419,10 +468,17 @@ internal sealed class KeyDependencyTracker : IDisposable
             return cachedKey;
         }
         if (frameKeys.TryGetValue(dependencies, out var key)) return key;
-        key = FrameCacheKey.FromFingerprints(dependencies.Content, files.Length == 0 ? EmptyFingerprints : Subset(known, files));
-        if (frameKeys.Count < 4096) frameKeys[dependencies] = key;
+        key = FrameKey(dependencies, known);
+        if (frameKeys.Count < MaximumFrameKeys) frameKeys[dependencies] = key;
         return key;
     }
+
+    // Keys kept per segment: enough for long projects (a key per segment of a bar's whole range), bounded in memory.
+    private const int MaximumFrameKeys = 16384;
+
+    // A frame's key from its dependencies and the verified fingerprints of all of its files (pure).
+    private static string FrameKey(FrameDependencyIndex.Dependencies dependencies, IReadOnlyDictionary<string, FileFingerprint> known) =>
+        FrameCacheKey.FromFingerprints(dependencies.Content, dependencies.Files.Length == 0 ? EmptyFingerprints : Subset(known, dependencies.Files));
 
     private static Dictionary<string, FileFingerprint> Subset(IReadOnlyDictionary<string, FileFingerprint> all, string[] files) =>
         files.ToDictionary(path => path, path => all[path], StringComparer.OrdinalIgnoreCase);
@@ -507,12 +563,14 @@ internal sealed class KeyDependencyTracker : IDisposable
             fingerprints = merged;
             cachedKey = string.Empty;
             frameKeys.Clear();
+            Interlocked.Increment(ref keyStamp);
         }
     }
 
     private void Invalidate()
     {
         Interlocked.Increment(ref revision);
+        Interlocked.Increment(ref keyStamp);
         Volatile.Write(ref lastInvalidated, Environment.TickCount64);
         // Cancellation is checked between 64 KiB reads; never wait for file I/O from an editor event.
         try { Volatile.Read(ref fingerprintCancellation)?.Cancel(); } catch (ObjectDisposedException) { }

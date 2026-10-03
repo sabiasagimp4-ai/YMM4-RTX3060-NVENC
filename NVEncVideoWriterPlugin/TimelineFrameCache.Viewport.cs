@@ -107,17 +107,21 @@ internal static partial class TimelineFrameCache
             var latest = latestViewports.GetValue(scene.Timeline, _ => new LatestViewport(scene.ID, scene.Timeline.ID));
             lock (cacheGate)
             {
-                association.Player = new WeakReference<object>(__instance);
+                association.Player = Weak(association.Player, __instance);
                 latest.SceneId = scene.ID;
                 latest.TimelineId = scene.Timeline.ID;
                 latest.Scenes = scene.Scenes;
                 latest.Viewport = viewport;
-                latest.Player = new WeakReference<object>(__instance);
-                latest.Source = new WeakReference<object>(source);
+                latest.Player = Weak(latest.Player, __instance);
+                latest.Source = Weak(latest.Source, source);
             }
         }
         catch { }
     }
+
+    // Every Draw names the same player and source: a weak reference (a GC handle with a finalizer) only for a new one.
+    private static WeakReference<object> Weak(WeakReference<object>? current, object target) =>
+        current is not null && current.TryGetTarget(out var known) && ReferenceEquals(known, target) ? current : new(target);
 
     private static Exception? DrawFinalizer(Exception? __exception, DrawMeasurement __state)
     {

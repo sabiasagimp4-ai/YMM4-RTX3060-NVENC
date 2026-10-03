@@ -195,7 +195,12 @@ public sealed class PluginSettingsPanel : StackPanel
         AddChoice("VRAM上限", nameof(FrameCacheToolSettings.GpuLimitMiB),
             new[] { 0, 128, 256, 512, 1024, 2048, 4096, 8192 }.Append(settings.GpuLimitMiB).Distinct().Order()
                 .Select(value => (value == 0 ? "使わない" : $"{value:N0} MiB", (object)value)));
-        var idle = new CheckBox { Content = "停止中にフレームをキャッシュする", Margin = new Thickness(0, 8, 0, 0) };
+        // The pre-renderer reads the timeline from the tool (IdleFramePreRenderer.SetTimelineToolInfo).
+        var idle = new CheckBox
+        {
+            Content = new TextBlock { Text = "停止中にフレームをキャッシュする（ツール「描画キャッシュ」を開いている間）", TextWrapping = TextWrapping.Wrap },
+            Margin = new Thickness(0, 8, 0, 0),
+        };
         Bind(idle, nameof(FrameCacheToolSettings.CacheFramesWhenIdle));
         Children.Insert(at++, idle);
         AddChoice("操作後の待ち時間", nameof(FrameCacheToolSettings.IdleDelaySeconds),

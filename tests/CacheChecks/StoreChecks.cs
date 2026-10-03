@@ -209,6 +209,8 @@ internal static class StoreChecks
         }
         CheckDiskDelivery(tempPath, Key);
         CheckConcurrentIndex(tempPath, Key);
+        CheckRestartKeepsRecentlyUsed(tempPath, Key);
+        CheckNoWaitBeforeIndex(tempPath, Key);
         Console.WriteLine("Cache store: ownership, budgets, cap, restart, checksum, locked-file epoch purge, physical accounting, concurrent purge and disk failure passed.");
     }
 
@@ -280,6 +282,57 @@ internal static class StoreChecks
         int files = Directory.EnumerateFiles(Path.Combine(root, "frames-v1"), "*.ymmframe", SearchOption.AllDirectories).Count();
         Check(files == 3, $"index and files disagree after the stress: {files} files");
         Console.WriteLine($"Cache store index under concurrency: {Interlocked.Read(ref rounds)} operations in 3 s, {cache.DiskWrites} disk writes, {cache.DiskReads} reads, {cache.DroppedWrites} writes dropped by backpressure, no errors, accounting consistent.");
+    }
+
+    // After a restart over a full disk budget, the records used last survive, not those first in file name order.
+    // A disk read counts as a use.
+    private static void CheckRestartKeepsRecentlyUsed(string tempPath, Func<int, string> key)
+    {
+        string root = Path.Combine(tempPath, "restart-order-store");
+        byte[] frame = Enumerable.Range(0, 16).Select(value => (byte)(value + 1)).ToArray();
+        int[] keys = [30, 31, 32];
+        using (var cache = new FrameCacheStore(root, 64, 3 * 64))
+        {
+            foreach (int value in keys) cache.Put(key(value), frame);
+            WaitFor(() => cache.DiskWrites == 3, "three records are written");
+        }
+        string Record(int value) => Directory.EnumerateFiles(root, key(value) + ".ymmframe", SearchOption.AllDirectories).Single();
+        var written = DateTime.UtcNow.AddHours(-3);
+        for (int i = 0; i < keys.Length; i++) File.SetLastWriteTimeUtc(Record(keys[i]), written.AddMinutes(i)); // 32 newest
+        using (var cache = new FrameCacheStore(root, 64, 3 * 64))
+        {
+            var residency = new byte[1];
+            WaitFor(() => { cache.GetResidency([key(30)], residency); return residency[0] == 1; }, "the index is loaded after restart");
+            Check(cache.TryGet(key(30), TimeSpan.FromSeconds(10), out _, out bool fromDisk) && fromDisk, "the oldest record is read from disk");
+            WaitFor(() => File.GetLastWriteTimeUtc(Record(30)) > written.AddHours(1), "a disk read marks the record as used");
+        }
+        using (var cache = new FrameCacheStore(root, 64, 2 * 64))
+        {
+            WaitFor(() => cache.DiskBytes == 2 * 64, "a smaller disk budget keeps two records");
+            var residency = new byte[3];
+            WaitFor(() => { cache.GetResidency(keys.Select(key).ToArray(), residency); return residency.Sum(value => value) == 2; }, "the index is loaded");
+            Check(residency.SequenceEqual(new byte[] { 1, 0, 1 }), $"the records read and written last survive the restart: {string.Join(",", residency)}");
+            Check(!Directory.EnumerateFiles(root, key(31) + ".ymmframe", SearchOption.AllDirectories).Any(), "the least recently used record is deleted");
+        }
+        Console.WriteLine("Cache store restart: the disk LRU follows the records' last use (writes and reads), not file name order.");
+    }
+
+    // Requests do not wait for a disk read while the index is still loading (reads start only after it).
+    private static void CheckNoWaitBeforeIndex(string tempPath, Func<int, string> key)
+    {
+        string root = Path.Combine(tempPath, "slow-index-store");
+        using var loading = new ManualResetEventSlim();
+        FrameCacheStore.IndexLoadingForTests = () => loading.Wait(TimeSpan.FromSeconds(30));
+        try
+        {
+            using var cache = new FrameCacheStore(root, 64, 256);
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            Check(!cache.TryGet(key(40), TimeSpan.FromSeconds(5), out _, out _), "nothing is stored yet");
+            Check(clock.ElapsedMilliseconds < 2000, $"a request waited {clock.ElapsedMilliseconds} ms for an index that was still loading");
+            loading.Set();
+        }
+        finally { FrameCacheStore.IndexLoadingForTests = null; loading.Set(); }
+        Console.WriteLine("Cache store: requests do not wait while the disk index loads.");
     }
 
     private static void Check(bool condition, string message)

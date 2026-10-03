@@ -69,9 +69,20 @@ internal sealed class FrameDependencyIndex
         return segment < boundaries.Length ? (int)Math.Min(int.MaxValue, boundaries[segment]) : int.MaxValue;
     }
 
-    internal Dependencies For(int frame)
+    // As For, with the frames that share them: [start, end) (int.MinValue / int.MaxValue when unbounded), so that a
+    // caller walking many frames looks a segment up once.
+    internal Dependencies For(int frame, out int start, out int end)
     {
         int segment = SegmentOf(frame);
+        start = segment == 0 ? int.MinValue : (int)Math.Clamp(boundaries[segment - 1], int.MinValue, int.MaxValue);
+        end = segment < boundaries.Length ? (int)Math.Clamp(boundaries[segment], int.MinValue, int.MaxValue) : int.MaxValue;
+        return For(frame, segment);
+    }
+
+    internal Dependencies For(int frame) => For(frame, SegmentOf(frame));
+
+    private Dependencies For(int frame, int segment)
+    {
         lock (segments) if (segments.TryGetValue(segment, out var cached)) return cached;
         var dependencies = Compute(frame);
         lock (segments) if (segments.Count < MaximumCachedSegments) segments[segment] = dependencies;

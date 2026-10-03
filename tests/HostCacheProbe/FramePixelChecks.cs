@@ -115,6 +115,8 @@ internal static class FramePixelChecks
             }
             Check(TimelineFrameCache.GpuBytes == 0, "Source disposal leaked global GPU reservation");
             Console.WriteLine("Actual host automatic source cache: hit/parity/invalidation/GPU cleanup OK");
+            CheckExportStore(host, context);
+            Check(TimelineFrameCache.GpuBytes == 0, "Export store checks leaked global GPU reservation");
             if (features is { Preview: true, SelectionRects: true })
             {
                 PreviewRectChecks.Run(host, context);
@@ -183,6 +185,64 @@ internal static class FramePixelChecks
         current.Initialize();
         Check(!current.PreviewCache && current.ExportCache && !current.NvencOutput, "Current settings were changed on load");
         Console.WriteLine("Settings: preview and export caches switch separately; old settings carried over");
+    }
+
+    // An export stores its frames without waiting for the GPU (copies finished by later frames, the last ones when the
+    // source is disposed): a second export of the same range restores every frame from the store, pixel for pixel.
+    private static void CheckExportStore(Assembly host, IGraphicsDevicesAndContext context)
+    {
+        const int Frames = 10, Width = 321, Height = 181;
+        var timeline = new Timeline();
+        timeline.VideoInfo.Width = Width; timeline.VideoInfo.Height = Height; timeline.VideoInfo.FPS = 30;
+        timeline.VideoInfo.BackgroundColor = System.Windows.Media.Color.FromArgb(200, 10, 120, 60);
+        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        for (int i = 0; i < Frames; i++)
+        {
+            var shape = new ShapeItem { Frame = i, Length = 1 };
+            shape.X.SetFirstValue(-140 + i * 31.5); shape.Y.SetFirstValue(-60 + i * 9.25); shape.Opacity.SetFirstValue(40 + i * 6);
+            timeline.Items = timeline.Items.Add(shape);
+        }
+        var scene = new Scene(timeline, scenes, []);
+        var dc = context.DeviceContext;
+        var half = new Vector2(Width / 2f, Height / 2f);
+        byte[][] Export(bool cache)
+        {
+            TimelineFrameCache.Enabled = cache;
+            var pixels = new byte[Frames][];
+            var source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [context, scene, null], null)!;
+            using (source)
+                for (int frame = 0; frame < Frames; frame++)
+                {
+                    source.Update(timeline.VideoInfo.GetTimeFrom(frame), TimelineSourceUsage.Exporting);
+                    pixels[frame] = TimelineFrameCache.Capture(dc, source.Output, Width, Height, -half)!;
+                }
+            return pixels;
+        }
+        try
+        {
+            var baseline = Export(cache: false);
+            TimelineFrameCache.Enabled = true;
+            TimelineFrameCache.Clear();
+            long misses = TimelineFrameCache.Misses;
+            var first = Export(cache: true);
+            Check(TimelineFrameCache.Misses - misses == Frames, $"The first export rendered {TimelineFrameCache.Misses - misses} of {Frames} frames: {TimelineFrameCache.Status}");
+            long ramHits = TimelineFrameCache.RamHits;
+            var second = Export(cache: true);
+            Check(TimelineFrameCache.RamHits - ramHits == Frames,
+                $"The second export restored {TimelineFrameCache.RamHits - ramHits} of {Frames} frames from the store (the last ones are finished when the export's source is disposed)");
+            for (int frame = 0; frame < Frames; frame++)
+                Check(first[frame].SequenceEqual(baseline[frame]) && second[frame].SequenceEqual(baseline[frame]), $"Export frame {frame} differs from the host's render");
+            Check(baseline.Distinct(new BytesComparer()).Count() == Frames, "The export fixture's frames are not all different");
+        }
+        finally { TimelineFrameCache.Enabled = true; }
+        Console.WriteLine($"Export store: {Frames} frames stored without waiting for the GPU (the last on disposal), restored by a second export pixel for pixel OK");
+    }
+
+    private sealed class BytesComparer : IEqualityComparer<byte[]>
+    {
+        public bool Equals(byte[]? x, byte[]? y) => x is not null && y is not null && x.AsSpan().SequenceEqual(y);
+        public int GetHashCode(byte[] value) => value.Length;
     }
 
     // Real reader, injected decoder failure: the host renders transparency and returns normally, and the

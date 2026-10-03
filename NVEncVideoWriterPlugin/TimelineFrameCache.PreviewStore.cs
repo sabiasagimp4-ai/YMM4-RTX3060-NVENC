@@ -86,6 +86,46 @@ internal static partial class TimelineFrameCache
         return true;
     }
 
+    // An export frame the host rendered is stored the same way, without the GPU stopping for it: its copy is finished
+    // by a later Update of the export. With every copy still pending, the oldest one (drawn three frames before) is
+    // waited for, so that every exported frame is stored. True when it took over `pending`.
+    private static bool StoreExport(Pending pending, ID2D1CommandList output)
+    {
+        var state = pending.State;
+        bool full;
+        lock (cacheGate) full = state.Deferred.Count >= ReadbacksInFlight;
+        if (full) CompleteOldestDeferred(state, waitForGpu: true);
+        // Without the source's pool: export frames can be of any size (4K: 33 MB each), and pooled textures would stay
+        // reserved against the GPU budget after the export.
+        var readback = BeginSceneReadback(pending.Devices.DeviceContext, output, pending.Scene, null);
+        if (readback is null) return false;
+        lock (cacheGate)
+        {
+            if (!StillCurrent(pending) || state.IsDisposed || state.Deferred.Count >= ReadbacksInFlight) { readback.Dispose(); return false; }
+            pending.HandOver();
+            state.Deferred.AddLast(new DeferredStore(pending, readback));
+        }
+        return true;
+    }
+
+    // When the export's source is disposed: its last frames' copies are finished (the GPU has drawn them by then) and
+    // stored. Preview copies are dropped as before, and so are export copies whose device context is already gone
+    // (completing checks the context's state).
+    private static void FinishExportStores(SourceState state)
+    {
+        try
+        {
+            while (true)
+            {
+                lock (cacheGate)
+                    if (state.IsDisposed || state.Deferred.First?.Value is not { Readback.SceneOrigin: not null } oldest
+                        || oldest.Pending.Devices.DeviceContext is not { NativePointer: not 0 }) return;
+                if (!CompleteOldestDeferred(state, waitForGpu: true)) return;
+            }
+        }
+        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException) { }
+    }
+
     // Under cacheGate, on the render thread, after the host's update of `pending` (CachePostfix). `shown` draws the
     // pixels BeginPreviewReadback drew from the host's output for `viewport`; the player's Draw then blits them
     // instead of evaluating the composition a second time. Pixels and accounting as for a hit (CommitReplacement),
@@ -193,12 +233,13 @@ internal static partial class TimelineFrameCache
                 return false;
             }
             if (!StillCurrent(deferred.Pending, files: true)) return true; // file I/O, outside cacheGate
+            bool preview = deferred.Readback.SceneOrigin is null;
             lock (cacheGate) if (StillCurrent(deferred.Pending))
             {
-                if (!deferred.Pending.State.Economics.ShouldAdmit(deferred.Pending.CacheKey!, record!.LongLength, gpuRetentionEnabled)) return true;
-                if (!store.Value.PutOwned(deferred.Pending.CacheKey!, record)) return true;
-                Interlocked.Increment(ref previewStored);
-                status = "描画したプレビューのフレームを保存しました。";
+                if (preview && !deferred.Pending.State.Economics.ShouldAdmit(deferred.Pending.CacheKey!, record!.LongLength, gpuRetentionEnabled)) return true;
+                if (!store.Value.PutOwned(deferred.Pending.CacheKey!, record!)) return true;
+                if (preview) Interlocked.Increment(ref previewStored);
+                status = preview ? "描画したプレビューのフレームを保存しました。" : "描画したフレームを保存しました。";
             }
             return true;
         }
@@ -210,7 +251,7 @@ internal static partial class TimelineFrameCache
         finally
         {
             if (!retained) deferred.Dispose();
-            Interlocked.Add(ref previewStoreTicks, System.Diagnostics.Stopwatch.GetTimestamp() - started);
+            if (deferred.Readback.SceneOrigin is null) Interlocked.Add(ref previewStoreTicks, System.Diagnostics.Stopwatch.GetTimestamp() - started);
         }
     }
 
