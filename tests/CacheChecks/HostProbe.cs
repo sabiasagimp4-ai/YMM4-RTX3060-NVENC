@@ -14,10 +14,9 @@ internal static class HostProbe
     internal static void Run(string hostDir)
     {
         Console.WriteLine("=== HOSTPROBE BEGIN ===");
-        Try("types", () => Types(hostDir));
-        Try("fonts-runtime", FontsRuntime);
-        Try("callers", () => Callers(hostDir));
+        Try("tachie-implementations", TachieImplementations);
         Try("decompile", () => Decompile(hostDir));
+        Try("types", () => Types(hostDir));
         Console.WriteLine("=== HOSTPROBE END ===");
         Console.Out.Flush();
     }
@@ -133,6 +132,28 @@ internal static class HostProbe
     }
 
     private static string[] fontOwners = [];
+    private static string[] tachieTypes = [];
+
+    // Built-in tachie sources (ITachieSource implementations in the host's assemblies): blink and mouth state.
+    private static void TachieImplementations()
+    {
+        var contract = typeof(YukkuriMovieMaker.Plugin.Tachie.ITachieSource);
+        var found = new List<string>();
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies().Where(a => a.GetName().Name?.StartsWith("YukkuriMovieMaker", StringComparison.Ordinal) == true))
+        {
+            Type[] types;
+            try { types = assembly.GetTypes(); } catch (ReflectionTypeLoadException error) { types = error.Types.OfType<Type>().ToArray(); }
+            foreach (var type in types.Where(t => !t.IsInterface && contract.IsAssignableFrom(t)))
+            {
+                Console.WriteLine($"  {assembly.GetName().Name}: {type.FullName}");
+                found.Add(type.Name);
+            }
+        }
+        tachieTypes = found.Distinct().ToArray();
+        var video = typeof(YukkuriMovieMaker.Project.Items.VideoItem);
+        foreach (var property in video.GetProperties(BindingFlags.Public | BindingFlags.Instance).OrderBy(p => p.Name, StringComparer.Ordinal))
+            Console.WriteLine($"  VideoItem.{property.Name} : {property.PropertyType.Name}");
+    }
 
     private static string ParentName(MetadataReader md, EntityHandle parent) => parent.Kind switch
     {
@@ -165,9 +186,10 @@ internal static class HostProbe
         // Simple names searched in every host assembly, with a line cap each.
         (string Name, int Lines)[] simple =
         [
-            ("WICSequentialImageVideoSource", 700), ("WICSequentialImageVideoSourcePlugin", 300), ("FontSettings", 300), ("Font", 300),
-            ("TachieSource", 700),
+            ("VideoSource", 600), ("VideoItemSource", 600), ("CachedVideoFileSource", 300), ("VideoFileSourceFactory", 300),
+            ("PlaybackRateMap", 400), ("ImageFileSourceFactory", 200), ("ImageSource", 300),
         ];
+        foreach (var name in tachieTypes) simple = [.. simple, (name, 400)];
         var done = new HashSet<string>(StringComparer.Ordinal);
         foreach (var file in HostFiles(hostDir).Select(Path.GetFileName))
         {
@@ -177,7 +199,9 @@ internal static class HostProbe
             {
                 if (type.DeclaringTypeDefinition is not null) continue;
                 var match = simple.FirstOrDefault(s => s.Name == type.Name);
-                bool owner = fontOwners.Contains(file + "|" + type.FullName);
+                if (match.Name is null && type.Name.Contains("Tachie", StringComparison.Ordinal) && type.Name.EndsWith("Source", StringComparison.Ordinal)
+                    && type.Name != "TachieSource") match = (type.Name, 400);
+                bool owner = false;
                 if (match.Name is null && !owner) continue;
                 if (match.Name == "Font" && !type.Namespace.Contains("Setting", StringComparison.Ordinal) && !type.Namespace.Contains("Font", StringComparison.Ordinal)) continue;
                 if (!done.Add(file + "|" + type.FullName)) continue;
