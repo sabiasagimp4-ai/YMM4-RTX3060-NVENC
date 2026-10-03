@@ -23,6 +23,8 @@
     <Compile Include="..\..\NVEncVideoWriterPlugin\PreviewPerformance.cs" Link="PreviewPerformance.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\CacheMemoryPolicy.cs" Link="CacheMemoryPolicy.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\CacheMemoryController.cs" Link="CacheMemoryController.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\GpuMemoryPolicy.cs" Link="GpuMemoryPolicy.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\GpuMemoryController.cs" Link="GpuMemoryController.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameRenderReadiness.cs" Link="FrameRenderReadiness.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\HostFeatures.cs" Link="HostFeatures.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\HostContracts.cs" Link="HostContracts.cs" />
