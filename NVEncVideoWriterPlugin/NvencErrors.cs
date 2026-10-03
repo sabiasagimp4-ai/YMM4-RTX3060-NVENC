@@ -29,6 +29,7 @@ internal static class NvencErrors
     }
 
     // YMM4 renders with one adapter; NVENC must be on that adapter, since frames stay on the GPU.
-    internal static string? NonNvidiaAdapter(uint vendorId, string adapterName) => vendorId == 0x10DE ? null
+    // The vendor id is a long: Vortice versions declare it int or uint.
+    internal static string? NonNvidiaAdapter(long vendorId, string adapterName) => vendorId == 0x10DE ? null
         : $"YMM4 が描画に使っている GPU（{adapterName}）は NVIDIA ではないため、NVENC で出力できません。NVIDIA の GPU を積んだノートPCなどでは、Windows の設定 > システム > ディスプレイ > グラフィックス で YukkuriMovieMaker を「高パフォーマンス」にして、YMM4 を再起動してください。";
 }
