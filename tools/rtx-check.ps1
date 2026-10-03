@@ -504,11 +504,11 @@ if (Test-Path -LiteralPath $csv) {
 }
 
 foreach ($pair in @(@('color', 'Color matrix of the NVENC output (#5)'), @('vui-experiment', 'VUI experiment: BT.709 signaled'))) {
-    $log = Join-Path $out "$($pair[0]).log"
-    if (-not (Test-Path -LiteralPath $log)) { continue }
+    $lines = @(Get-Lines (Join-Path $out "$($pair[0]).log") '^(\S.*\(.*frames|  signaled:|  bt[67]0[19]-|  best:|    shown by|VUI |  vui: )')
+    if ($lines.Count -eq 0) { continue }  # a failed check is already listed under Failures
     Add-Md
     Add-Md "## $($pair[1])"
-    Add-Code (Get-Lines $log '^(\S.*\(.*frames|  signaled:|  bt[67]0[19]-|  best:|    shown by|VUI |  vui: )')
+    Add-Code $lines
 }
 if ($patched) {
     Add-Md

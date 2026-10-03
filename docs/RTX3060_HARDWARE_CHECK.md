@@ -39,6 +39,15 @@ run `37106722408`（commit `8ead5cf`、windows-2022、2コア・8 GB）での結
   - 保存の見送り（`busy`）：全パスで0
   - idle：68.8〜75.7 fps、描画器の作成は1回
 
+NVENCを使う手順も、一度だけWindowsで動かした（run `37107197357`、PowerShell 5.1）。ランナーにNVENCはないので、偽の `nvidia-smi` を置いて実行した。
+
+- NVENCが要る手順は、想定どおり `nvEncodeAPI64.dll not found` で失敗した。
+- VUI実験のパッチはMSVCでコンパイルできた。
+- ソースは元に戻り、作り直し（restore-build）と残骸の確認（leftovers）はPASSした。
+- 報告には5つの失敗がすべて載った。
+
+この確認のためのジョブは、確認後に削除した。
+
 ## B. RTX 3060のPCで行うこと（利用者）
 
 ### 準備（初回だけ）
