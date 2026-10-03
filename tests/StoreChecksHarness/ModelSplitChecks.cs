@@ -1,6 +1,7 @@
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using NVEncVideoWriterPlugin;
+using Parts = NVEncVideoWriterPlugin.FrameModelSplit.Parts;
 
 // FrameModelSplit streams the model; its texts must equal those of the parsed-tree version it replaced (they are
 // hashed into every frame key, so any difference would silently drop all stored frames), and the owner it gives each
@@ -37,6 +38,7 @@ internal static class ModelSplitChecks
         }
         Check(rejections > 3 && attributed > 50 && nestedForeign > 20 && characterForeign > 20 && audioOnly > 20,
             $"premise: the models cover every owner ({rejections} rejected, {attributed} items, {nestedForeign} nested, {characterForeign} characters, {audioOnly} audio)");
+        CheckLayers();
 
         // A model about the size of 1000 shapes (several MB).
         var bigRoot = Guid.NewGuid();
@@ -95,20 +97,58 @@ internal static class ModelSplitChecks
         return (null, items, nested, [.. foreignCharacters], audio);
     }
 
-    // The version FrameCacheKey.DescribeFrames used until the split was made in place.
+    // Layer names and colors reach no frame key; the root timeline's layer volumes only the other timelines' part
+    // (frames that read audio); a hidden layer every frame.
+    private static void CheckLayers()
+    {
+        var random = new Random(31);
+        var rootId = Guid.NewGuid();
+        var model = Parse(Model(random, rootId, timelines: 2, items: 5, foreignTypes: false));
+        var root = ((JArray)model["Timelines"]!).OfType<JObject>().Single(t => (string?)t["ID"] == rootId.ToString());
+        var layer = (JObject)root["LayerSettings"]!["Items"]![0]!;
+        Parts Split() => FrameModelSplit.TrySplit(model.ToString(Formatting.None), rootId, [], Classify, out var parts, out _) ? parts : throw new Exception("Model split: layer model rejected");
+        var before = Split();
+        layer["Label"] = "renamed";
+        layer["Color"] = "#FF123456";
+        var renamed = Split();
+        Check(renamed.Global == before.Global && renamed.Nested == before.Nested && renamed.RootItems.SequenceEqual(before.RootItems),
+            "a layer's name or color changed a frame key");
+        layer["Volume"] = 0.25;
+        var quieter = Split();
+        Check(quieter.Global == before.Global && quieter.Nested != before.Nested, "a layer's volume did not change only the frames that read audio");
+        layer["IsHidden"] = !(bool)layer["IsHidden"]!;
+        Check(Split().Global != quieter.Global, "hiding a layer did not change every frame's key");
+    }
+
+    // The version FrameCacheKey.DescribeFrames used until the split was made in place, with the layer settings
+    // reduced as FrameModelSplit describes.
     private static (string Global, string Nested, string[] RootItems) Copying(JObject source, Guid rootId, IEnumerable<string> resources)
     {
+        string[] display = ["Label", "Labels", "Color", "Colors"], audio = ["Volume", "Volumes"];
         var parsed = (JObject)source.DeepClone();
         var timelines = (JArray)parsed["Timelines"]!;
         var root = timelines.OfType<JObject>().Single(t => Guid.TryParse(t["ID"]?.ToString(), out var id) && id == rootId);
         var rootTokens = (JArray)root["Items"]!;
-        var nested = new JArray(timelines.Where(t => !ReferenceEquals(t, root)).Select(t => t.DeepClone()));
+        var nested = new JArray(timelines.Where(t => !ReferenceEquals(t, root)).Select(t => WithLayers((JObject)t.DeepClone(), display)));
+        if (root["LayerSettings"] is { } rootLayers) nested.Add(new JObject { ["RootLayerSettings"] = Strip(rootLayers.DeepClone(), display) });
         var global = (JObject)parsed.DeepClone();
-        var rootSettings = (JObject)root.DeepClone();
+        var rootSettings = WithLayers((JObject)root.DeepClone(), [.. display, .. audio]);
         rootSettings.Remove("Items");
         global["Timelines"] = new JArray(rootSettings);
         global["Resources"] = new JArray(resources);
         return (global.ToString(Formatting.None), nested.ToString(Formatting.None), rootTokens.Select(t => t.ToString(Formatting.None)).ToArray());
+
+        static JObject WithLayers(JObject timeline, string[] names)
+        {
+            if (timeline["LayerSettings"] is { } layers) Strip(layers, names);
+            return timeline;
+        }
+        static JToken Strip(JToken layers, string[] names)
+        {
+            if (layers is JContainer container)
+                foreach (var property in container.Descendants().OfType<JProperty>().Where(p => names.Contains(p.Name)).ToArray()) property.Remove();
+            return layers;
+        }
     }
 
     private static JObject Parse(string text)
@@ -156,7 +196,18 @@ internal static class ModelSplitChecks
             new("VideoInfo", foreignTypes && random.Next(30) == 0
                 ? new JObject { ["$type"] = "Some.Plugin.Info, Some.Plugin", ["Width"] = 1920 }
                 : new JObject { ["Width"] = 1920, ["Height"] = 1080, ["FPS"] = 30, ["BackgroundColor"] = "#FF000000" }),
-            new("LayerSettings", new JObject { ["Layers"] = new JArray(random.Next(3), random.Next(3)) }),
+            new("LayerSettings", new JObject
+            {
+                ["Items"] = new JArray(Enumerable.Range(0, 1 + random.Next(3)).Select(layer => new JObject
+                {
+                    ["Layer"] = layer,
+                    ["Label"] = "レイヤー" + random.Next(10),
+                    ["Color"] = "#FF" + random.Next(0x1000000).ToString("X6"),
+                    ["IsHidden"] = random.Next(4) == 0,
+                    ["Volume"] = random.NextDouble(),
+                })),
+                ["MaxLayer"] = random.Next(3, 10),
+            }),
             new("Length", random.Next(1, 10000)),
         };
         bool settingsFirst = random.Next(2) == 0;

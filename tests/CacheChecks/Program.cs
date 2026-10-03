@@ -45,6 +45,7 @@ internal static class Program
         CheckBundledTachie();
         CheckFramePreparesOwnFiles();
         CheckFingerprintCancellation();
+        CheckUnverifiableFiles();
         CheckIdentitySeeds();
         CheckCommunity();
         CheckDynamicDependencies();
@@ -396,6 +397,74 @@ internal static class Program
     }
 
     // Per-frame keys: an edit changes only the frames of the edited item, and a frame only needs its own files.
+    // YMM4's own settings: the UI's (timeline zoom, preview volume) leave a capture valid; the scaling mode the
+    // renderers read (FrameCacheKey.DrawingSettings) invalidates it and changes the frame keys.
+    private static void CheckUiSettings(KeyDependencyTracker tracker, string at10)
+    {
+        var settings = YukkuriMovieMaker.Plugin.SettingsBase<YukkuriMovieMaker.Settings.YMMSettings>.Default;
+        Check(tracker.TryCapture(10, out var capture, out string reason), "No capture to check settings with: " + reason);
+        using (capture)
+        {
+            double zoom = settings.TimelineZoom, volume = settings.Volume;
+            try
+            {
+                settings.TimelineZoom = zoom * 1.5 + 1;
+                settings.Volume = volume > 0.5 ? volume / 2 : volume + 0.25;
+                Check(capture!.Validate(files: false), "A timeline zoom or preview volume change invalidated a capture");
+            }
+            finally { settings.TimelineZoom = zoom; settings.Volume = volume; }
+        }
+        Check(WaitForFrameKey(tracker, 10) == at10, "A UI setting changed a frame key");
+        var zoomMode = typeof(YukkuriMovieMaker.Settings.YMMSettings).GetProperty(nameof(settings.ZoomMode))!;
+        object mode = zoomMode.GetValue(settings)!;
+        object other = Enum.GetValues(mode.GetType()).Cast<object>().First(value => !value.Equals(mode));
+        Check(tracker.TryCapture(10, out capture, out reason), "No capture to check the scaling mode with: " + reason);
+        using (capture)
+        {
+            try
+            {
+                zoomMode.SetValue(settings, other);
+                Check(!capture!.Validate(files: false), "A scaling mode change left a capture valid");
+                Check(WaitForFrameKey(tracker, 10) != at10, "A scaling mode change did not change the frame key");
+            }
+            finally { zoomMode.SetValue(settings, mode); }
+        }
+        Check(WaitForFrameKey(tracker, 10) == at10, "Restoring the scaling mode did not restore the frame key");
+    }
+
+    // A layer's name, color and volume (the timeline's display, the audio) leave the keys of frames without audio as
+    // they are; hiding the layer changes them. Frame 10 shows an item on layer 1.
+    private static void CheckLayerSettings(Timeline timeline, KeyDependencyTracker tracker, string at10)
+    {
+        var layers = timeline.LayerSettings;
+        var items = layers.GetType().GetProperty("Items")!;
+        var original = items.GetValue(layers)!;
+        var settingType = items.PropertyType.GetGenericArguments()[0];
+        object empty = items.PropertyType.GetField("Empty")!.GetValue(null)!;
+        void Use(string label, byte red, bool hidden, double volume)
+        {
+            var setting = Activator.CreateInstance(settingType)!;
+            settingType.GetProperty("Layer")!.SetValue(setting, 1);
+            settingType.GetProperty("Label")!.SetValue(setting, label);
+            settingType.GetProperty("Color")!.SetValue(setting, System.Windows.Media.Color.FromRgb(red, 0, 0));
+            settingType.GetProperty("IsHidden")!.SetValue(setting, hidden);
+            settingType.GetProperty("Volume")!.SetValue(setting, volume);
+            items.SetValue(layers, empty.GetType().GetMethod("Add")!.Invoke(empty, [setting]));
+        }
+        try
+        {
+            Use("A", 10, hidden: false, volume: 1);
+            Console.WriteLine("Layer settings as YMM4 saves them: " + YukkuriMovieMaker.Json.Json.GetJsonText(layers));
+            string named = WaitForFrameKey(tracker, 10);
+            Use("B", 200, hidden: false, volume: 0.25);
+            Check(WaitForFrameKey(tracker, 10) == named, "A layer's name, color or volume changed the key of a frame without audio");
+            Use("B", 200, hidden: true, volume: 0.25);
+            Check(WaitForFrameKey(tracker, 10) != named, "Hiding a layer did not change the key of a frame showing it");
+        }
+        finally { items.SetValue(layers, original); }
+        Check(WaitForFrameKey(tracker, 10) == at10, "Restoring the layer settings did not restore the frame key");
+    }
+
     private static void CheckFrameKeys(Timeline timeline, Timeline nested, KeyDependencyTracker tracker)
     {
         var early = new ShapeItem { Frame = 0, Length = 30, Layer = 1 };
@@ -427,6 +496,8 @@ internal static class Program
         Check(WaitForFrameKey(tracker, 10) != at10, "An added file extension did not invalidate frames");
         extensions.RemoveAt(extensions.Count - 1);
         Check(WaitForFrameKey(tracker, 10) == at10, "Removing the added file extension did not restore frame keys");
+        CheckUiSettings(tracker, at10);
+        CheckLayerSettings(timeline, tracker, at10);
 
         string folder = Path.Combine(Path.GetTempPath(), "ymm-frame-key-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
@@ -787,6 +858,64 @@ internal static class Program
         capture!.Dispose();
         Check(!tracker.TryCapture(55, out _, out reason) && reason.Contains("立ち絵"), "The tachie frame was keyed: " + reason);
         Console.WriteLine($"Bundled tachie ({parameterType.Name}): frames without it keyed, its frames rendered normally");
+    }
+
+    // A file that cannot be verified (here: behind a directory junction, as in a OneDrive folder) only disables the
+    // frames showing it. They render normally for good, so the idle pre-renderer passes them (RendersNormally), and
+    // the file is retried on its own: the project's other files are not opened again and again.
+    private static void CheckUnverifiableFiles()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "ymm-unverifiable-" + Guid.NewGuid().ToString("N"));
+        string real = Path.Combine(folder, "real"), link = Path.Combine(folder, "link");
+        Directory.CreateDirectory(real);
+        var retry = KeyDependencyTracker.UnverifiableRetry;
+        try
+        {
+            using (var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{real}\"")
+                { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true }))
+                mklink!.WaitForExit();
+            Check(Directory.Exists(link) && (File.GetAttributes(link) & FileAttributes.ReparsePoint) != 0, "Could not create the test junction");
+            File.WriteAllBytes(Path.Combine(real, "plain.png"), [1, 2, 3, 4]);
+            File.WriteAllBytes(Path.Combine(real, "linked.png"), [5, 6, 7, 8]);
+            var timeline = new Timeline();
+            timeline.Items = timeline.Items
+                .Add(new ImageItem { FilePath = Path.Combine(real, "plain.png"), Frame = 0, Length = 10, Layer = 1 })
+                .Add(new ImageItem { FilePath = Path.Combine(link, "linked.png"), Frame = 10, Length = 10, Layer = 1 })
+                .Add(new ImageItem { FilePath = Path.Combine(real, "plain.png"), Frame = 20, Length = 10, Layer = 1 });
+            var scenes = new Scenes(false);
+            scenes.AddScene(timeline);
+            KeyDependencyTracker.UnverifiableRetry = TimeSpan.FromMilliseconds(200);
+            using var tracker = new KeyDependencyTracker(new Scene(timeline, scenes, []));
+            WaitForFrameKey(tracker, 5);
+            string reason = string.Empty;
+            Check(SpinWait.SpinUntil(() => !tracker.TryCapture(15, out _, out reason) && tracker.RendersNormally(15), TimeSpan.FromSeconds(15)),
+                "A frame whose file cannot be verified was not marked to render normally: " + reason);
+            Check(reason.Contains("検証できません", StringComparison.Ordinal), "Unexpected reason for the unverifiable file: " + reason);
+            Check(!tracker.RendersNormally(5) && !tracker.RendersNormally(25), "Frames without the unverifiable file render normally");
+            // Longer than the 5 s between passes before: captures of the frame and the cache bars over every frame.
+            long opens = FileDependencyLease.FileOpens;
+            var keys = new string?[30];
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            while (clock.Elapsed < TimeSpan.FromSeconds(6))
+            {
+                tracker.TryCapture(15, out _, out _);
+                tracker.TryPeekFrameKeys(Enumerable.Range(0, 30).ToArray(), keys, out _);
+                Thread.Sleep(50);
+            }
+            Check(FileDependencyLease.FileOpens == opens, $"The project's files were opened again {FileDependencyLease.FileOpens - opens} times because of one unverifiable file");
+            Check(keys[5] is not null && keys[15] is null && keys[25] is not null, "The cache bars lost the frames without the unverifiable file");
+            // The file moves out of the junction (an edit): its frames are cached again.
+            ((ImageItem)timeline.Items[1]).FilePath = Path.Combine(real, "linked.png");
+            Check(!tracker.RendersNormally(15) || SpinWait.SpinUntil(() => !tracker.RendersNormally(15), TimeSpan.FromSeconds(5)), "An edit did not clear the unverifiable frame");
+            WaitForFrameKey(tracker, 15);
+            Console.WriteLine("Unverifiable file: only its frames render normally, idle passes them, no repeated project-wide verification OK");
+        }
+        finally
+        {
+            KeyDependencyTracker.UnverifiableRetry = retry;
+            if (Directory.Exists(link)) Directory.Delete(link);
+            Directory.Delete(folder, recursive: true);
+        }
     }
 
     // A frame only waits for its own files: with 150 large files in the project, a frame whose small file comes last

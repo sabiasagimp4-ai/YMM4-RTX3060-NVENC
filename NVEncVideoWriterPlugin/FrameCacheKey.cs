@@ -462,6 +462,14 @@ internal static class FrameCacheKey
     internal static bool IsMidi(string path) =>
         Path.GetExtension(path).Equals(".mid", StringComparison.OrdinalIgnoreCase) || Path.GetExtension(path).Equals(".midi", StringComparison.OrdinalIgnoreCase);
 
+    // The YMMSettings values the drawing model holds (TryDescribe), as one text. KeyDependencyTracker compares it when
+    // another property of YMMSettings changes.
+    internal static string DrawingSettings()
+    {
+        var settings = SettingsBase<YMMSettings>.Default;
+        return $"{settings.GetZoomMode()}|{settings.GetMFSourceReaderMode2()}|{settings.GetVoiceUpsamplingMode()}";
+    }
+
     internal static string[] FileTypes() =>
         SettingsBase<FileSettings>.Default.FileExtensions.Select(extension => $"{extension.Extention}={extension.FileType}").ToArray();
 

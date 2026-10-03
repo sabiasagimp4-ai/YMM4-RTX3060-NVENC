@@ -326,12 +326,14 @@ internal static partial class IdleFramePreRenderer
 
     // One frame of a batch: the live and clone keys must agree; a frame already stored (in RAM, or on disk where the
     // preview reads it ahead) is not rendered again; otherwise the clone renders it and it is primed for the view.
+    // A frame either tracker renders normally is passed over (passing one is never wrong, only not cached): the clone
+    // has not even described the model when the live capture fails first, as for a file that failed verification.
     internal static IdleFrameResult PrimeFrame(KeyDependencyTracker liveTracker, Scene liveScene, KeyDependencyTracker cloneTracker,
         Scene cloneScene, object source, Action<TimeSpan> render, int frame, TimelineFrameCache.PreviewViewport viewport,
         Func<bool> canContinue, CancellationToken token, out string reason)
     {
         if (!TryCapturePair(liveTracker, cloneTracker, frame, out var liveCapture, out var cloneCapture, out reason))
-            return liveTracker.RendersNormally(frame) && cloneTracker.RendersNormally(frame) ? IdleFrameResult.Normal : IdleFrameResult.NotKeyed;
+            return liveTracker.RendersNormally(frame) || cloneTracker.RendersNormally(frame) ? IdleFrameResult.Normal : IdleFrameResult.NotKeyed;
         using (liveCapture)
         using (cloneCapture)
         {

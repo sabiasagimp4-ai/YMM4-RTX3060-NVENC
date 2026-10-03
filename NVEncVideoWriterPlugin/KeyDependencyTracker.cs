@@ -20,6 +20,11 @@ internal sealed class KeyDependencyTracker : IDisposable
     private long describeRevision = -1;
     private long lastDescribeTicks = -1;
     private static readonly SemaphoreSlim FingerprintSlot = new(1, 1);
+    // The YMMSettings properties the drawing model holds (FrameCacheKey.DrawingSettings), with the older ones they may
+    // fall back to. YMM4's renderers read no other property of YMMSettings (4.56.1.0): the rest is the UI's (timeline
+    // zoom, volume, layout, ...), which changes often while previewing and must not describe the project again.
+    private static readonly HashSet<string> DrawingSettingNames = new(StringComparer.Ordinal)
+        { "ZoomMode", "MFSourceReaderMode", "MFSourceReaderMode2", "HardwareDecodeMode", "VoiceUpsamplingMode" };
     private readonly Scene scene;
     private readonly object gate = new();
     private readonly List<Action> unsubscribe = [];
@@ -39,11 +44,19 @@ internal sealed class KeyDependencyTracker : IDisposable
     // KnownCode.Generation the description was made with: trusting another plugin describes the project again.
     private long cachedCode = -1;
     private Guid[] cachedParents = [];
+    // FrameCacheKey.DrawingSettings of the description (null before the first one).
+    private volatile string? cachedSettings;
     private IReadOnlyDictionary<string, FileFingerprint>? fingerprints;
-    private Task<(IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason)>? fingerprintTask;
+    private Task<(IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason, IReadOnlyDictionary<string, string> Failed)>? fingerprintTask;
     private CancellationTokenSource? fingerprintCancellation;
     private long fingerprintRevision;
     private long nextFingerprintAttempt;
+    // Files a pass could not verify (a link or cloud placeholder, a volume other than a local NTFS one, over the size
+    // limit, unreadable), with the reason. Their frames render normally (RendersNormally: the idle pre-renderer passes
+    // them), and they are not verified again with the whole project, only on their own every UnverifiableRetry.
+    private readonly Dictionary<string, string> unverifiable = new(StringComparer.OrdinalIgnoreCase);
+    private long nextUnverifiableRetry;
+    internal static TimeSpan UnverifiableRetry { get; set; } = TimeSpan.FromSeconds(30); // tests shorten it
     private bool disposed;
 
     public KeyDependencyTracker(Scene scene) => this.scene = scene;
@@ -84,19 +97,21 @@ internal sealed class KeyDependencyTracker : IDisposable
         Capture(frame, out capture, out reason, settle, background);
 
     // True when the current description renders this frame normally whatever its files' state (a tachie, a plugin's
-    // code, a file or font that cannot be verified), or a file of it was overwritten while YMM4 runs (HostContent).
-    // It stays so until an edit (or a restart), so the idle pre-renderer passes it. So does a frame keyed by the live
-    // objects' identities (Dependencies.Session): a clone of the scene draws its randomness otherwise.
+    // code, a file or font that cannot be verified), a file of it was overwritten while YMM4 runs (HostContent), or a
+    // file of it failed verification (unverifiable). It stays so until an edit (or a restart, or the file passes a
+    // retry), so the idle pre-renderer passes it. So does a frame keyed by the live objects' identities
+    // (Dependencies.Session): a clone of the scene draws its randomness otherwise.
     internal bool RendersNormally(int frame)
     {
         lock (gate)
             return !disposed && cachedRevision >= 0 && cachedRevision == Revision && cachedEligible
                 && cachedFrames is { } frames && frames.For(frame) is var dependencies
-                && (!dependencies.Cacheable || dependencies.Session || dependencies.Files.Any(HostContent.Changed));
+                && (!dependencies.Cacheable || dependencies.Session || dependencies.Files.Any(HostContent.Changed)
+                    || dependencies.Files.Any(unverifiable.ContainsKey));
     }
 
     private sealed record Description(bool Eligible, string Model, string[] Paths, FrameDependencyIndex? Frames, string Reason,
-        Type[][] SourceReaders, long Ticks, long Code);
+        Type[][] SourceReaders, long Ticks, long Code, string Settings);
 
     private bool Capture(int? frame, out KeyCapture? capture, out string reason, bool settle, bool background = false)
     {
@@ -196,9 +211,21 @@ internal sealed class KeyDependencyTracker : IDisposable
                 return false;
             }
             long now = Environment.TickCount64;
-            // This frame's own unverified files first, then the rest of the project.
             var verified = fingerprints;
-            StartFingerprinting(before, now, verified is null ? files : files.Where(file => !verified.ContainsKey(file)).ToArray());
+            string[] missing = verified is null ? files : files.Where(file => !verified.ContainsKey(file)).ToArray();
+            // Files that failed before are tried again on their own, not with the whole project.
+            if (missing.Length != 0 && missing.All(unverifiable.ContainsKey))
+            {
+                if (now >= nextUnverifiableRetry)
+                {
+                    nextUnverifiableRetry = now + (long)UnverifiableRetry.TotalMilliseconds;
+                    StartFingerprinting(before, now, missing, onlyFirst: true);
+                }
+                reason = "外部素材の一部を検証できません: " + unverifiable[missing[0]];
+                return false;
+            }
+            // This frame's own unverified files first, then the rest of the project.
+            StartFingerprinting(before, now, missing);
             reason = cachedPartialReason.Length != 0 ? "外部素材の一部を検証できません: " + cachedPartialReason
                 : now < nextFingerprintAttempt && !string.IsNullOrEmpty(cachedReason)
                 ? cachedReason : "外部素材の内容確認を準備中のため、通常描画を使用します。";
@@ -211,11 +238,16 @@ internal sealed class KeyDependencyTracker : IDisposable
     {
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
         Type[][] sourceReaders;
-        try { sourceReaders = FrameCacheKey.CaptureSourceReaderTypes(); }
+        string settings;
+        try
+        {
+            sourceReaders = FrameCacheKey.CaptureSourceReaderTypes();
+            settings = FrameCacheKey.DrawingSettings();
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { return null; }
         long code = KnownCode.Generation;
         bool eligible = FrameCacheKey.TryDescribe(scene, sourceReaders, out string model, out string[] paths, out var frames, out string reason);
-        return new(eligible, model, paths, frames, reason, sourceReaders, System.Diagnostics.Stopwatch.GetTimestamp() - started, code);
+        return new(eligible, model, paths, frames, reason, sourceReaders, System.Diagnostics.Stopwatch.GetTimestamp() - started, code, settings);
     }
 
     // Under gate: adopts a description of revision `current` unless the project or the readers changed since.
@@ -234,6 +266,7 @@ internal sealed class KeyDependencyTracker : IDisposable
         frameKeys.Clear();
         cachedSourceReaders = description.SourceReaders;
         cachedCode = description.Code;
+        cachedSettings = description.Settings;
         cachedParents = scene.ParentScenes.ToArray();
         cachedReason = description.Reason;
         cachedEligible = description.Eligible && description.Frames is not null;
@@ -279,7 +312,9 @@ internal sealed class KeyDependencyTracker : IDisposable
                 var dependencies = cachedFrames.For(frames[i]);
                 bool verified = dependencies.Files.Length == 0
                     || (fingerprints is not null && dependencies.Files.All(fingerprints.ContainsKey));
-                unverified |= dependencies.Cacheable && !verified;
+                // A file that failed verification is retried by captures only (Capture), not with the project.
+                unverified |= dependencies.Cacheable && !verified && dependencies.Files.Any(file =>
+                    (fingerprints is null || !fingerprints.ContainsKey(file)) && !unverifiable.ContainsKey(file));
                 keys[i] = dependencies.Cacheable && verified ? KeyFor(dependencies, dependencies.Files) : null;
             }
             if (unverified && fingerprintTask is null) StartFingerprinting(cachedRevision, Environment.TickCount64);
@@ -289,15 +324,32 @@ internal sealed class KeyDependencyTracker : IDisposable
     }
 
     // Under gate, with a finished fingerprintTask: keeps its fingerprints if they describe this revision's files.
+    // The verified files are added to those known before (a pass can cover only some files); the failed ones are
+    // removed from them and remembered as unverifiable.
     private void AdoptFingerprints(long current)
     {
+        if (fingerprintTask!.IsCompletedSuccessfully)
+        {
+            var (files, _, failed) = fingerprintTask.Result;
+            foreach (var path in files?.Keys ?? []) unverifiable.Remove(path);
+            foreach (var (path, failure) in failed) unverifiable[path] = failure;
+        }
         if (fingerprintRevision == current)
         {
-            if (fingerprintTask!.IsCompletedSuccessfully && fingerprintTask.Result.Files is { } fingerprinted)
+            if (fingerprintTask!.IsCompletedSuccessfully && (fingerprintTask.Result.Files is not null || fingerprintTask.Result.Failed.Count != 0))
             {
-                fingerprints = fingerprinted;
-                cachedKey = string.Empty;
-                frameKeys.Clear();
+                var merged = new Dictionary<string, FileFingerprint>(StringComparer.OrdinalIgnoreCase);
+                if (fingerprints is not null) foreach (var pair in fingerprints) merged[pair.Key] = pair.Value;
+                foreach (var pair in fingerprintTask.Result.Files ?? EmptyFingerprints) merged[pair.Key] = pair.Value;
+                foreach (var path in fingerprintTask.Result.Failed.Keys) merged.Remove(path);
+                // Unchanged (a retry that failed again): the same dictionary, so the idle renderer stays reusable.
+                var known = fingerprints;
+                if (known is null || merged.Count != known.Count || merged.Any(pair => !known.TryGetValue(pair.Key, out var own) || own != pair.Value))
+                {
+                    fingerprints = merged;
+                    cachedKey = string.Empty;
+                    frameKeys.Clear();
+                }
                 cachedReason = string.Empty;
                 // Files that could not be verified only disable the frames that use them; retry later.
                 if (fingerprintTask.Result.Reason.Length != 0)
@@ -318,8 +370,8 @@ internal sealed class KeyDependencyTracker : IDisposable
     }
 
     // Under gate, with no fingerprintTask: verifies the project's files in the background (one tracker at a time),
-    // `first` before the others. Fingerprints are published as each chunk finishes.
-    private void StartFingerprinting(long current, long now, string[]? first = null)
+    // `first` before the others (only `first` with onlyFirst). Fingerprints are published as each chunk finishes.
+    private void StartFingerprinting(long current, long now, string[]? first = null, bool onlyFirst = false)
     {
         if (now >= nextFingerprintAttempt && FingerprintSlot.Wait(0))
         {
@@ -327,9 +379,9 @@ internal sealed class KeyDependencyTracker : IDisposable
             fingerprintCancellation = cancellation;
             fingerprintRevision = current;
             cachedPartialReason = string.Empty;
-            string[] paths = cachedPaths;
+            string[] paths = onlyFirst ? first ?? [] : cachedPaths;
             int leading = 0;
-            if (first is { Length: > 0 })
+            if (!onlyFirst && first is { Length: > 0 })
             {
                 var set = new HashSet<string>(first, StringComparer.OrdinalIgnoreCase);
                 paths = first.Concat(paths.Where(path => !set.Contains(path))).ToArray();
@@ -370,22 +422,26 @@ internal sealed class KeyDependencyTracker : IDisposable
     // so that one unverifiable file only disables the frames that use it.
     // Editing/disposal cancels optional validation. Return an unavailable result instead of faulting a
     // fire-and-forget Task: abandoned faulted tasks otherwise reach the host's unobserved-exception UI.
-    internal static (IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason) FingerprintSafely(string[] paths,
+    // Failed: the files that failed on their own, with the reason (not those of a cancelled or failed pass).
+    internal static (IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason, IReadOnlyDictionary<string, string> Failed) FingerprintSafely(string[] paths,
         IReadOnlyDictionary<string, FileFingerprint>? previous, CancellationToken token,
         Action<IReadOnlyDictionary<string, FileFingerprint>>? publish = null, int leading = 0)
     {
         try { return Fingerprint(paths, previous, token, publish, leading); }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
-        { return (null, "外部素材の内容確認を中断しました。"); }
+        { return (null, "外部素材の内容確認を中断しました。", NoFailures); }
         catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
-        { return (null, "外部素材の内容確認に失敗しました: " + error.GetType().Name); }
+        { return (null, "外部素材の内容確認に失敗しました: " + error.GetType().Name, NoFailures); }
     }
 
-    private static (IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason) Fingerprint(string[] paths,
+    private static readonly IReadOnlyDictionary<string, string> NoFailures = new Dictionary<string, string>();
+
+    private static (IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason, IReadOnlyDictionary<string, string> Failed) Fingerprint(string[] paths,
         IReadOnlyDictionary<string, FileFingerprint>? previous, CancellationToken token,
         Action<IReadOnlyDictionary<string, FileFingerprint>>? publish = null, int leading = 0)
     {
         var result = new Dictionary<string, FileFingerprint>(StringComparer.OrdinalIgnoreCase);
+        var failed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         string reason = string.Empty;
         // The leading files (a waiting frame's) are chunked on their own, so they are published first.
         foreach (var chunk in paths[..leading].Chunk(FingerprintChunk).Concat(paths[leading..].Chunk(FingerprintChunk)))
@@ -396,11 +452,12 @@ internal sealed class KeyDependencyTracker : IDisposable
                 foreach (var path in chunk)
                 {
                     token.ThrowIfCancellationRequested();
-                    TryAdd([path], added);
+                    if (!TryAdd([path], added)) failed[path] = reason;
                 }
             if (added.Count != 0) publish?.Invoke(added);
         }
-        return (result.Count == 0 ? null : result, reason);
+        token.ThrowIfCancellationRequested(); // a failure caused by the cancellation is not the file's
+        return (result.Count == 0 ? null : result, reason, failed);
 
         bool TryAdd(string[] group, Dictionary<string, FileFingerprint> added)
         {
@@ -415,7 +472,7 @@ internal sealed class KeyDependencyTracker : IDisposable
     }
 
     // A chunk's fingerprints, while the pass goes on. They describe files, not a project revision: a capture still
-    // leases its files and compares their stamps, and the finished pass replaces the whole dictionary.
+    // leases its files and compares their stamps, and the finished pass drops the files it could not verify.
     private void Publish(IReadOnlyDictionary<string, FileFingerprint> added)
     {
         // The project's files as verified in the background, usually before YMM4 reads them for a frame: a later
@@ -501,13 +558,24 @@ internal sealed class KeyDependencyTracker : IDisposable
 
     private static bool IsTimelineUiProperty(object? sender, string? property) => sender is Timeline && property is
         "CurrentFrame" or "SelectedItems" or "SelectedItem" or "GroupedItems" or "SelectedAndGroupedItems";
+    // A YMMSettings property other than DrawingSettingNames (an unnamed change counts as one of them).
+    private static bool IsUiSetting(object? sender, string? property) =>
+        sender is YukkuriMovieMaker.Settings.YMMSettings && !string.IsNullOrEmpty(property) && !DrawingSettingNames.Contains(property);
     private void PropertyChanged(object? sender, PropertyChangedEventArgs args)
     {
-        if (!IsTimelineUiProperty(sender, args.PropertyName)) Invalidate();
+        if (IsTimelineUiProperty(sender, args.PropertyName)) return;
+        // Should a drawing setting depend on another property after all, its value changed: describe again.
+        if (IsUiSetting(sender, args.PropertyName) && SafeDrawingSettings() == cachedSettings) return;
+        Invalidate();
     }
     private void PropertyChanging(object? sender, PropertyChangingEventArgs args)
     {
-        if (!IsTimelineUiProperty(sender, args.PropertyName)) Invalidate();
+        if (!IsTimelineUiProperty(sender, args.PropertyName) && !IsUiSetting(sender, args.PropertyName)) Invalidate();
+    }
+    private static string? SafeDrawingSettings()
+    {
+        try { return FrameCacheKey.DrawingSettings(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { return null; }
     }
     private void CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs args) => Invalidate();
     private void UndoCommandCreated(object? sender, UndoRedoEventArgs args) => Invalidate();

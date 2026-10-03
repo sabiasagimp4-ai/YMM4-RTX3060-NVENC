@@ -15,7 +15,56 @@ internal static class IdleFramePreRendererChecks
     {
         CheckClonedSceneIsIndependent();
         CheckCancelledJobCannotCommit();
-        Console.WriteLine("Idle pre-render: independent scene clone and cancelled commit guard OK");
+        CheckUnverifiableFramePassed();
+        Console.WriteLine("Idle pre-render: independent scene clone, cancelled commit guard and unverifiable frames passed over OK");
+    }
+
+    // A frame showing a file that cannot be verified (behind a directory junction, as in a OneDrive folder) is passed
+    // over as one that renders normally, so a batch goes on past it instead of stopping there on every idle tick.
+    private static void CheckUnverifiableFramePassed()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "ymm-idle-unverifiable-" + Guid.NewGuid().ToString("N"));
+        string real = Path.Combine(folder, "real"), link = Path.Combine(folder, "link");
+        Directory.CreateDirectory(real);
+        var retry = KeyDependencyTracker.UnverifiableRetry;
+        try
+        {
+            using (var mklink = Process.Start(new ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{real}\"")
+                { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true }))
+                mklink!.WaitForExit();
+            Check(Directory.Exists(link) && (File.GetAttributes(link) & FileAttributes.ReparsePoint) != 0, "Could not create the test junction");
+            File.WriteAllBytes(Path.Combine(real, "linked.png"), [5, 6, 7, 8]);
+            var timeline = new Timeline();
+            timeline.Items = timeline.Items.Add(new ImageItem { FilePath = Path.Combine(link, "linked.png"), Frame = 0, Length = 10, Layer = 1 });
+            timeline.RefreshTimelineLengthAndMaxLayer();
+            var scenes = new Scenes(false);
+            scenes.AddScene(timeline);
+            var live = new Scene(timeline, scenes, []);
+            Check(FrameCacheKey.TryDescribe(live, out var model, out _, out var reason), reason);
+            var clone = IdleFramePreRenderer.CloneSceneFromModel(model);
+            KeyDependencyTracker.UnverifiableRetry = TimeSpan.FromMilliseconds(200);
+            using var liveTracker = new KeyDependencyTracker(live);
+            using var cloneTracker = new KeyDependencyTracker(clone, liveTracker.VerifiedFingerprints);
+            Check(SpinWait.SpinUntil(() =>
+            {
+                if (liveTracker.TryCapture(5, out var capture, out _)) capture!.Dispose();
+                return liveTracker.RendersNormally(5);
+            }, TimeSpan.FromSeconds(15)), "The live tracker never marked the unverifiable frame to render normally");
+            var viewport = new TimelineFrameCache.PreviewViewport(64, 36, Matrix3x2.Identity, Vector2.Zero, 96f, 96f,
+                new Vortice.DCommon.PixelFormat(Vortice.DXGI.Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),
+                Vortice.Direct2D1.AntialiasMode.PerPrimitive, Vortice.Direct2D1.TextAntialiasMode.Default,
+                Vortice.Direct2D1.PrimitiveBlend.SourceOver, Vortice.Direct2D1.UnitMode.Dips,
+                live.ID, live.Timeline.ID, Stopwatch.GetTimestamp(), false);
+            var result = IdleFramePreRenderer.PrimeFrame(liveTracker, live, cloneTracker, clone, new object(),
+                _ => throw new InvalidOperationException("An unverifiable frame was rendered"), 5, viewport, () => true, CancellationToken.None, out reason);
+            Check(result == IdleFramePreRenderer.IdleFrameResult.Normal, $"An unverifiable frame stopped the batch ({result}: {reason})");
+        }
+        finally
+        {
+            KeyDependencyTracker.UnverifiableRetry = retry;
+            if (Directory.Exists(link)) Directory.Delete(link);
+            Directory.Delete(folder, recursive: true);
+        }
     }
 
     private static void CheckClonedSceneIsIndependent()

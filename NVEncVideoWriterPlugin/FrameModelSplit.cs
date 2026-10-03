@@ -1,5 +1,6 @@
 using System.IO;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace NVEncVideoWriterPlugin;
 
@@ -8,8 +9,25 @@ namespace NVEncVideoWriterPlugin;
 // streaming pass that also checks every "$type": a parsed tree, the scan over it and the per-item serialization
 // took about two thirds of describing a project of 1000 items. The texts equal those the parsed tree gave
 // (StoreChecks compares them).
+// A timeline's layer settings lose what no frame draws: the layers' names and colors (the timeline's display). The
+// root timeline's layer volumes only reach frames that read audio, so they go with the other timelines' part.
 internal static class FrameModelSplit
 {
+    // Properties of a timeline's "LayerSettings" (any depth) that no frame draws, and those only audio uses.
+    private static readonly string[] LayerDisplay = ["Label", "Labels", "Color", "Colors"];
+    private static readonly string[] LayerAudio = ["Volume", "Volumes"];
+
+    // A copy of the layer settings `value` without what no frame draws, and without the volumes unless `withAudio`.
+    internal static JToken LayerView(JToken value, bool withAudio)
+    {
+        var copy = value.DeepClone();
+        if (copy is not JContainer container) return copy;
+        foreach (var property in container.Descendants().OfType<JProperty>()
+            .Where(p => LayerDisplay.Contains(p.Name) || !withAudio && LayerAudio.Contains(p.Name)).ToArray())
+            property.Remove();
+        return copy;
+    }
+
     // What a "$type" means for the frames: Known (code that was read, or data no cached frame reads), AudioOnly (only
     // frames that read audio, the wide ones), Foreign (code that was not read).
     internal enum TypeUse { Known, AudioOnly, Foreign }
@@ -45,6 +63,8 @@ internal static class FrameModelSplit
         private readonly List<bool> foreignItems = [];
         private readonly SortedSet<int> foreignCharacters = [];
         private bool nestedForeign, audioForeign;
+        // The root timeline's layer settings with their volumes, for the frames that read audio (Nested).
+        private JToken? rootLayers;
         private Owner owner;
         private int ownerIndex;
         internal string? Rejected { get; private set; }
@@ -101,6 +121,7 @@ internal static class FrameModelSplit
             }
             Expect(reader.TokenType, JsonToken.EndObject);
             global.WriteEndObject();
+            if (rootLayers is not null) new JObject { ["RootLayerSettings"] = rootLayers }.WriteTo(nested);
             nested.WriteEndArray();
             if (!rootFound || reader.Read()) throw new InvalidDataException("The model has no root timeline or extra content");
             global.Flush();
@@ -146,6 +167,15 @@ internal static class FrameModelSplit
                     continue;
                 }
                 writer.WritePropertyName(name);
+                if (name == "LayerSettings")
+                {
+                    var buffer = new JTokenWriter();
+                    if (!CheckedCopy(buffer, name)) return false; // "$type" values are checked as anywhere else
+                    var layers = buffer.Token!;
+                    LayerView(layers, withAudio: !root).WriteTo(writer);
+                    if (root) rootLayers = LayerView(layers, withAudio: true);
+                    continue;
+                }
                 if (!CheckedCopy(writer, name)) return false;
             }
             Expect(reader.TokenType, JsonToken.EndObject);

@@ -13,7 +13,7 @@ namespace NVEncVideoWriterPlugin;
 //   frames depend on the whole project ("wide"), as every frame did before.
 internal sealed class FrameDependencyIndex
 {
-    internal const string Version = "frame-deps-v1";
+    internal const string Version = "frame-deps-v2";
     private const int MaximumCachedSegments = 65536;
 
     // Uncacheable: the item uses something that cannot be fingerprinted (an uninstalled font, a remote file) or
