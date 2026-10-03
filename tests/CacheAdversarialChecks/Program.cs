@@ -8,7 +8,7 @@ try
     if (args.Length == 0 || args.Contains("disk")) { DiskIdentity(raw: true); DiskIdentity(raw: false); }
     if (args.Length == 0 || args.Contains("dependencies")) DependencyBinding();
     if (args.Length == 0 || args.Contains("publication")) PublicationBarrier();
-    if (args.Length == 0 || args.Contains("cycles")) ComputeCycles();
+    if (args.Length == 0 || args.Contains("cycles")) { ComputeCycles(); ComputeAsyncCycles(); ComputeValidDiamond(); }
     if (args.Length == 0 || args.Contains("order")) DrawOrderSafety();
     Console.WriteLine("Adversarial cache checks passed.");
 }
@@ -117,6 +117,73 @@ static void ComputeCycles()
         retry!.Dispose();
     }
     Console.WriteLine("Compute dependencies: independent-root wait cycle fails promptly and permits retry.");
+}
+static void ComputeAsyncCycles()
+{
+    using var cache = new DynamicComputeCache(0, 8);
+    DynamicComputeCache.Computation<int, string>? a = null, b = null;
+    bool recurse = true;
+    int deletes = 0;
+    a = cache.Register<int, string>("async-a", x => x.ToString(), x =>
+    {
+        if (recurse) { using var child = b!.ComputeAsync(x).GetAwaiter().GetResult(); }
+        return "a";
+    }, _ => 1, _ => Interlocked.Increment(ref deletes), backgroundThreadSafe: true);
+    b = cache.Register<int, string>("async-b", x => x.ToString(), x =>
+    {
+        using var child = a!.ComputeAsync(x).GetAwaiter().GetResult();
+        return "b";
+    }, _ => 1, _ => Interlocked.Increment(ref deletes), backgroundThreadSafe: true);
+    using (a) using (b)
+    {
+        try
+        {
+            using var unexpected = a.ComputeAsync(0).WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            throw new Exception("async descendant cycle accepted");
+        }
+        catch (InvalidOperationException) { }
+        recurse = false;
+        using var retry = a.ComputeAsync(0).WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+        Check(retry?.Value == "a", "async descendant cycle must release job capacity for retry");
+    }
+    Check(deletes == 1, "cycle failure must not delete uncreated values or leak the retry borrow");
+    Console.WriteLine("Compute dependencies: async descendant cycle rejects promptly and releases capacity/ownership.");
+}
+static void ComputeValidDiamond()
+{
+    using var cache = new DynamicComputeCache(0, 8);
+    using var rootsStarted = new CountdownEvent(2);
+    using var finishLeaf = new ManualResetEventSlim();
+    int calls = 0, deletes = 0;
+    using var leaf = cache.Register<int, string>("diamond-leaf", x => x.ToString(), _ =>
+    {
+        Interlocked.Increment(ref calls);
+        Check(finishLeaf.Wait(TimeSpan.FromSeconds(5)), "valid diamond leaf released");
+        return "leaf";
+    }, _ => 1, _ => Interlocked.Increment(ref deletes), backgroundThreadSafe: true);
+    string Root(int x)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var cancelled = leaf.ComputeAsync(0, cancellation.Token);
+        var surviving = leaf.ComputeAsync(0);
+        cancellation.Cancel();
+        try { using var receipt = cancelled.GetAwaiter().GetResult(); throw new Exception("nested cancellation ignored"); }
+        catch (OperationCanceledException) { }
+        rootsStarted.Signal();
+        using var child = surviving.GetAwaiter().GetResult();
+        Check(child?.Value == "leaf", "cancelling one edge must preserve the other edge/consumer");
+        return "root-" + x;
+    }
+    using var roots = cache.Register<int, string>("diamond-root", x => x.ToString(), Root,
+        _ => 1, _ => Interlocked.Increment(ref deletes), backgroundThreadSafe: true);
+    var tasks = new[] { roots.ComputeAsync(1), roots.ComputeAsync(2) };
+    try { Check(rootsStarted.Wait(TimeSpan.FromSeconds(5)), "independent diamond roots started"); }
+    finally { finishLeaf.Set(); }
+    Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+    foreach (var task in tasks) task.Result?.Dispose();
+    Check(calls == 1 && deletes == 3 && cache.ResidentBytes == 0,
+        "valid diamond must share leaf once, remove cancelled edges, and delete three values exactly once");
+    Console.WriteLine("Compute dependencies: valid diamond, repeated edge cancellation, shared completion and final borrow cleanup passed.");
 }
 static void DrawOrderSafety()
 {

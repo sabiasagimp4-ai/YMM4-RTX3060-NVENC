@@ -130,6 +130,8 @@ internal static class FramePixelChecks
             {
                 PreviewDeliveryChecks.Run(host, context, features.SelectionRects);
                 Check(TimelineFrameCache.GpuBytes == 0, "Preview delivery checks leaked global GPU reservation");
+                OperationSequenceChecks.Run(host, context);
+                Check(TimelineFrameCache.GpuBytes == 0, "Operation sequences leaked global GPU reservation");
             }
             if (features.DecoderVerified(mediaFoundation)) CheckBoundaryTimes(host, context, videoPath);
             if (features.DecoderVerified(mediaFoundation)) CheckVideoDecodeFailureIsNotStored(host, context, videoPath);
