@@ -117,15 +117,22 @@ internal static partial class TimelineFrameCache
     internal sealed class PreviewReadback(ID3D11Texture2D readable, ID3D11DeviceContext immediate, PreviewViewport viewport, long bytes,
         ReadbackPool? pool = null, Vector2? sceneOrigin = null) : IDisposable
     {
-        private int disposed;
+        private int disposed, failed;
         internal readonly ID3D11Texture2D Readable = readable;
         internal readonly ID3D11DeviceContext Immediate = immediate;
         internal readonly PreviewViewport Viewport = viewport;
         internal readonly Vector2? SceneOrigin = sceneOrigin;
+        // Reading the copy failed (a lost device, a staging texture of another device): its texture is not pooled again,
+        // and the pool's other textures are dropped too, so that the source does not fail the same way frame after frame.
+        internal void Failed()
+        {
+            Volatile.Write(ref failed, 1);
+            pool?.Reset();
+        }
         public void Dispose()
         {
             if (Interlocked.Exchange(ref disposed, 1) != 0) return;
-            try { if (pool?.Return(Readable, Viewport) != true) Readable.Dispose(); }
+            try { if (Volatile.Read(ref failed) != 0 || pool?.Return(Readable, Viewport) != true) Readable.Dispose(); }
             finally { Immediate.Dispose(); Interlocked.Add(ref gpuBytes, -bytes); }
         }
     }
@@ -256,13 +263,6 @@ internal static partial class TimelineFrameCache
         description.CPUAccessFlags = CpuAccessFlags.Read;
         description.MiscFlags = ResourceOptionFlags.None;
         readable = pool?.TakeStaging(viewport);
-        if (readable is not null && !OnDevice(readable, device))
-        {
-            // The source draws with another device now: none of the pooled textures can be used.
-            readable.Dispose();
-            readable = null;
-            pool!.Reset();
-        }
         if (readable is null)
         {
             readable = device.CreateTexture2D(description);
@@ -272,12 +272,6 @@ internal static partial class TimelineFrameCache
         immediate.CopyResource(readable, texture);
         immediate.Flush(); // submit the copy, including paused frames; does not wait for completion
         return true;
-    }
-
-    private static bool OnDevice(ID3D11Texture2D texture, ID3D11Device device)
-    {
-        using var owner = texture.Device;
-        return owner.NativePointer == device.NativePointer;
     }
 
     // Blocking completion is reserved for explicit capture and test helpers, never live cache updates.
@@ -303,7 +297,11 @@ internal static partial class TimelineFrameCache
             if (trace is not null) trace.Outcome = "gpu-busy";
             return false;
         }
-        result.CheckError(); // device loss/other failures invalidate the optional capture
+        if (result.Failure)
+        {
+            readback.Failed();
+            result.CheckError(); // device loss/other failures invalidate the optional capture
+        }
         try
         {
             var viewport = readback.Viewport;
