@@ -17,6 +17,28 @@
   - `dist/rtx-check` をartifact `rtx-check-powershell`／`rtx-check-pwsh` として残す。
 - このモードでは、エンコードする5つの手順（audio-first、native-smoke、benchmark、color、vui-experiment）をSKIPにする。OneDriveのないランナーではonedriveもSKIPになる。
 
+### 実行結果（2026-10-03）
+
+run `37106722408`（commit `8ead5cf`、windows-2022、2コア・8 GB）での結果：
+
+| 項目 | PowerShell 5.1.20348 | PowerShell 7.6.6 |
+| --- | --- | --- |
+| 結果 | PASS 11、SKIP 6 | PASS 11、SKIP 6 |
+| スクリプト自身のエラー | なし | なし |
+| 所要時間 | 約6分 | 約5.7分 |
+| leftovers（残骸・追跡ファイルの変更） | なし | なし |
+
+- 期待した出力行はすべて出た。
+  - CacheChecksの3行（#1 #2 #4 #9）
+  - HostCacheProbe `--gpu --video` の3行（#6 #7 #4 #9）
+  - ManagedSmokeのGPUを使わない3行
+- アダプターは `Microsoft Basic Render Driver`（WARP）で、100フレームの画素が一致した。
+- WARPでの計測値（files24、PowerShell 5.1／7）：
+  - GPU hitのp50：0.57〜0.77 ms
+  - RAM hitのp50：4.5〜5.1 ms
+  - 保存の見送り（`busy`）：全パスで0
+  - idle：68.8〜75.7 fps、描画器の作成は1回
+
 ## B. RTX 3060のPCで行うこと（利用者）
 
 ### 準備（初回だけ）
