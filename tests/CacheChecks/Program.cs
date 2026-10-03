@@ -8,10 +8,12 @@ using YukkuriMovieMaker.Project.Items;
 
 internal static class Program
 {
+    private static string probeHostDir = string.Empty;
     [STAThread]
     private static int Main(string[] args)
     {
         string hostDir = Path.GetFullPath(args.FirstOrDefault() ?? @"D:\YukkuriMovieMaker_v4_Lite");
+        probeHostDir = hostDir;
         AssemblyLoadContext.Default.Resolving += (_, name) =>
         {
             string file = Path.Combine(hostDir, name.Name + ".dll");
@@ -38,6 +40,7 @@ internal static class Program
         var scenes = new Scenes(false);
         scenes.AddScene(timeline);
         var scene = new Scene(timeline, scenes, []);
+        HostProbe.Run(probeHostDir, scene);
         Check(FrameCacheKey.IsBuiltInSourceReader(typeof(Scene)), "Host source reader assembly was not trusted");
         Check(FrameCacheKey.IsBuiltInSourceReader(typeof(YukkuriMovieMaker.Plugin.CacheProvider)), "Plugin API reader assembly was not trusted");
         Check(!FrameCacheKey.IsBuiltInSourceReader(typeof(Program)), "Custom reader assembly was trusted");
