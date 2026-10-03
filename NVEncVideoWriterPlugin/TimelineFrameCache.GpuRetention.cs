@@ -58,10 +58,12 @@ internal static partial class TimelineFrameCache
     {
         while (gpuLru.First is { } node) RemoveGpuFrame(node.Value);
     }
+    // Cheap when within budget: the render path calls it on every Update to apply a budget lowered elsewhere.
     private static void TrimGpuFrames(long incoming)
     {
+        int limit = GpuMemoryPolicy.EntryLimit(gpuRetentionBudget);
         while (gpuLru.First is { } node && (gpuRetainedBytes + incoming > gpuRetentionBudget
-            || (incoming > 0 && gpuLru.Count >= 64))) RemoveGpuFrame(node.Value);
+            || gpuLru.Count + (incoming > 0 ? 1 : 0) > limit)) RemoveGpuFrame(node.Value);
     }
     private static void RetainUploaded(Pending pending, ID2D1CommandList command, long bytes)
     {
@@ -69,9 +71,9 @@ internal static partial class TimelineFrameCache
         // Check every LRU victim required to make room. A one-use scan cannot displace equally
         // frequent residents; repeated requests can. Count aging lets a new working set take over.
         long remainingBytes = gpuRetainedBytes;
-        int remainingCount = gpuLru.Count;
+        int remainingCount = gpuLru.Count, limit = GpuMemoryPolicy.EntryLimit(gpuRetentionBudget);
         int frequency = pending.State.GpuAdmission.Frequency(pending.CacheKey);
-        for (var node = gpuLru.First; node is not null && (remainingBytes + bytes > gpuRetentionBudget || remainingCount >= 64); node = node.Next)
+        for (var node = gpuLru.First; node is not null && (remainingBytes + bytes > gpuRetentionBudget || remainingCount >= limit); node = node.Next)
         {
             int residentFrequency = node.Value.Owner.TryGetTarget(out var owner) ? owner.GpuAdmission.Frequency(node.Value.Key) : 0;
             if (frequency <= residentFrequency) return;

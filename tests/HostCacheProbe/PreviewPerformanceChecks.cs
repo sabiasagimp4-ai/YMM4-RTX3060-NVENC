@@ -188,6 +188,15 @@ internal static class PreviewPerformanceChecks
                 Update(1);
                 TimelineFrameCache.GpuRetentionBudget = oldGpuBudget;
                 for (int frame = 0; frame < HotFrames; frame++) Update(frame);
+                // A budget lowered by GpuMemoryController (a timer thread) releases frames on the render thread, at its next Update.
+                long retainedBefore = TimelineFrameCache.GpuRetainedBytes;
+                Check(retainedBefore > 0, "Frames were not retained again before the deferred budget change");
+                TimelineFrameCache.SetGpuRetentionBudgetDeferred(0);
+                Check(TimelineFrameCache.GpuRetainedBytes == retainedBefore, "A deferred budget change released frames off the render thread");
+                Update(2);
+                Check(TimelineFrameCache.GpuRetainedBytes == 0, "The next Update did not apply the lowered budget");
+                TimelineFrameCache.GpuRetentionBudget = oldGpuBudget;
+                for (int frame = 0; frame < HotFrames; frame++) Update(frame);
                 long priorGpuHits = TimelineFrameCache.GpuHits;
                 var previousViewport = viewport;
                 viewport = viewport with { Transform = Matrix3x2.CreateTranslation(1.25f, -.75f) };
@@ -225,7 +234,12 @@ internal static class PreviewPerformanceChecks
                 source.Dispose(); source = null;
                 Check(TimelineFrameCache.GpuRetainedBytes == 0 && TimelineFrameCache.GpuBytes == 0,
                     "Source disposal leaked retained or borrowed GPU images");
-                Console.WriteLine("GPU retention: 8-frame pixel parity, active-borrow eviction, viewport/edit/purge invalidation and source disposal OK");
+                Console.WriteLine("GPU retention: 8-frame pixel parity, active-borrow eviction, deferred budget change, viewport/edit/purge invalidation and source disposal OK");
+                var vram = GpuMemoryController.Probe();
+                Check(vram is not null, "The render path did not report its adapter for the VRAM budget");
+                Console.WriteLine(vram!.Value.Sample is { } sample
+                    ? $"VRAM sample ({vram.Value.Name}): budget {sample.Budget >> 20} MiB, usage {sample.CurrentUsage >> 20} MiB, dedicated {sample.DedicatedVideoMemory >> 20} MiB, software {sample.Software}"
+                    : $"VRAM sample ({vram.Value.Name}): unavailable");
             }
             finally { TimelineFrameCache.GpuRetentionEnabled = false; TimelineFrameCache.GpuRetentionBudget = oldGpuBudget; }
             var effectsMeasurements = MeasureEffectsFixture(host, context, dc, target, viewport, root);

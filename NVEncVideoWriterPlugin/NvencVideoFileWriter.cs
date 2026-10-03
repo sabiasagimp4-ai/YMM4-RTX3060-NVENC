@@ -229,8 +229,16 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
         var codec = _settings.Codec switch
         {
             NvencCodec.H265 => 1,
+            NvencCodec.AV1 => 2,
             _ => 0,
         };
+        // NVENC encodes the frames where YMM4 renders them: that adapter must be NVIDIA (laptops may render on the iGPU).
+        using (var dxgiDevice = device.QueryInterfaceOrNull<IDXGIDevice>())
+        using (var adapter = dxgiDevice?.GetAdapter())
+        {
+            if (adapter is not null && NvencErrors.NonNvidiaAdapter(adapter.Description.VendorId, adapter.Description.Description) is { } wrongAdapter)
+                throw new InvalidOperationException(wrongAdapter);
+        }
         var quality = (int)_settings.Quality;
         var rateControl = _settings.RateControl == NvencRateControl.Variable ? 1 : 0;
         if (_settings.RateControl == NvencRateControl.YouTubeRecommended)
@@ -268,7 +276,7 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
         {
             NvencNativeMethods.NvencDestroy(_encoderHandle);
             _encoderHandle = IntPtr.Zero;
-            throw new InvalidOperationException(error);
+            throw new InvalidOperationException(NvencErrors.Describe(error));
         }
 
         if (_pendingAudio is not null)

@@ -14,7 +14,7 @@ int wmain(int argc, wchar_t** argv)
 {
     if (argc != 3 && argc != 4 && argc != 9)
     {
-        std::wcerr << L"usage: NativeSmoke.exe output.mp4 codec(0=h264,1=hevc) [cancel|failure|frames width height quality fastPreset hevcAsync]\n";
+        std::wcerr << L"usage: NativeSmoke.exe output.mp4 codec(0=h264,1=hevc,2=av1) [cancel|failure|frames width height quality fastPreset hevcAsync]\n";
         return 2;
     }
 
@@ -30,7 +30,7 @@ int wmain(int argc, wchar_t** argv)
     const int fastPreset = benchmark ? _wtoi(argv[7]) : 0;
     const int hevcAsync = benchmark ? _wtoi(argv[8]) : codec == 1;
     constexpr int fps = 30;
-    if (codec < 0 || codec > 1 || frames < 1 || frames > 1800 || width < 2 || width > 3840 ||
+    if (codec < 0 || codec > 2 || frames < 1 || frames > 1800 || width < 2 || width > 3840 ||
         height < 2 || height > 2160 || (width & 1) || (height & 1) || quality < 0 || quality > 2 ||
         fastPreset < 0 || fastPreset > 1 || hevcAsync < 0 || hevcAsync > 1)
     {

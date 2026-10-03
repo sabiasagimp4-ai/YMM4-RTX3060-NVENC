@@ -280,6 +280,35 @@ namespace
         return state && state->codec == kCodecAv1;
     }
 
+    const wchar_t* CodecName(int codec)
+    {
+        return codec == kCodecHevc ? L"HEVC" : codec == kCodecAv1 ? L"AV1" : L"H.264";
+    }
+
+    // NvEncodeAPIGetMaxSupportedVersion reports (major << 4) | minor: the newest API the installed driver serves.
+    bool DriverSupportsApi(uint32_t driverVersion)
+    {
+        return driverVersion >= ((NVENCAPI_MAJOR_VERSION << 4) | NVENCAPI_MINOR_VERSION);
+    }
+
+    // Stable English texts; the plugin's managed side turns these into Japanese guidance (NvencErrors).
+    std::wstring DriverTooOldMessage(uint32_t driverVersion)
+    {
+        return L"NVENC driver too old: supports API " + std::to_wstring(driverVersion >> 4) + L"." + std::to_wstring(driverVersion & 0xF)
+            + L", needs " + std::to_wstring(NVENCAPI_MAJOR_VERSION) + L"." + std::to_wstring(NVENCAPI_MINOR_VERSION);
+    }
+
+    std::wstring CodecUnsupportedMessage(int codec)
+    {
+        return std::wstring(L"NVENC codec unsupported: ") + CodecName(codec);
+    }
+
+    std::wstring SizeUnsupportedMessage(int codec, int width, int height, int maxWidth, int maxHeight)
+    {
+        return L"NVENC size unsupported: " + std::to_wstring(width) + L"x" + std::to_wstring(height) + L" > "
+            + std::to_wstring(maxWidth) + L"x" + std::to_wstring(maxHeight) + L" (" + CodecName(codec) + L")";
+    }
+
     struct Av1SequenceHeaderInfo;
     bool ExtractAv1SequenceHeaderObu(const uint8_t* data, size_t size, std::vector<uint8_t>& outObu, Av1SequenceHeaderInfo& info);
     std::vector<uint8_t> BuildAv1CFromSequenceObu(const std::vector<uint8_t>& seqObu, const Av1SequenceHeaderInfo& info);
@@ -2647,6 +2676,22 @@ namespace
             return false;
         }
 
+        // An older driver than the API this plugin is built with cannot open a session; say so instead of a status code.
+        typedef NVENCSTATUS(NVENCAPI* GetMaxSupportedVersion)(uint32_t*);
+        if (auto getMaxVersion = reinterpret_cast<GetMaxSupportedVersion>(GetProcAddress(state->nvencModule, "NvEncodeAPIGetMaxSupportedVersion")))
+        {
+            uint32_t driverVersion = 0;
+            if (getMaxVersion(&driverVersion) == NV_ENC_SUCCESS)
+            {
+                LogLine(state, L"driver NVENC API " + std::to_wstring(driverVersion >> 4) + L"." + std::to_wstring(driverVersion & 0xF));
+                if (!DriverSupportsApi(driverVersion))
+                {
+                    SetError(state, DriverTooOldMessage(driverVersion));
+                    return false;
+                }
+            }
+        }
+
         state->createInstance = reinterpret_cast<decltype(state->createInstance)>(
             GetProcAddress(state->nvencModule, "NvEncodeAPICreateInstance"));
         if (!state->createInstance)
@@ -2686,6 +2731,54 @@ namespace
         {
             encodeGuid = NV_ENC_CODEC_AV1_GUID;
         }
+
+        // What this GPU's NVENC can do (AV1 needs RTX 40 or newer; sizes and async differ by generation). A query
+        // that fails is skipped: the encoder's own initialization still reports what it rejects.
+        uint32_t guidCount = 0;
+        if (state->funcs.nvEncGetEncodeGUIDCount(state->session, &guidCount) == NV_ENC_SUCCESS && guidCount > 0)
+        {
+            std::vector<GUID> guids(guidCount);
+            uint32_t returned = 0;
+            if (state->funcs.nvEncGetEncodeGUIDs(state->session, guids.data(), guidCount, &returned) == NV_ENC_SUCCESS)
+            {
+                bool supported = false;
+                for (uint32_t i = 0; i < returned && i < guidCount; ++i)
+                {
+                    supported = supported || IsEqualGUID(guids[i], encodeGuid);
+                }
+                if (!supported)
+                {
+                    SetError(state, CodecUnsupportedMessage(codec));
+                    return false;
+                }
+            }
+        }
+        auto queryCap = [state, &encodeGuid](NV_ENC_CAPS cap, int& value)
+        {
+            NV_ENC_CAPS_PARAM param{};
+            param.version = NV_ENC_CAPS_PARAM_VER;
+            param.capsToQuery = cap;
+            int result = 0;
+            if (state->funcs.nvEncGetEncodeCaps(state->session, encodeGuid, &param, &result) != NV_ENC_SUCCESS)
+            {
+                return false;
+            }
+            value = result;
+            return true;
+        };
+        int maxWidth = 0, maxHeight = 0;
+        if (queryCap(NV_ENC_CAPS_WIDTH_MAX, maxWidth) && queryCap(NV_ENC_CAPS_HEIGHT_MAX, maxHeight)
+            && maxWidth > 0 && maxHeight > 0 && (width > maxWidth || height > maxHeight))
+        {
+            SetError(state, SizeUnsupportedMessage(codec, width, height, maxWidth, maxHeight));
+            return false;
+        }
+        int asyncSupported = 1;
+        if (queryCap(NV_ENC_CAPS_ASYNC_ENCODE_SUPPORT, asyncSupported) && asyncSupported == 0)
+        {
+            LogLine(state, L"async encode not supported by this GPU/driver (sync mode)");
+        }
+
         const GUID presetGuid = (state->fastPreset != 0)
             ? NV_ENC_PRESET_P1_GUID
             : (quality <= 0 ? NV_ENC_PRESET_P1_GUID : (quality == 2 ? NV_ENC_PRESET_P7_GUID : NV_ENC_PRESET_P3_GUID));
@@ -2718,7 +2811,8 @@ namespace
         state->initParams.enablePTD = 1;
         state->initParams.reportSliceOffsets = 0;
         state->initParams.enableSubFrameWrite = 0;
-        const bool allowAsync = (codec == kCodecH264) || (codec == kCodecAv1) || (codec == kCodecHevc && hevcAsyncOptIn);
+        const bool allowAsync = asyncSupported != 0
+            && ((codec == kCodecH264) || (codec == kCodecAv1) || (codec == kCodecHevc && hevcAsyncOptIn));
         state->initParams.enableEncodeAsync = allowAsync ? 1 : 0;
         state->initParams.encodeConfig = &state->config;
 

@@ -27,7 +27,10 @@ internal static partial class TimelineFrameCache
     private const BindingFlags Instance = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
     private const int RecordHeader = 24;
     private const int PreviewRecordHeader = 32;
-    private const long GpuBudget = 384L * 1024 * 1024;
+    // Images the cache holds on the GPU besides retained frames: uploads in flight, readback textures, shown copies.
+    // The whole reservation is retention plus this (384 MiB at the initial 128 MiB retention).
+    private const long GpuWorkingBudget = 256L * 1024 * 1024;
+    private const long MaxGpuRetentionBudget = 8192L * 1024 * 1024;
     private static readonly TimeSpan RectsRefreshDelay = TimeSpan.FromMilliseconds(100);
     // A paused request for a frame stored on disk only waits this long for the disk worker (off the UI thread: the
     // player renders on its own task) before rendering the frame itself.
@@ -42,7 +45,7 @@ internal static partial class TimelineFrameCache
     private static readonly object cacheGate = new();
     // Only immutable pixel-upload command lists are retained. Host effect graphs remain source-owned.
     private static readonly LinkedList<GpuFrame> gpuLru = new();
-    private static long gpuRetainedBytes, gpuRetentionBudget = 128L << 20;
+    private static long gpuRetainedBytes, gpuRetentionBudget = GpuMemoryPolicy.InitialBudget;
     private static bool gpuRetentionEnabled = true;
     private static Lazy<FrameCacheStore> store = new(() => CacheMemoryController.CreateStore(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YMM4-RTX3060-NVENC", "cache")));
@@ -98,8 +101,15 @@ internal static partial class TimelineFrameCache
     internal static long GpuRetentionBudget
     {
         get { lock (cacheGate) return gpuRetentionBudget; }
-        set { lock (cacheGate) { gpuRetentionBudget = Math.Clamp(value, 0, GpuBudget / 2); TrimGpuFrames(0); } }
+        set { lock (cacheGate) { gpuRetentionBudget = Math.Clamp(value, 0, MaxGpuRetentionBudget); TrimGpuFrames(0); } }
     }
+    // Lock-free, for GpuMemoryController: frames over a lowered budget are released on the render thread at its next
+    // Update (TrimGpuFrames there), not on the controller's timer thread.
+    internal static long GpuRetentionBudgetNow => Interlocked.Read(ref gpuRetentionBudget);
+    internal static long GpuRetainedBytesNow => Interlocked.Read(ref gpuRetainedBytes);
+    internal static void SetGpuRetentionBudgetDeferred(long value) =>
+        Interlocked.Exchange(ref gpuRetentionBudget, Math.Clamp(value, 0, MaxGpuRetentionBudget));
+    private static long GpuImageBudget => Interlocked.Read(ref gpuRetentionBudget) + GpuWorkingBudget;
     internal static bool GpuRetentionEnabled
     {
         get { lock (cacheGate) return gpuRetentionEnabled; }
@@ -469,6 +479,7 @@ internal static partial class TimelineFrameCache
             }
             lock (cacheGate)
             {
+                TrimGpuFrames(0); // a budget lowered by GpuMemoryController takes effect on this thread
                 if (gpuRetentionEnabled && viewport is not null && cacheKey is not null) state.GpuAdmission.Observe(cacheKey);
                 if (currentGeneration == Interlocked.Read(ref generation) && state.Generation == currentGeneration
                     && state.LastKey == liveKey && (state.LastViewportKey is null || state.LastViewportKey == cacheKey)
@@ -685,6 +696,7 @@ internal static partial class TimelineFrameCache
         using var device = surface.GetDevice<IDXGIDevice>();
         using var adapter = device.GetAdapter();
         var description = adapter.Description;
+        GpuMemoryController.ObserveAdapter(adapter);
         var invariant = System.Globalization.CultureInfo.InvariantCulture;
         // IDXGIDevice is the documented way to read the user-mode driver version from DXGI.
         string driver = adapter.CheckInterfaceSupport<IDXGIDevice>(out long version) ? version.ToString("X16", invariant) : "unknown";

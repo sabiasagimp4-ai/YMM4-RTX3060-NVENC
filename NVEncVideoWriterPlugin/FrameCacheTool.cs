@@ -37,6 +37,13 @@ public sealed class FrameCacheToolSettings : SettingsBase<FrameCacheToolSettings
 
     public bool AutomaticRamBudget { get => automaticRamBudget; set => Set(ref automaticRamBudget, value); }
     public int RamLimitMiB { get => ramLimitMiB; set => Set(ref ramLimitMiB, Math.Clamp(value, 64, 16384)); }
+
+    // Restored preview frames kept on the GPU (VRAM): sized from the adapter's video memory up to the limit, or fixed
+    // at the limit. Zero keeps none.
+    private bool automaticGpuBudget = true;
+    private int gpuLimitMiB = 2048;
+    public bool AutomaticGpuBudget { get => automaticGpuBudget; set => Set(ref automaticGpuBudget, value); }
+    public int GpuLimitMiB { get => gpuLimitMiB; set => Set(ref gpuLimitMiB, Math.Clamp(value, 0, 8192)); }
     public bool CacheFramesWhenIdle { get => cacheFramesWhenIdle; set => Set(ref cacheFramesWhenIdle, value); }
     public double IdleDelaySeconds
     {
@@ -70,7 +77,7 @@ public sealed class FrameCacheToolSettings : SettingsBase<FrameCacheToolSettings
         set => Set(ref exportCache, value);
     }
 
-    // The output format "RTX 3060 NVENC 出力" and the export hook it needs.
+    // The output format "NVIDIA NVENC 出力" and the export hook it needs.
     public bool NvencOutput
     {
         get => nvencOutput;
@@ -117,7 +124,7 @@ public sealed class FrameCacheToolSettings : SettingsBase<FrameCacheToolSettings
     }
 
     public override SettingsCategory Category => SettingsCategory.Other;
-    public override string Name => "RTX 3060 NVENC・描画キャッシュ";
+    public override string Name => "NVENC・描画キャッシュ";
     public override bool HasSettingView => true;
     public override object? SettingView => new PluginSettingsPanel();
     public override void Initialize()
@@ -139,7 +146,7 @@ public sealed class PluginSettingsPanel : StackPanel
 {
     private readonly CheckBox preview = new() { Content = "プレビューで描画キャッシュを使う（YMM4 標準のプレビューのまま。先読み・キャッシュの帯を含む）" };
     private readonly CheckBox export = new() { Content = "動画出力で描画キャッシュを使う（YMM4 標準・NVENC どちらの出力形式でも）", Margin = new Thickness(0, 4, 0, 0) };
-    private readonly CheckBox nvenc = new() { Content = "RTX 3060 NVENC 出力を使う", Margin = new Thickness(0, 4, 0, 0) };
+    private readonly CheckBox nvenc = new() { Content = "NVIDIA NVENC 出力を使う", Margin = new Thickness(0, 4, 0, 0) };
     private readonly TextBlock note = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0), Foreground = SystemColors.GrayTextBrush };
     private readonly StackPanel plugins = new() { Margin = new Thickness(12, 2, 0, 0) };
     internal IEnumerable<UIElement> AutomationControls => [preview, export, nvenc];
@@ -175,15 +182,22 @@ public sealed class PluginSettingsPanel : StackPanel
         System.Windows.Automation.AutomationProperties.SetAutomationId(preview, "FrameCachePreviewEnabled");
         Bind(export, nameof(FrameCacheToolSettings.ExportCache));
         Bind(nvenc, nameof(FrameCacheToolSettings.NvencOutput));
+        int at = 3; // the memory and idle rows go between the three switches and the note
         var automatic = new CheckBox { Content = "空きメモリに応じてRAMを自動配分する", Margin = new Thickness(0, 10, 0, 0) };
         Bind(automatic, nameof(FrameCacheToolSettings.AutomaticRamBudget));
-        Children.Insert(3, automatic);
+        Children.Insert(at++, automatic);
         AddChoice("RAM上限", nameof(FrameCacheToolSettings.RamLimitMiB),
             new[] { 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384 }.Append(settings.RamLimitMiB).Distinct().Order()
                 .Select(value => ($"{value:N0} MiB", (object)value)));
+        var automaticGpu = new CheckBox { Content = "GPUの空きVRAMに応じてGPU保持を自動配分する", Margin = new Thickness(0, 8, 0, 0) };
+        Bind(automaticGpu, nameof(FrameCacheToolSettings.AutomaticGpuBudget));
+        Children.Insert(at++, automaticGpu);
+        AddChoice("VRAM上限", nameof(FrameCacheToolSettings.GpuLimitMiB),
+            new[] { 0, 128, 256, 512, 1024, 2048, 4096, 8192 }.Append(settings.GpuLimitMiB).Distinct().Order()
+                .Select(value => (value == 0 ? "使わない" : $"{value:N0} MiB", (object)value)));
         var idle = new CheckBox { Content = "停止中にフレームをキャッシュする", Margin = new Thickness(0, 8, 0, 0) };
         Bind(idle, nameof(FrameCacheToolSettings.CacheFramesWhenIdle));
-        Children.Insert(5, idle);
+        Children.Insert(at++, idle);
         AddChoice("操作後の待ち時間", nameof(FrameCacheToolSettings.IdleDelaySeconds),
             new double[] { 1, 2, 4, 8, 15, 30, 60, 120 }.Append(settings.IdleDelaySeconds).Distinct().Order()
                 .Select(value => ($"{value:g} 秒", (object)value)));
@@ -220,8 +234,7 @@ public sealed class PluginSettingsPanel : StackPanel
             box.SetBinding(Selector.SelectedValueProperty, new System.Windows.Data.Binding(property)
                 { Source = settings, Mode = System.Windows.Data.BindingMode.TwoWay });
             row.Children.Add(box);
-            Children.Insert(property == nameof(FrameCacheToolSettings.RamLimitMiB) ? 4
-                : property == nameof(FrameCacheToolSettings.IdleDelaySeconds) ? 6 : 7, row);
+            Children.Insert(at++, row);
         }
     }
 
@@ -257,7 +270,7 @@ public sealed class PluginSettingsPanel : StackPanel
     {
         note.Text = (HostIntegration.CacheAvailable ? string.Empty : "このYMM4では自動キャッシュを使えません（理由はツール「描画キャッシュ」に表示）。設定は保存され、使える版で有効になります。")
             + (FrameCacheToolSettings.Default.NvencOutput ? string.Empty
-                : "NVENC 出力を切ると、出力形式「RTX 3060 NVENC 出力」は選んでも出力できません（一覧には残ります）。次回の起動からは出力用のフックも入れません。")
+                : "NVENC 出力を切ると、出力形式「NVIDIA NVENC 出力」は選んでも出力できません（一覧には残ります）。次回の起動からは出力用のフックも入れません。")
             + (PluginSettings.SaveError is { } error ? "設定を保存できませんでした: " + error : string.Empty);
     }
 }
@@ -371,14 +384,14 @@ public sealed class FrameCacheToolView : UserControl
         if (CacheDiagnostics.IsRecording) traceInfo.Text = "記録中: " + CacheDiagnostics.OutputPath + "\n混雑による欠落: " + CacheDiagnostics.DroppedRecords;
         status.Text = HostIntegration.Status + Environment.NewLine + FrameRenderReadiness.Summary
             + Environment.NewLine + TimelineFrameCache.Status + Environment.NewLine + IdleFramePreRenderer.Status
-            + Environment.NewLine + CacheMemoryController.Status;
+            + Environment.NewLine + CacheMemoryController.Status + Environment.NewLine + GpuMemoryController.Status;
         var store = TimelineFrameCache.StoreIfCreated;
         counts.Text = $"再利用 {TimelineFrameCache.Hits:N0}（同じ画像 {TimelineFrameCache.LiveReuses:N0} / GPU {TimelineFrameCache.GpuHits:N0} / RAM {TimelineFrameCache.RamHits:N0} / ディスク {TimelineFrameCache.DiskHits:N0}）"
             + $" / 新規描画 {TimelineFrameCache.Misses:N0} / 対象外 {TimelineFrameCache.Bypasses:N0}\n"
             + $"プレビュー保存 {TimelineFrameCache.PreviewStored:N0}（描画スレッド {TimelineFrameCache.PreviewStoreMilliseconds:N1} ms/枚）/ 先読み読込 {TimelineFrameCache.ReadAheads:N0}"
             + (store is null ? "\n" : $" / ディスク読込 {store.DiskReads:N0}（{store.DiskReadMilliseconds:N1} ms/枚）/ 書込 {store.DiskWrites:N0}（混雑で見送り {store.DroppedWrites:N0}）\n")
             + $"描画の所要時間 p50/p95: 新規描画 {TimelineFrameCache.RenderTimes} / GPU {TimelineFrameCache.GpuTimes} / RAM {TimelineFrameCache.RamTimes} / ディスク {TimelineFrameCache.DiskTimes} / 同じ画像 {TimelineFrameCache.LiveTimes}\n"
-            + $"GPU {TimelineFrameCache.GpuBytes / 1048576.0:N1} MiB / RAM {(store?.RamBytes ?? 0) / 1048576.0:N0} / {(store?.RamBudget ?? 0) / 1048576.0:N0} MiB（設定上限 {CacheMemoryController.Maximum / 1048576.0:N0} MiB）"
+            + $"GPU {TimelineFrameCache.GpuBytes / 1048576.0:N1} MiB（保持 {TimelineFrameCache.GpuRetainedBytesNow / 1048576.0:N0} / {TimelineFrameCache.GpuRetentionBudgetNow / 1048576.0:N0} MiB）/ RAM {(store?.RamBytes ?? 0) / 1048576.0:N0} / {(store?.RamBudget ?? 0) / 1048576.0:N0} MiB（設定上限 {CacheMemoryController.Maximum / 1048576.0:N0} MiB）"
             + $" / ディスク {(store?.DiskBytes ?? 0) / 1048576.0:N0} MiB / 4 GiB\n"
             + $"ディスク書込待ち {(store?.QueuedWriteBytes ?? 0) / 1048576.0:N0} MiB（RAMの使用量表示とは別に保持）";
         if (CacheTrace.Enabled && Environment.TickCount64 >= metricsAt)

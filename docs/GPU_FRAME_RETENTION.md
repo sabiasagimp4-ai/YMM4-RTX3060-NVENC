@@ -12,16 +12,17 @@ RAM/ディスクから初めて復元したプレビュー画像だけをGPU側�
   LRUで追い出しても表示中のborrowを破棄しない。最後のowner解放で画像予算を返す。
 - 退避対象はグローバルLRUから選び、追加は利用頻度で判断する。頻度が同じなら既存entryを残す。
   sourceごとの履歴は256キーに制限し、512観測ごとに頻度を半減して新しい範囲へ追従する。
-  保持は既定128MiB、最大64 entry。これは画素payloadの予算で、driverが確保する実VRAM全量ではない。
-  既存の384MiB総画像予算に一度だけ計上し、同じbitmapのaliasは二重計上しない。
+  保持の予算は、描画に使うGPUのVRAMに応じた自動配分（初期128MiB）か、手動の固定値。entry数は予算に比例して64〜1024。
+  これは画素payloadの予算で、driverが確保する実VRAM全量ではない。
+  総画像予算（保持＋256MiB）に一度だけ計上し、同じbitmapのaliasは二重計上しない。
 - contextの同一性、generation、既存の完全なcache key（frame・usage・viewport・DPI・変換・描画状態等）を照合する。
   モデル/ファイル依存検証を維持し、borrow前と出力差替え前に再検証する。
 - ON/OFF切替・purgeで保持entryを解放。source破棄でも解放。弱参照ownerはsourceを延命しない。
 - miss/予算超過はRAM/ディスクへ戻る。書出しは従来経路を維持する。
 
-128MiBには1080p BGRAを約16枚保持できる。全100枚の巡回では通常GPU missとなるため、
+128MiBには1080p BGRAを約16枚、2048MiBには約260枚を保持できる。保持しきれない長い巡回では通常GPU missとなるため、
 小さいworking setでの速度を長いタイムライン全体に適用しない。
-現在の予算は実adapterの空きVRAMを動的に推定する仕組みではない。
+自動配分は `GpuMemoryPolicy`（純粋な方針）と `GpuMemoryController`（1秒ごとの採取）。規則は [キャッシュ仕様](CACHE_BEHAVIOR.md) の「メモリと容量」。
 
 ## 検証
 

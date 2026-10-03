@@ -34,6 +34,7 @@ internal static class PluginSettings
     {
         bool available = HostIntegration.CacheAvailable;
         CacheMemoryController.Configure(settings.AutomaticRamBudget, settings.RamLimitMiB * CacheMemoryPolicy.MiB);
+        GpuMemoryController.Configure(settings.AutomaticGpuBudget, settings.GpuLimitMiB * GpuMemoryPolicy.MiB);
         TimelineFrameCache.SetEnabled(available && settings.PreviewCache, available && settings.ExportCache);
         IdleFramePreRenderer.Configure(settings.IdleDelaySeconds, settings.IdleOrder, settings.IdleRangeStartFrame, settings.IdleRangeEndFrame);
         IdleFramePreRenderer.Enabled = available && settings.PreviewCache && settings.CacheFramesWhenIdle;

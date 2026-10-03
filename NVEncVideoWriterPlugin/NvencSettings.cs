@@ -54,6 +54,7 @@ public enum NvencCodec
 {
     H264,
     H265,
+    AV1, // GeForce RTX 40 series and newer
 }
 
 public enum NvencQuality

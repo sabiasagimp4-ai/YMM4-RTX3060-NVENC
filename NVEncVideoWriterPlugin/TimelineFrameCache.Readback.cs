@@ -532,7 +532,7 @@ internal static partial class TimelineFrameCache
         while (true)
         {
             long current = Interlocked.Read(ref gpuBytes);
-            if (bytes <= 0 || bytes > GpuBudget - current - Interlocked.Read(ref readbackPoolBytes)) return false;
+            if (bytes <= 0 || bytes > GpuImageBudget - current - Interlocked.Read(ref readbackPoolBytes)) return false;
             if (Interlocked.CompareExchange(ref gpuBytes, current + bytes, current) == current) return true;
         }
     }

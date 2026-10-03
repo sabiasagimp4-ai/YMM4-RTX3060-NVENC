@@ -149,6 +149,17 @@ int main()
         Check(!accepted && std::chrono::steady_clock::now() - before < std::chrono::seconds(2),
             "Full writer queue ignored failure");
         Check(queue.sampleQueue.empty(), "Failed writer accepted a sample");
+
+        // Driver and GPU capability texts: the managed side (NvencErrors) parses these exact forms.
+        const uint32_t needed = (NVENCAPI_MAJOR_VERSION << 4) | NVENCAPI_MINOR_VERSION;
+        Check(DriverSupportsApi(needed) && DriverSupportsApi(needed + 1) && DriverSupportsApi((NVENCAPI_MAJOR_VERSION + 1) << 4)
+            && !DriverSupportsApi(needed - 1) && !DriverSupportsApi((12 << 4) | 2), "Driver API version comparison");
+        Check(DriverTooOldMessage((12 << 4) | 2) == L"NVENC driver too old: supports API 12.2, needs "
+            + std::to_wstring(NVENCAPI_MAJOR_VERSION) + L"." + std::to_wstring(NVENCAPI_MINOR_VERSION), "Driver message");
+        Check(CodecUnsupportedMessage(kCodecAv1) == L"NVENC codec unsupported: AV1"
+            && CodecUnsupportedMessage(kCodecHevc) == L"NVENC codec unsupported: HEVC", "Codec message");
+        Check(SizeUnsupportedMessage(kCodecH264, 7680, 4320, 4096, 4096) == L"NVENC size unsupported: 7680x4320 > 4096x4096 (H.264)",
+            "Size message");
         std::cout << "Native cache/queue, NAL and MP4 invariants OK\n";
         return 0;
     }

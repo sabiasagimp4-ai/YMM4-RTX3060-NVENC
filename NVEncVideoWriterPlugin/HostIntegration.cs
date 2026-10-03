@@ -133,7 +133,7 @@ internal static class HostIntegration
         // Direct/offline callers have no host cancellation contract. The real host must have one.
         if (!IsHostProcess) return;
         if (!NvencOutputEnabled())
-            throw new InvalidOperationException("「RTX 3060 NVENC 出力」は設定で無効になっています。ツール「描画キャッシュ」か、YMM4 の設定（その他）で有効にするか、YMM4 標準の出力形式を選んでください。");
+            throw new InvalidOperationException("「NVIDIA NVENC 出力」は設定で無効になっています。ツール「描画キャッシュ」か、YMM4 の設定（その他）で有効にするか、YMM4 標準の出力形式を選んでください。");
         if (!EnsureInstalled() || !EnsureExportHooks(out var reason))
             throw new NotSupportedException($"このYMM4では安全な動画出力を開始できません。{Status}");
         if (HostExportScope.GetCurrent() is null)
