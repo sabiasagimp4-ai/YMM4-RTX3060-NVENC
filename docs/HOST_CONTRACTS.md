@@ -23,7 +23,10 @@ fingerprintは型・基底・interface・field・属性・正規化IL・生成�
 | FFmpeg | 同じstream時計。読込エラーでも直前画素を終端へ引き延ばすため、終端まで届く区間は保守的に未確認 |
 | CachedVideoFileSource | resource.Sourceへ委譲し、検証済み内側ソースの状態を確認 |
 | WIC GIF／WebP | 同期decodeの例外を確認。読み取った契約の範囲で扱う |
-| DirectShow／連番等の未確認ソース | 通常描画し、保存しない |
+| WIC連番 | `GetFrameIndex(t)`（60枚／秒）の画像を同期で読み込み済み（`source` あり、`currentFrame` 一致）。読めない画像は空の画像を描くので未完成とする。加えて、キーが示す画像を実際に表示したことを確認する |
+| DirectShow等の未確認ソース | 通常描画し、保存しない |
+
+連番の各フレームがどの画像を表示するかは、ホストの `VideoSource.CalculateSourceTime`（internal。再生速度とそのアニメーション、開始位置、長さ、ループ、ソースの長さ）と `FrameTime.TimeToFrame(t, 60)` をそのまま呼んで求める（`ImageSequence`）。ファイル一覧は読込側と同じ規則（拡張子の種類が動画でない、名前の末尾が数字、同じ接頭辞・拡張子のファイルを番号順に並べ、指定したファイルの番号から連続する範囲。最小の番号でないファイルを指定すると一覧は空で、連番にならない）で作る。読込側は一覧を一度だけ作り、ホストはそのソースをパスごとに使い回すため、起動中に一覧が変わった連番はキーにしない。TimelineSourceは1秒先までのアイテムのソースを同じscopeで先読みするので、「表示した画像がすべてキーにある」ではなく「キーが示す画像がすべて表示された」を条件にする。
 
 Harmony 2.4.2は一部の例外フィルター付きmethodを作り直せない。DirectShow等のpatch失敗を成功扱いせず、検証できるwrapperによって未確認の内側を拒否する。wrapper等の必須契約を確保できない場合は対応機能を無効にする。
 
@@ -49,6 +52,8 @@ Harmony 2.4.2は一部の例外フィルター付きmethodを作り直せない�
 `KnownCode.VerifiedCommunity` は4.56.1.0のCommunityの固定MVID `ac765de8-d44f-44f1-a094-961becf4d22e` と読込場所を確認する。型の正確な一覧と対象外理由は [KnownCode.cs](../NVEncVideoWriterPlugin/KnownCode.cs)。
 
 他アイテム／シーン・音声・未報告ファイル・時計・乱数・native／通信・可変static・前フレーム画像を読む処理を調べた。MotionBlur／AfterImageの履歴依存、AudioVolume、OpenFx、未報告ファイルや未監査処理は自動対象にしない。CameraShake等の同一性をseedとする処理はSessionキーとなり、idle複製は避ける。
+
+ShuffleText／ShuffleTextInOutは、フレーム番号（と入力の番号）だけを種にしたMersenneTwisterで文字を選ぶ。NumberTextは値を `double.ToString`（現在のカルチャ）で書式化する。3つとも `Font` の名前をYMM4と同じくフォント設定から引き（なければArial）、DirectWriteで描く。キーには `Font` から解決したフェイスとファミリーのファイル、インストール済みフォントの識別、NumberTextではカルチャの数値書式を入れる。4.56.1.0のYMM4はUIのカルチャ（`CurrentUICulture`）だけを設定し、`CurrentCulture` はOSの設定のまま。
 
 ユーザーが信頼したアセンブリも名前とMVIDをキーに含め、設定変更でtrackerを再記述する。この信頼は隠れた依存を検出する仕組みではない。CommunityのMVIDが変わった場合は再監査してからリストを更新する。
 
