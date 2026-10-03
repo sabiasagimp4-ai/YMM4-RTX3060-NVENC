@@ -15,7 +15,7 @@ namespace NVEncVideoWriterPlugin;
 //   segments also end where the file shown changes.
 internal sealed class FrameDependencyIndex
 {
-    internal const string Version = "frame-deps-v2";
+    internal const string Version = "frame-deps-v3";
     private const int MaximumCachedSegments = 65536;
 
     // Uncacheable: the item uses something that cannot be fingerprinted (a font file that is not local, a remote file)
@@ -26,7 +26,8 @@ internal sealed class FrameDependencyIndex
     // culture matches the description's (Culture below).
     // FrameFiles: the file it shows at each of its frames (index: frame - Frame), besides Files.
     internal readonly record struct Entry(int Frame, int Length, bool IsTransition, bool IsWide, string Hash, string[] Files,
-        bool Uncacheable = false, bool Session = false, bool Culture = false, string[]? FrameFiles = null)
+        bool Uncacheable = false, bool Session = false, bool Culture = false, string[]? FrameFiles = null,
+        int? Layer = null, bool AlwaysOnTop = false)
     {
         internal bool Contains(long frame) => Frame <= frame && frame < (long)Frame + Length;
     }
@@ -44,6 +45,7 @@ internal sealed class FrameDependencyIndex
     private readonly bool nestedSession;
     private readonly bool nestedCulture;
     private readonly long[] boundaries;
+    private readonly bool potentialOrderAmbiguity;
     private readonly Dictionary<int, Dependencies> segments = [];
     private Dependencies? whole;
 
@@ -60,6 +62,7 @@ internal sealed class FrameDependencyIndex
         this.globalFiles = Distinct(globalFiles);
         this.nestedFiles = Distinct(nestedFiles);
         this.entries = entries.ToArray();
+        potentialOrderAmbiguity = HasPotentialOrderAmbiguity(this.entries);
         if (this.entries.FirstOrDefault(e => e.FrameFiles is { } files && files.Length != e.Length) is { FrameFiles: not null } wrong)
             throw new ArgumentException($"An entry at {wrong.Frame} has {wrong.FrameFiles.Length} frame files for {wrong.Length} frames");
         boundaries = this.entries.SelectMany(Boundaries).Distinct().Order().ToArray();
@@ -121,7 +124,7 @@ internal sealed class FrameDependencyIndex
         {
             lock (segments)
                 return whole ??= Create(Enumerable.Range(0, entries.Length), wide: true,
-                    entries.SelectMany(entry => entry.FrameFiles ?? [])) with { Shown = null };
+                    entries.SelectMany(entry => entry.FrameFiles ?? []), potentialOrderAmbiguity) with { Shown = null };
         }
     }
 
@@ -133,13 +136,20 @@ internal sealed class FrameDependencyIndex
         pending.Enqueue(frame);
         var visited = new HashSet<long>();
         bool wide = false;
+        bool ambiguousOrder = false;
         while (pending.Count != 0)
         {
             long at = pending.Dequeue();
             if (!visited.Add(at)) continue;
+            var orders = new HashSet<(int Layer, bool AlwaysOnTop)>();
             for (int i = 0; i < entries.Length; i++)
             {
                 if (!entries[i].Contains(at)) continue;
+                // TimelineSource orders a resource dictionary by top/Z/layer. Equal
+                // sort values retain insertion order, which prefetch/parallel creation
+                // and seek history can change. We cannot certify Z ties before render;
+                // overlapping equal layers/top states conservatively render normally.
+                if (entries[i].Layer is int layer && !orders.Add((layer, entries[i].AlwaysOnTop))) ambiguousOrder = true;
                 // An item a transition also draws at its first frame - 1 shows its image of that frame too.
                 if (entries[i].FrameFiles is { } files) shown.Add(files[(int)(at - entries[i].Frame)]);
                 if (!included.Add(i)) continue;
@@ -148,11 +158,12 @@ internal sealed class FrameDependencyIndex
             }
         }
         // A wide frame reads the whole project, but root items only draw the images of their frames.
-        if (wide) return shown.Count == 0 ? Whole : Create(Enumerable.Range(0, entries.Length), wide: true, shown);
-        return Create(included, wide: false, shown);
+        if (wide) return shown.Count == 0 && !ambiguousOrder ? Whole
+            : Create(Enumerable.Range(0, entries.Length), wide: true, shown, ambiguousOrder || potentialOrderAmbiguity);
+        return Create(included, wide: false, shown, ambiguousOrder);
     }
 
-    private Dependencies Create(IEnumerable<int> included, bool wide, IEnumerable<string> shown)
+    private Dependencies Create(IEnumerable<int> included, bool wide, IEnumerable<string> shown, bool ambiguousOrder = false)
     {
         var hashes = included.Select(i => entries[i].Hash).Order(StringComparer.Ordinal).ToArray();
         var content = new StringBuilder(Version).Append("|global:").Append(globalHash)
@@ -160,7 +171,7 @@ internal sealed class FrameDependencyIndex
         foreach (var hash in hashes) content.Append('|').Append(hash);
         var files = globalFiles.Concat(included.SelectMany(i => entries[i].Files)).Concat(shown);
         if (wide) files = files.Concat(nestedFiles);
-        bool cacheable = !included.Any(i => entries[i].Uncacheable) && !(wide && nestedUncacheable);
+        bool cacheable = !ambiguousOrder && !included.Any(i => entries[i].Uncacheable) && !(wide && nestedUncacheable);
         bool session = included.Any(i => entries[i].Session) || wide && nestedSession;
         bool culture = included.Any(i => entries[i].Culture) || wide && nestedCulture;
         string[] images = Distinct(shown);
@@ -168,6 +179,21 @@ internal sealed class FrameDependencyIndex
     }
 
     internal static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+
+    internal static bool HasPotentialOrderAmbiguity(IEnumerable<Entry> entries)
+    {
+        foreach (var group in entries.Where(entry => entry.Layer is not null && entry.Length > 0)
+            .GroupBy(entry => (entry.Layer, entry.AlwaysOnTop)))
+        {
+            long end = long.MinValue;
+            foreach (var entry in group.OrderBy(entry => entry.Frame))
+            {
+                if (entry.Frame < end) return true;
+                end = Math.Max(end, (long)entry.Frame + entry.Length);
+            }
+        }
+        return false;
+    }
 
     private static string[] Distinct(IEnumerable<string> files) =>
         files.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();

@@ -27,6 +27,9 @@ public sealed class DynamicComputeCache : IDisposable
     private readonly Dictionary<string, object> classes = new(StringComparer.Ordinal);
     private readonly Dictionary<(object Class, string Key), Entry> entries = [];
     private readonly LinkedList<Entry> lru = [];
+    // Flows through async callbacks/Task.Run; thread identity alone misses A -> B -> A
+    // when the computations have independent owners on different worker threads.
+    private readonly AsyncLocal<Entry?> executing = new();
     private readonly long budget;
     private readonly int maximumEntries;
     private long bytes;
@@ -44,6 +47,7 @@ public sealed class DynamicComputeCache : IDisposable
         internal int References = 1; // computation; cache ownership added only on admission
         internal bool Ready;
         internal LinkedListNode<Entry>? Node;
+        internal Dictionary<Entry, int>? Dependencies;
     }
     public DynamicComputeCache(long budgetBytes, int maximumEntries = 256)
     {
@@ -121,7 +125,7 @@ public sealed class DynamicComputeCache : IDisposable
             cancellation.ThrowIfCancellationRequested();
             if (current is not null && !current(options)) return ComputeCacheStatus.Missing;
             string inputKey = Key(options);
-            Entry entry; bool owner; Entry? retired = null;
+            Entry entry; bool owner; Entry? retired = null, dependencyOwner = null;
             lock (cache.gate)
             {
                 ObjectDisposedException.ThrowIf(cache.disposed || !cache.classes.TryGetValue(id, out var registered) || !ReferenceEquals(registered, this), this);
@@ -142,6 +146,7 @@ public sealed class DynamicComputeCache : IDisposable
                 else if (!entry.Ready && !waitForOtherThread) return ComputeCacheStatus.Computing;
                 else if (!entry.Ready && entry.OwnerThread == Environment.CurrentManagedThreadId)
                     throw new InvalidOperationException("Recursive computation of the same cache key");
+                dependencyOwner = cache.BeginDependency(entry);
                 entry.References++; // consumer reservation survives completion, eviction, purge and unregistration
                 cache.Touch(entry);
             }
@@ -157,11 +162,13 @@ public sealed class DynamicComputeCache : IDisposable
                 receipt = Receipt(entry);
                 return ComputeCacheStatus.Ready;
             }
-            finally { if (receipt is null) cache.Release(entry); }
+            finally { cache.EndDependency(dependencyOwner, entry); if (receipt is null) cache.Release(entry); }
         }
         private void Execute(TOptions options, string inputKey, Entry entry)
         {
             lock (cache.gate) entry.OwnerThread = Environment.CurrentManagedThreadId;
+            var previous = cache.executing.Value;
+            cache.executing.Value = entry;
             long started = Stopwatch.GetTimestamp();
             TValue? result = default;
             bool created = false;
@@ -201,7 +208,12 @@ public sealed class DynamicComputeCache : IDisposable
                     if (cache.entries.TryGetValue((this, inputKey), out var active) && ReferenceEquals(active, entry)) cache.entries.Remove((this, inputKey));
                 entry.Completion.TrySetException(error);
             }
-            finally { lock (cache.gate) cache.activeComputations--; cache.Release(entry); } // computation ownership
+            finally
+            {
+                cache.executing.Value = previous;
+                lock (cache.gate) cache.activeComputations--;
+                cache.Release(entry); // computation ownership
+            }
         }
         public Task<ComputeReceipt<TValue>?> ComputeAsync(TOptions options, CancellationToken cancellation = default)
         {
@@ -209,7 +221,7 @@ public sealed class DynamicComputeCache : IDisposable
             cancellation.ThrowIfCancellationRequested();
             if (current is not null && !current(options)) return Task.FromResult<ComputeReceipt<TValue>?>(null);
             string inputKey = Key(options);
-            Entry entry; bool owner; Entry? retired = null;
+            Entry entry; bool owner; Entry? retired = null, dependencyOwner = null;
             lock (cache.gate)
             {
                 ObjectDisposedException.ThrowIf(cache.disposed || !cache.classes.TryGetValue(id, out var registered) || !ReferenceEquals(registered, this), this);
@@ -228,14 +240,15 @@ public sealed class DynamicComputeCache : IDisposable
                 }
                 else if (!entry.Ready && entry.OwnerThread == Environment.CurrentManagedThreadId)
                     throw new InvalidOperationException("Recursive computation of the same cache key");
+                dependencyOwner = cache.BeginDependency(entry);
                 entry.References++;
                 cache.Touch(entry);
             }
             if (retired is not null) cache.Release(retired);
             if (owner) _ = Task.Run(() => Execute(options, inputKey, entry));
-            return AwaitReceipt(options, entry, cancellation);
+            return AwaitReceipt(options, entry, dependencyOwner, cancellation);
         }
-        private async Task<ComputeReceipt<TValue>?> AwaitReceipt(TOptions options, Entry entry, CancellationToken cancellation)
+        private async Task<ComputeReceipt<TValue>?> AwaitReceipt(TOptions options, Entry entry, Entry? dependencyOwner, CancellationToken cancellation)
         {
             ComputeReceipt<TValue>? receipt = null;
             try
@@ -246,10 +259,41 @@ public sealed class DynamicComputeCache : IDisposable
                 receipt = Receipt(entry);
                 return receipt;
             }
-            finally { if (receipt is null) cache.Release(entry); }
+            finally { cache.EndDependency(dependencyOwner, entry); if (receipt is null) cache.Release(entry); }
         }
         private ComputeReceipt<TValue> Receipt(Entry entry) => new((TValue)entry.Value!, entry.Ticks, entry.Bytes, () => cache.Release(entry));
         public void Dispose() => cache.Unregister(id, this);
+    }
+    // Under gate. Reject an edge before reserving a consumer reference: cycle failure
+    // must not strand either a waiter reservation or a job slot. Cached/no-wait hits
+    // have no dependency edge. Multiple consumers of an edge are counted separately.
+    private Entry? BeginDependency(Entry target)
+    {
+        var caller = executing.Value;
+        if (caller is null || caller.Ready || caller.Completion.Task.IsCompleted || target.Ready) return null;
+        var pending = new Stack<Entry>();
+        var visited = new HashSet<Entry>();
+        pending.Push(target);
+        while (pending.TryPop(out var next))
+        {
+            if (ReferenceEquals(next, caller)) throw new InvalidOperationException("Cyclic compute cache dependency");
+            if (!visited.Add(next) || next.Completion.Task.IsCompleted) continue;
+            if (next.Dependencies is { } dependencies)
+                foreach (var dependency in dependencies.Keys) pending.Push(dependency);
+        }
+        var edges = caller.Dependencies ??= [];
+        edges[target] = edges.GetValueOrDefault(target) + 1;
+        return caller;
+    }
+    private void EndDependency(Entry? caller, Entry target)
+    {
+        if (caller is null) return;
+        lock (gate)
+        {
+            var edges = caller.Dependencies!;
+            if (--edges[target] == 0) edges.Remove(target);
+            if (edges.Count == 0) caller.Dependencies = null;
+        }
     }
     private void Touch(Entry entry)
     { if (entry.Node is { } node) { lru.Remove(node); lru.AddLast(node); } }

@@ -16,6 +16,7 @@
     <Compile Include="../../NVEncVideoWriterPlugin/FrameModelSplit.cs" Link="FrameModelSplit.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/KeyDependencyTracker.cs" Link="KeyDependencyTracker.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameDependencyIndex.cs" Link="FrameDependencyIndex.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/FrameDependencyIdentity.cs" Link="FrameDependencyIdentity.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FileDependencyLease.cs" Link="FileDependencyLease.cs" />
     <Compile Remove="StoreChecks.cs" />
     <Using Include="System.IO" />

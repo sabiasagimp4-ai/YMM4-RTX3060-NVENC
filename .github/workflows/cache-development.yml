@@ -2,7 +2,7 @@ name: cache-development
 
 on:
   push:
-    branches: ['main', 'codex/ae-cache-continuation']
+    branches: ['main', 'codex/ae-cache-continuation', 'codex/cache-architecture-audit-*']
   pull_request:
     paths: ['NVEncVideoWriterPlugin/**', 'tests/**', '.github/workflows/cache-development.yml']
   workflow_dispatch:
@@ -34,6 +34,7 @@ jobs:
       - run: python -m unittest discover -s tests/tools -v
       - run: dotnet run --project tests/StoreChecksHarness/StoreChecks.csproj -c Release
       - run: dotnet run --project tests/ReadinessChecks/ReadinessChecks.csproj -c Release
+      - run: dotnet run --project tests/CacheAdversarialChecks/CacheAdversarialChecks.csproj -c Release
 
   host:
     runs-on: ubuntu-latest
@@ -86,8 +87,27 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Store checks failed' }
           dotnet run --project tests/ReadinessChecks/ReadinessChecks.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Readiness checks failed' }
+          dotnet run --project tests/CacheAdversarialChecks/CacheAdversarialChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Adversarial cache checks failed' }
           dotnet run --project tests/FileLeaseChecks/FileLeaseChecks.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'File lease checks failed' }
+      - name: Live-reuse regression rejects a deliberately removed validation guard
+        run: |
+          $path = Join-Path $env:GITHUB_WORKSPACE 'NVEncVideoWriterPlugin/TimelineFrameCache.cs'
+          $original = [IO.File]::ReadAllText($path)
+          $broken = $original.Replace('if (StillCurrent(pending) && currentGeneration ==', 'if (currentGeneration ==')
+          if ($broken -eq $original) { throw 'Live validation mutation did not apply' }
+          try {
+            [IO.File]::WriteAllText($path, $broken)
+            $output = & dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            if ($code -eq 0 -or ($output -join "`n") -notmatch 'Edit between capture and live lookup reused stale output') {
+              throw 'Negative control did not fail at the stale-live-output regression'
+            }
+          } finally {
+            [IO.File]::WriteAllText($path, $original)
+          }
       - name: Dependency keys against the real host
         run: |
           dotnet run --project tests/CacheChecks/CacheChecks.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR

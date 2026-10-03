@@ -86,6 +86,12 @@ internal sealed class KeyDependencyTracker : IDisposable
     public long CaptureRevision() => Revision;
     public bool ValidateRevision(long capturedRevision) => !Volatile.Read(ref disposed) && Revision == capturedRevision;
 
+    internal readonly record struct EnvironmentWitness(long Code, long Fonts, Type[][] Readers, string Settings)
+    {
+        internal bool IsCurrent() => Code == KnownCode.Generation && Fonts == FontEnvironment.Generation
+            && FrameCacheKey.SourceReadersMatch(Readers) && Settings == SafeDrawingSettings();
+    }
+
     public bool TryGetKey(out string key, out string reason)
     {
         key = string.Empty;
@@ -168,7 +174,7 @@ internal sealed class KeyDependencyTracker : IDisposable
             var dependencies = frame is int at ? cachedFrames!.For(at) : null;
             if (!(dependencies ?? cachedFrames!.Whole).Cacheable)
             {
-                reason = "立ち絵（非同期の口パク）、外部プラグインのコード（エフェクト・図形・アイテム・トランジション）、確認できない素材（外部の場所のファイル、起動中に構成が変わった連番画像）のいずれかを使うアイテムが映るため、通常描画を使用します。";
+                reason = "描画順を確定できない同一レイヤーの重なり、立ち絵（非同期の口パク）、未確認の外部プラグイン、確認できない素材のいずれかを含むため、通常描画を使用します。";
                 return false;
             }
             // NumberText formats with the rendering thread's culture: only keyed where it is the described one.
@@ -191,11 +197,11 @@ internal sealed class KeyDependencyTracker : IDisposable
             catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
             { reason = "動的な入力依存を確認できません: " + error.GetType().Name; return false; }
             string DynamicKey() => dynamicSnapshots.Length == 0 ? KeyFor(dependencies, files)
-                : Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
-                    "dynamic-frame-v1:" + KeyFor(dependencies, files) + string.Concat(dynamicSnapshots.Select(pair => pair.Snapshot.Key).Order(StringComparer.Ordinal)))));
+                : FrameDependencyIdentity.WithDynamicState(KeyFor(dependencies, files), dynamicSnapshots.Select(pair => pair.Snapshot));
             if (files.Length == 0)
             {
-                capture = new KeyCapture(this, DynamicKey(), cachedModel, before, cachedParents, null, dynamicSnapshots, dependencies?.Shown);
+                capture = new KeyCapture(this, DynamicKey(), cachedModel, before, cachedParents,
+                    new(cachedCode, cachedFonts, cachedSourceReaders, cachedSettings!), null, dynamicSnapshots, dependencies?.Shown);
                 return true;
             }
             if (fingerprintTask is { IsCompleted: true }) AdoptFingerprints(before);
@@ -216,7 +222,8 @@ internal sealed class KeyDependencyTracker : IDisposable
                         reason = HostContent.Reason;
                         return false;
                     }
-                    capture = new KeyCapture(this, DynamicKey(), cachedModel, before, cachedParents, lease, dynamicSnapshots, dependencies?.Shown);
+                    capture = new KeyCapture(this, DynamicKey(), cachedModel, before, cachedParents,
+                        new(cachedCode, cachedFonts, cachedSourceReaders, cachedSettings!), lease, dynamicSnapshots, dependencies?.Shown);
                     reason = string.Empty;
                     return true;
                 }
@@ -278,7 +285,9 @@ internal sealed class KeyDependencyTracker : IDisposable
     private bool Apply(Description description, long current)
     {
         lastDescribeTicks = description.Ticks;
-        if (current != Revision || !FrameCacheKey.SourceReadersMatch(description.SourceReaders))
+        if (current != Revision || !FrameCacheKey.SourceReadersMatch(description.SourceReaders)
+            || description.Code != KnownCode.Generation || description.Fonts != FontEnvironment.Generation
+            || description.Settings != SafeDrawingSettings())
         {
             if (current == Revision) Invalidate();
             return false;
@@ -692,15 +701,17 @@ internal sealed class KeyCapture : IDisposable
     private readonly KeyDependencyTracker tracker;
     private readonly Guid[] parents;
     private readonly FileDependencyLease? lease;
+    private readonly KeyDependencyTracker.EnvironmentWitness environment;
     private readonly (ICacheDependencyProvider Provider, CacheDependencySnapshot Snapshot)[] dynamicSnapshots;
     private int disposed;
     public string Key { get; }
     public string Model { get; }
     public long Revision { get; }
-    internal KeyCapture(KeyDependencyTracker tracker, string key, string model, long revision, Guid[] parents, FileDependencyLease? lease,
+    internal KeyCapture(KeyDependencyTracker tracker, string key, string model, long revision, Guid[] parents,
+        KeyDependencyTracker.EnvironmentWitness environment, FileDependencyLease? lease,
         (ICacheDependencyProvider Provider, CacheDependencySnapshot Snapshot)[]? dynamicSnapshots = null, string[]? shown = null)
     {
-        this.tracker = tracker; Key = key; Model = model; Revision = revision; this.parents = parents; this.lease = lease;
+        this.tracker = tracker; Key = key; Model = model; Revision = revision; this.parents = parents; this.environment = environment; this.lease = lease;
         this.dynamicSnapshots = dynamicSnapshots ?? []; Shown = shown ?? [];
     }
     // The images of image sequences this key says the frame shows: the render must have shown each (FrameRenderReadiness).
@@ -715,6 +726,9 @@ internal sealed class KeyCapture : IDisposable
     // becomes visible (a store commit, an output swap made after the capture's Update) needs it. Every other check
     // (edits, settings, scene parents, dynamic inputs) stays on every call.
     public bool Validate(bool files = true) => Volatile.Read(ref disposed) == 0 && tracker.ValidateRevision(Revision)
-        && tracker.HasParents(parents) && DynamicCurrent() && (!files || (lease?.VerifyPaths() ?? true)) && Volatile.Read(ref disposed) == 0;
+        && environment.IsCurrent() && tracker.HasParents(parents) && DynamicCurrent() && (!files || (lease?.VerifyPaths() ?? true))
+        // A provider/path check can re-enter the editor. Recheck the witnesses after callbacks,
+        // not only before them, so a callback cannot validate the snapshot it just invalidated.
+        && tracker.ValidateRevision(Revision) && environment.IsCurrent() && tracker.HasParents(parents) && Volatile.Read(ref disposed) == 0;
     public void Dispose() { if (Interlocked.Exchange(ref disposed, 1) == 0) lease?.Dispose(); }
 }

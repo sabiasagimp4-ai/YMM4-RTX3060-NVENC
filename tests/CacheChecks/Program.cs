@@ -51,6 +51,7 @@ internal static class Program
         CheckCommunity();
         CheckImageSequence();
         CheckDynamicDependencies();
+        CheckAmbiguousDrawingOrder();
         Type[][] readerTypes = FrameCacheKey.CaptureSourceReaderTypes();
         Check(FrameCacheKey.SourceReadersMatch(readerTypes), "Unchanged source reader stamp mismatched");
         Check(!FrameCacheKey.SourceReadersMatch([readerTypes[0].Append(typeof(Program)).ToArray(), readerTypes[1], readerTypes[2]]), "Source reader list change was not detected");
@@ -914,8 +915,9 @@ internal static class Program
         [Newtonsoft.Json.JsonIgnore] public bool CanCaptureOnCurrentThread => true;
         [Newtonsoft.Json.JsonIgnore] public string ExternalState { get; set; } = "initial";
         [Newtonsoft.Json.JsonIgnore] public bool FailValidation { get; set; }
+        [Newtonsoft.Json.JsonIgnore] public Action? OnValidate { get; set; }
         public CacheDependencySnapshot CaptureDependencies(long ticks) => new("test/dynamic-blur", "1", ExternalState, "cpu", [new("previous-input", ExternalState, ticks - 1, ticks)]);
-        public bool IsCurrent(CacheDependencySnapshot snapshot) => !FailValidation && snapshot.StateToken == ExternalState;
+        public bool IsCurrent(CacheDependencySnapshot snapshot) { OnValidate?.Invoke(); return !FailValidation && snapshot.StateToken == ExternalState; }
     }
     private static void CheckDynamicDependencies()
     {
@@ -941,9 +943,49 @@ internal static class Program
             }
             effect.FailValidation = true;
             Check(!tracker.TryCapture(5, out _, out _), "Failing dynamic provider did not bypass cache");
+            effect.FailValidation = false;
+            Check(tracker.TryCapture(5, out var reentrant, out reason), reason);
+            using (reentrant)
+            {
+                effect.OnValidate = () => { effect.OnValidate = null; timeline.VideoInfo.BackgroundColor = System.Windows.Media.Colors.Red; };
+                Check(!reentrant!.Validate(files: false), "Provider re-entry edited the model but validated its old capture");
+            }
+            Check(tracker.TryCapture(5, out var trusted, out reason), reason);
+            using (trusted)
+            {
+                KnownCode.Trusted = previousTrust;
+                Check(!trusted!.Validate(files: false), "Trust change left an active capture valid before the next capture");
+            }
+            KnownCode.Trusted = previousTrust.Append(typeof(Program).Assembly.GetName().Name!).ToArray();
+            var front = new DynamicBlurEffect { ExternalState = "red" };
+            var back = new DynamicBlurEffect { ExternalState = "blue" };
+            item.VideoEffects = [front, back];
+            Check(tracker.TryCapture(5, out var ordered, out reason), reason);
+            using (ordered)
+            {
+                (front.ExternalState, back.ExternalState) = (back.ExternalState, front.ExternalState);
+                Check(tracker.TryCapture(5, out var swapped, out reason), reason);
+                using (swapped) Check(ordered!.Model == swapped!.Model && ordered.Key != swapped.Key,
+                    "Hidden state swap between identical host effect slots aliased the frame key");
+            }
             Console.WriteLine("Dynamic host dependencies: animatable discovery, hidden state keys, post-capture validation and fail-closed bypass passed.");
         }
         finally { KnownCode.Trusted = previousTrust; }
+    }
+    private static void CheckAmbiguousDrawingOrder()
+    {
+        var timeline = new Timeline(); var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var first = new ShapeItem { Frame = 0, Length = 20, Layer = 1 };
+        var second = new ShapeItem { Frame = 10, Length = 20, Layer = 1 };
+        timeline.Items = timeline.Items.Add(first).Add(second);
+        var scene = new Scene(timeline, scenes, []);
+        Check(FrameCacheKey.TryDescribe(scene, FrameCacheKey.CaptureSourceReaderTypes(), out _, out _, out var frames, out string reason), reason);
+        Check(frames!.For(5).Cacheable && !frames.For(10).Cacheable && !frames.For(19).Cacheable && frames.For(20).Cacheable,
+            "Same-layer overlap must bypass only its affected frames");
+        second.Layer = 2;
+        Check(FrameCacheKey.TryDescribe(scene, FrameCacheKey.CaptureSourceReaderTypes(), out _, out _, out frames, out reason), reason);
+        Check(frames!.For(15).Cacheable, "Distinct layers must remain cacheable");
+        Console.WriteLine("Host order certificate: overlapping ties bypass, disjoint frames and distinct layers reuse.");
     }
     private sealed class ForeignShapeItem : ShapeItem { }
     // Readers in the plugin assemblies YMM4 ships (its folder) are built in, so a project with a file or a font

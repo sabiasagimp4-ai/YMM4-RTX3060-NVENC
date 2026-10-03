@@ -150,11 +150,12 @@ internal static partial class TimelineFrameCache
     // Full Update time by path, including deferred work, storing and finalizer cleanup.
     internal static readonly FrameTimeSamples RenderTimes = new(), RamTimes = new(), DiskTimes = new(), LiveTimes = new(), GpuTimes = new();
     internal static FrameCacheStore? StoreIfCreated => store.IsValueCreated ? store.Value : null;
+    internal static Action? BeforeCacheLookupForTests { get; set; }
 
     // Tests only: a store with other budgets or in another folder (the caller disposes it).
     internal static void UseStore(FrameCacheStore replacement)
     {
-        lock (cacheGate) { ClearGpuFrames(); store = new Lazy<FrameCacheStore>(replacement); }
+        lock (cacheGate) { Interlocked.Increment(ref generation); ClearGpuFrames(); store = new Lazy<FrameCacheStore>(replacement); }
     }
     internal static void Clear()
     {
@@ -365,6 +366,7 @@ internal static partial class TimelineFrameCache
         internal readonly KeyCapture Capture = capture;
         internal readonly string LiveKey = liveKey;
         internal readonly string? CacheKey = cacheKey;
+        internal readonly FrameCacheStore.Publication Publication = cacheKey is null ? default : store.Value.BeginPublication();
         internal readonly long Generation = generation;
         internal readonly TimeSpan Time = time;
         internal readonly string UsageKey = usageKey;
@@ -456,6 +458,7 @@ internal static partial class TimelineFrameCache
             pending = new Pending(state, scene, devices, previousOutput, capture, liveKey, cacheKey,
                 currentGeneration, time, usageKey, viewport, wantRects, traits.RectsReusable, usageName == "Playing", environment, fps);
             capture = null;
+            BeforeCacheLookupForTests?.Invoke();
             if (preview) PreviewPerformance.End(PreviewStage.KeyGeneration, keyStarted);
             keyMeasured = true;
             using var lookup = preview ? PreviewPerformance.Measure(PreviewStage.CacheLookup) : default;
@@ -481,7 +484,7 @@ internal static partial class TimelineFrameCache
             {
                 TrimGpuFrames(0); // a budget lowered by GpuMemoryController takes effect on this thread
                 if (gpuRetentionEnabled && viewport is not null && cacheKey is not null) state.GpuAdmission.Observe(cacheKey);
-                if (currentGeneration == Interlocked.Read(ref generation) && state.Generation == currentGeneration
+                if (StillCurrent(pending) && currentGeneration == Interlocked.Read(ref generation) && state.Generation == currentGeneration
                     && state.LastKey == liveKey && (state.LastViewportKey is null || state.LastViewportKey == cacheKey)
                     && state.LastOutput is { NativePointer: not 0 }
                     && ReferenceEquals(state.LastOutput, previousOutput))
@@ -848,6 +851,8 @@ internal static partial class TimelineFrameCache
                 var traits = modelTraits.GetValue(capture!.Model, static model => new ModelTraits(model));
                 string usageKey = exporting ? usageName : PreviewUsage.KeyFor(usageName, traits.ShowOnlyPreview);
                 var key = MakeKey(capture.Key, time, scene.FPS, usageKey, context, viewport);
+                var destination = store.Value;
+                var publication = destination.BeginPublication();
                 var output = (ID2D1CommandList)outputField.GetValue(timelineSource)!;
                 privateSources.TryGetValue(timelineSource, out var pool); // the idle renderer's textures, reused
                 var record = viewport is { } view ? CapturePreview(context, output, view, pool) : CaptureScene(context, output, scene);
@@ -856,7 +861,7 @@ internal static partial class TimelineFrameCache
                 {
                     if (cancellation.IsCancellationRequested || captureGeneration != generation
                         || !capture.Validate(files: false) || !EnabledFor(exporting)) return false;
-                    if (!store.Value.PutOwned(key, record)) return false;
+                    if (!destination.PutOwned(key, record, publication)) return false;
                     status = viewport is null ? "出力フレームを先読みしました。" : "プレビューのフレームを先読みしました。";
                     return true;
                 }
@@ -961,4 +966,3 @@ internal static partial class TimelineFrameCache
         }
     }
 }
-

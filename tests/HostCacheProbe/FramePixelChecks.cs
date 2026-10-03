@@ -94,6 +94,7 @@ internal static class FramePixelChecks
                 Console.WriteLine($"Measured TimelineSource.Update: baseline {baselineClock.Elapsed.TotalMilliseconds / 3:F2} ms/update; live reuse {reuseClock.Elapsed.TotalMilliseconds / 8:F2} ms/update (3/8 samples; no performance threshold)");
                 var cached = TimelineFrameCache.Capture(dc, source.Output, 321, 181, new(-160.5f, -90.5f))!;
                 Check(baseline.SequenceEqual(cached), "Actual background/ShapeItem source pixel parity failed");
+                CheckEditDuringLiveLookup(source, timeline, dc);
                 timeline.VideoInfo.BackgroundColor = System.Windows.Media.Colors.Red;
                 oldHits = TimelineFrameCache.Hits;
                 source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
@@ -143,6 +144,28 @@ internal static class FramePixelChecks
         }
     }
     private static bool SkipLoader() => false;
+
+    private static void CheckEditDuringLiveLookup(ITimelineSource source, Timeline timeline, ID2D1DeviceContext dc)
+    {
+        long hits = TimelineFrameCache.Hits;
+        TimelineFrameCache.BeforeCacheLookupForTests = () =>
+        {
+            TimelineFrameCache.BeforeCacheLookupForTests = null;
+            timeline.VideoInfo.BackgroundColor = System.Windows.Media.Colors.Green;
+        };
+        try
+        {
+            source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+            Check(TimelineFrameCache.Hits == hits, "Edit between capture and live lookup reused stale output");
+            var edited = TimelineFrameCache.Capture(dc, source.Output, 321, 181, new(-160.5f, -90.5f))!;
+            TimelineFrameCache.Enabled = false;
+            source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+            var fresh = TimelineFrameCache.Capture(dc, source.Output, 321, 181, new(-160.5f, -90.5f))!;
+            Check(edited.SequenceEqual(fresh), "Concurrent-edit fallback differs from fresh host rendering");
+            Console.WriteLine("Host live reuse: edit after capture rejects stale output and matches fresh pixels.");
+        }
+        finally { TimelineFrameCache.BeforeCacheLookupForTests = null; TimelineFrameCache.Enabled = true; }
+    }
 
     // The settings switch the preview cache and the export cache separately (NVENC output is a third switch).
     private static void CheckSeparateSwitches(ITimelineSource source)
