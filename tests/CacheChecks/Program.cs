@@ -838,8 +838,10 @@ internal static class Program
             File.WriteAllBytes(Path.Combine(directory, "other3.png"), [3]);
             Check(ImageSequence.Files(Image(0)) is { } listed && listed.SequenceEqual(Enumerable.Range(0, 12).Select(Image)),
                 "The sequence is not the contiguous numbers from the file's");
-            Check(ImageSequence.Files(Image(5))?.Length == 7 && ImageSequence.Files(Path.Combine(directory, "other3.png"))?.Length == 1
-                && ImageSequence.Files(Path.Combine(directory, "missing7.png")) is null, "A sequence must start at the file's own number");
+            // The reader lists the numbers in order from the lowest and keeps those continuing from the file's own: a
+            // file after the first one of its name gives an empty list (it is then not a sequence).
+            Check(ImageSequence.Files(Image(5)) is null && ImageSequence.Files(Path.Combine(directory, "other3.png"))?.Length == 1
+                && ImageSequence.Files(Path.Combine(directory, "missing7.png")) is null, "A sequence was listed unlike the reader lists it");
 
             var timeline = new Timeline();
             timeline.VideoInfo.FPS = 30;

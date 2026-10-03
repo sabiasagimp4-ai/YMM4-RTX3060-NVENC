@@ -172,7 +172,7 @@ internal static class FrameCacheKey
                             // a root frame depends on the one image it shows, a scene item's frames on all of them.
                             if (item is VideoItem video && ImageSequence.Files(video.FilePath) is { } sequence)
                             {
-                                if (!ImageSequence.Unchanged(video.FilePath, sequence)) uncacheable = true;
+                                if (!ImageSequence.Unchanged(video.FilePath!, sequence)) uncacheable = true;
                                 else if (!root) foreach (string file in sequence) AddPath(file, itemPaths);
                                 else if (ImageSequence.FrameFiles(video, sequence, scene.FPS) is { } shown)
                                 {

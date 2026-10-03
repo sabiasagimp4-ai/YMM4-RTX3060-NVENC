@@ -69,8 +69,9 @@ internal static class FontEnvironment
         using var factory = DWrite.DWriteCreateFactory<IDWriteFactory6>();
         using var fonts = factory.GetSystemFontSet(false);
         var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var entries = new List<string>(fonts.FontCount);
-        for (int i = 0; i < fonts.FontCount; i++)
+        int count = fonts.FontCount;
+        var entries = new List<string>(count);
+        for (int i = 0; i < count; i++)
         {
             using var reference = fonts.GetFontFaceReference(i);
             using var file = reference.FontFile;

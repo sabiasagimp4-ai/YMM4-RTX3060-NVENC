@@ -11,8 +11,9 @@ using YukkuriMovieMaker.Settings;
 namespace NVEncVideoWriterPlugin;
 
 // YMM4's image sequence reader (WICSequentialImageVideoSource, 4.56.1.0) plays a video item's file when it is not a
-// video by its extension and its name ends in a number: that file and the files with the same name before the number
-// and the next numbers after it, one image per 1/60 s. Update(t) shows the image at FrameTime.TimeToFrame(t, 60),
+// video by its extension and its name ends in a number: the files with the same name before the number, in the order
+// of their numbers from the lowest, as long as they continue from the file's own number (so only the lowest-numbered
+// file of a name starts a sequence), one image per 1/60 s. Update(t) shows the image at FrameTime.TimeToFrame(t, 60),
 // clamped to the list, and loads it synchronously. A root frame of the item depends only on the image it shows, which
 // the key finds with YMM4's own time mapping (VideoSource.CalculateSourceTime: playback rate and its animation,
 // content offset, loop); FrameRenderReadiness checks after the render that the image shown was that one.
