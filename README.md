@@ -73,6 +73,7 @@ GPU保持では、繰り返し表示するフレームをGPU上に残し、RAM�
 ## 開発・検証資料
 
 - [開発状況・次の課題](docs/AE_CACHE_DEVELOPMENT.md)
+- [目的・invariantsからのアーキテクチャ監査と改善](docs/CACHE_ARCHITECTURE_AUDIT_2026-10-04.md)
 - [AE SDKと現行キャッシュの契約差](docs/AE_CACHE_CONTRACTS.md)
 - [ホスト契約と更新手順](docs/HOST_CONTRACTS.md)
 - [詳細ログの採取と集計](docs/CACHE_DIAGNOSTICS.md)
