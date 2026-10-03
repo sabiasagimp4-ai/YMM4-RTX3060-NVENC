@@ -146,3 +146,39 @@ jobs:
           path: dist/rtx-check
           if-no-files-found: ignore
           retention-days: 14
+
+  # TEMPORARY (reverted after one run): the NVENC branches on Windows PowerShell 5.1 without NVENC, behind a fake
+  # nvidia-smi. Encoding steps fail; checks that the VUI patch compiles with MSVC, the source is restored and rebuilt,
+  # and the report is written with many failures.
+  rtx-check-dry:
+    if: ${{ inputs.rtx_check }}
+    needs: host
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: host
+          path: host
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: ffmpeg
+        run: choco install ffmpeg -y --no-progress
+      - name: rtx-check.ps1 NVENC mode, dry run
+        run: |
+          $stub = Join-Path $env:RUNNER_TEMP 'stub'
+          New-Item -ItemType Directory -Force $stub | Out-Null
+          Set-Content (Join-Path $stub 'nvidia-smi.cmd') '@echo dry-run stub, 0.0, 0 MiB, 0, 0'
+          $env:PATH = "$stub;$env:PATH"
+          $before = (Get-FileHash NvencNative\NvencNative.cpp).Hash
+          & powershell -NoProfile -ExecutionPolicy Bypass -File tools\rtx-check.ps1 -Ymm4DirPath "$env:GITHUB_WORKSPACE\host" -PreviewRuns 1 -BenchmarkRuns 1
+          "rtx-check exit code: $LASTEXITCODE"
+          "source restored: $((Get-FileHash NvencNative\NvencNative.cpp).Hash -eq $before)"
+          $vui = Get-ChildItem dist\rtx-check -Filter vui-experiment.log -Recurse | Select-Object -First 1
+          if ($vui) { Get-Content -LiteralPath $vui.FullName | Select-String 'error|warning C|Build succeeded|exited with|NvencNative.vcxproj ->' | Select-Object -First 40 }
+          Get-ChildItem dist\rtx-check -Filter summary.md -Recurse | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }
+          git status --short
+          exit 0
+
