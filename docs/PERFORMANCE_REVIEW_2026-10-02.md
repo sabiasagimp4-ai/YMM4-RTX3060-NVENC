@@ -2,7 +2,7 @@
 
 2026-10-02。対象は `main` の現行コード（`23e4fdb`）。製品コードは変更していない。
 
-実装した改善（A1・A3〜A8・B3）と前後の測定は [PERFORMANCE_RESULTS_2026-10-02.md](PERFORMANCE_RESULTS_2026-10-02.md)。
+実装した改善（A1・A3〜A8・B3）と前後の測定は [PERFORMANCE_RESULTS_2026-10-02.md](PERFORMANCE_RESULTS_2026-10-02.md)。F13（出力キャッシュの同期capture、B7）は [3回目の調査](ISSUE_REVIEW_3_2026-10-03.md) の R1 で直した。
 
 ## 0. 根拠の種類と読み方
 
