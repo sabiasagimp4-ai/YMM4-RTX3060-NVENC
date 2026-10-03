@@ -166,8 +166,9 @@ def main():
             print(f"  {row['Matrix']}-{row['Range']:<7}  rms {row['Rms']:6.2f}  (Y {row['RmsY']:.2f}, Cb {row['RmsCb']:.2f}, Cr {row['RmsCr']:.2f})")
         sample = result['Sample']
         print(f"  best: {result['Best']} (margin {result['Margin']:.2f}); source RGB {sample['SourceRgb']} -> YCbCr {sample['EncodedYCbCr']}")
-        for name, rgb in sample['ShownAs'].items():
-            print(f'    shown by a {name} player: RGB {rgb}')
+        if pattern == 'managed':  # a solid saturated color; the native pattern's means are near gray
+            for name, rgb in sample['ShownAs'].items():
+                print(f'    shown by a {name} player: RGB {rgb}')
     if args.json:
         Path(args.json).write_text(json.dumps(results, indent=2), encoding='utf-8')
     return 0
