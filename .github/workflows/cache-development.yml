@@ -6,6 +6,11 @@ on:
   pull_request:
     paths: ['NVEncVideoWriterPlugin/**', 'tests/**', '.github/workflows/cache-development.yml']
   workflow_dispatch:
+    inputs:
+      rtx_check:
+        description: 'Also run tools/rtx-check.ps1 -NoNvenc under Windows PowerShell 5.1 and PowerShell 7'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -102,5 +107,42 @@ jobs:
         with:
           name: preview-performance
           path: dist
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # The one-command hardware check, without its NVENC steps: proves the script itself on Windows before it runs on an
+  # RTX PC. Only on request (workflow_dispatch with rtx_check), since it repeats the checks above.
+  rtx-check:
+    if: ${{ inputs.rtx_check }}
+    needs: host
+    runs-on: windows-2022
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: host
+          path: host
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: ffmpeg for the --video clip
+        run: choco install ffmpeg -y --no-progress
+      - name: tools/rtx-check.ps1 -NoNvenc under ${{ matrix.shell }}
+        run: |
+          & ${{ matrix.shell }} -NoProfile -ExecutionPolicy Bypass -File tools\rtx-check.ps1 -Ymm4DirPath "$env:GITHUB_WORKSPACE\host" -NoNvenc -PreviewRuns 1
+          $code = $LASTEXITCODE
+          Get-ChildItem dist\rtx-check -Filter summary.md -Recurse | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }
+          git status --short
+          exit $code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rtx-check-${{ matrix.shell }}
+          path: dist/rtx-check
           if-no-files-found: ignore
           retention-days: 14
