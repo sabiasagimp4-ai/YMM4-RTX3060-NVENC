@@ -210,8 +210,8 @@ if (args.Length == 1)
                 if ((File.ReadAllText(guardedPath) != sentinel) != shouldPublish)
                     throw new Exception("Cancelled/incomplete export publication contract failed.");
                 var partials = Directory.GetFiles(Path.GetTempPath(), $".{Path.GetFileName(guardedPath)}.*.partial");
-                if (shouldPublish ? partials.Length != 0 : partials.Length != 1)
-                    throw new Exception("Cancelled/incomplete export did not retain only its partial output.");
+                if (partials.Length != 0)
+                    throw new Exception("A cancelled, incomplete or published export left its partial output.");
             }
             finally
             {
@@ -240,6 +240,8 @@ if (args.Length == 1)
                 if (failedOwner.IsAlive) throw new Exception("Encoder thread leaked after initialization failed.");
             }
             if (File.ReadAllText(protectedPath) != sentinel) throw new Exception("Failed export replaced an existing file.");
+            if (Directory.GetFiles(Path.GetTempPath(), $".{Path.GetFileName(protectedPath)}.*.partial").Length != 0)
+                throw new Exception("Failed export left its partial output.");
             Console.WriteLine("Invalid GPU input preserved existing output OK");
         }
         finally
