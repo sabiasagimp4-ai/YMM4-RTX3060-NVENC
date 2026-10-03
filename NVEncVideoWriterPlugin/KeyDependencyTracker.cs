@@ -47,15 +47,18 @@ internal sealed class KeyDependencyTracker : IDisposable
     // FrameCacheKey.DrawingSettings of the description (null before the first one).
     private volatile string? cachedSettings;
     private IReadOnlyDictionary<string, FileFingerprint>? fingerprints;
-    private Task<(IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason, IReadOnlyDictionary<string, string> Failed)>? fingerprintTask;
+    private Task<(IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason, IReadOnlyDictionary<string, Unverified> Failed)>? fingerprintTask;
     private CancellationTokenSource? fingerprintCancellation;
     private long fingerprintRevision;
     private long nextFingerprintAttempt;
     // Files a pass could not verify (a link or cloud placeholder, a volume other than a local NTFS one, over the size
-    // limit, unreadable), with the reason. Their frames render normally (RendersNormally: the idle pre-renderer passes
-    // them), and they are not verified again with the whole project, only on their own every UnverifiableRetry.
-    private readonly Dictionary<string, string> unverifiable = new(StringComparer.OrdinalIgnoreCase);
-    private long nextUnverifiableRetry;
+    // limit, missing, unreadable), with the reason. Their frames render normally (RendersNormally: the idle
+    // pre-renderer passes them), and they are not verified again with the whole project, only on their own: every
+    // UnverifiableRetry, or at once when the file looks different (it appeared, its size or write time changed; looked
+    // at once a second without opening it).
+    internal readonly record struct Unverified(string Reason, (bool Exists, long Length, long Written) Seen);
+    private readonly Dictionary<string, Unverified> unverifiable = new(StringComparer.OrdinalIgnoreCase);
+    private long nextUnverifiableRetry, nextUnverifiableLook;
     internal static TimeSpan UnverifiableRetry { get; set; } = TimeSpan.FromSeconds(30); // tests shorten it
     private bool disposed;
 
@@ -216,12 +219,18 @@ internal sealed class KeyDependencyTracker : IDisposable
             // Files that failed before are tried again on their own, not with the whole project.
             if (missing.Length != 0 && missing.All(unverifiable.ContainsKey))
             {
-                if (now >= nextUnverifiableRetry)
+                bool changed = false;
+                if (now >= nextUnverifiableLook)
+                {
+                    nextUnverifiableLook = now + 1000;
+                    changed = missing.Any(file => Look(file) != unverifiable[file].Seen);
+                }
+                if ((changed || now >= nextUnverifiableRetry) && now >= nextFingerprintAttempt)
                 {
                     nextUnverifiableRetry = now + (long)UnverifiableRetry.TotalMilliseconds;
                     StartFingerprinting(before, now, missing, onlyFirst: true);
                 }
-                reason = "外部素材の一部を検証できません: " + unverifiable[missing[0]];
+                reason = "外部素材の一部を検証できません: " + unverifiable[missing[0]].Reason;
                 return false;
             }
             // This frame's own unverified files first, then the rest of the project.
@@ -423,7 +432,7 @@ internal sealed class KeyDependencyTracker : IDisposable
     // Editing/disposal cancels optional validation. Return an unavailable result instead of faulting a
     // fire-and-forget Task: abandoned faulted tasks otherwise reach the host's unobserved-exception UI.
     // Failed: the files that failed on their own, with the reason (not those of a cancelled or failed pass).
-    internal static (IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason, IReadOnlyDictionary<string, string> Failed) FingerprintSafely(string[] paths,
+    internal static (IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason, IReadOnlyDictionary<string, Unverified> Failed) FingerprintSafely(string[] paths,
         IReadOnlyDictionary<string, FileFingerprint>? previous, CancellationToken token,
         Action<IReadOnlyDictionary<string, FileFingerprint>>? publish = null, int leading = 0)
     {
@@ -434,14 +443,25 @@ internal sealed class KeyDependencyTracker : IDisposable
         { return (null, "外部素材の内容確認に失敗しました: " + error.GetType().Name, NoFailures); }
     }
 
-    private static readonly IReadOnlyDictionary<string, string> NoFailures = new Dictionary<string, string>();
+    private static readonly IReadOnlyDictionary<string, Unverified> NoFailures = new Dictionary<string, Unverified>();
 
-    private static (IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason, IReadOnlyDictionary<string, string> Failed) Fingerprint(string[] paths,
+    // What a file looks like without opening it (attributes only), to notice that an unverifiable one changed.
+    private static (bool Exists, long Length, long Written) Look(string path)
+    {
+        try
+        {
+            var info = new System.IO.FileInfo(path);
+            return info.Exists ? (true, info.Length, info.LastWriteTimeUtc.Ticks) : default;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { return default; }
+    }
+
+    private static (IReadOnlyDictionary<string, FileFingerprint>? Files, string Reason, IReadOnlyDictionary<string, Unverified> Failed) Fingerprint(string[] paths,
         IReadOnlyDictionary<string, FileFingerprint>? previous, CancellationToken token,
         Action<IReadOnlyDictionary<string, FileFingerprint>>? publish = null, int leading = 0)
     {
         var result = new Dictionary<string, FileFingerprint>(StringComparer.OrdinalIgnoreCase);
-        var failed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var failed = new Dictionary<string, Unverified>(StringComparer.OrdinalIgnoreCase);
         string reason = string.Empty;
         // The leading files (a waiting frame's) are chunked on their own, so they are published first.
         foreach (var chunk in paths[..leading].Chunk(FingerprintChunk).Concat(paths[leading..].Chunk(FingerprintChunk)))
@@ -452,7 +472,7 @@ internal sealed class KeyDependencyTracker : IDisposable
                 foreach (var path in chunk)
                 {
                     token.ThrowIfCancellationRequested();
-                    if (!TryAdd([path], added)) failed[path] = reason;
+                    if (!TryAdd([path], added)) failed[path] = new(reason, Look(path));
                 }
             if (added.Count != 0) publish?.Invoke(added);
         }
