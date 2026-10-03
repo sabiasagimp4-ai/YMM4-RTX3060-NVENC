@@ -177,7 +177,7 @@ if ($hasNvidiaSmi) {
     $envLines.Add("nvidia-smi: $smi")
 }
 $cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($cpu) { $envLines.Add("CPU: $($cpu.Name), $($cpu.NumberOfCores) cores / $($cpu.NumberOfLogicalProcessors) threads") }
+if ($cpu) { $envLines.Add("CPU: $("$($cpu.Name)".Trim()), $($cpu.NumberOfCores) cores / $($cpu.NumberOfLogicalProcessors) threads") }
 $system = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue
 if ($system) { $envLines.Add("RAM: $([Math]::Round($system.TotalPhysicalMemory / 1GB, 1)) GB") }
 $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
