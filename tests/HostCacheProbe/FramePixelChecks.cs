@@ -117,6 +117,8 @@ internal static class FramePixelChecks
             Console.WriteLine("Actual host automatic source cache: hit/parity/invalidation/GPU cleanup OK");
             CheckExportStore(host, context);
             Check(TimelineFrameCache.GpuBytes == 0, "Export store checks leaked global GPU reservation");
+            if (features.DecoderVerified("YukkuriMovieMaker.Plugin.FileSource.WIC")) CheckImageSequence(host, context, harmony);
+            else Console.WriteLine("Image sequence check skipped: the WIC reader is not trusted on this build");
             if (features is { Preview: true, SelectionRects: true })
             {
                 PreviewRectChecks.Run(host, context);
@@ -237,6 +239,151 @@ internal static class FramePixelChecks
         }
         finally { TimelineFrameCache.Enabled = true; }
         Console.WriteLine($"Export store: {Frames} frames stored without waiting for the GPU (the last on disposal), restored by a second export pixel for pixel OK");
+    }
+
+    // A numbered PNG played by YMM4's own sequence reader: frames are stored once their images are fingerprinted and
+    // restored pixel for pixel; a key that names another image than the one the reader showed is never stored.
+    private static void CheckImageSequence(Assembly host, IGraphicsDevicesAndContext context, Harmony harmony)
+    {
+        Check(FrameRenderReadiness.Coverage.Any(line => line.StartsWith(FrameRenderReadiness.WicSequenceTypeName + ": image sequence", StringComparison.Ordinal)),
+            "The image sequence reader was not verified: " + string.Join(" | ", FrameRenderReadiness.Coverage));
+        const int Frames = 6, Width = 160, Height = 90;
+        string directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ymm-cache-sequence-" + Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(directory);
+        var patch = new Harmony("ymm.tests.sequence-misprediction");
+        try
+        {
+            for (int i = 0; i < 2 * Frames; i++)
+                System.IO.File.WriteAllBytes(System.IO.Path.Combine(directory, $"shot{i}.png"), Png(48, 32, (x, y) =>
+                    ((byte)(i * 21), (byte)(255 - i * 19), (byte)((x * 5 + y * 3 + i * 40) % 256), (byte)(x < 8 + i * 3 ? 255 : 160))));
+            var timeline = new Timeline();
+            timeline.VideoInfo.Width = Width; timeline.VideoInfo.Height = Height; timeline.VideoInfo.FPS = 30;
+            var scenes = new Scenes(false); scenes.AddScene(timeline);
+            timeline.Items = timeline.Items.Add(new VideoItem { FilePath = System.IO.Path.Combine(directory, "shot0.png"), Frame = 0, Length = Frames });
+            var scene = new Scene(timeline, scenes, []);
+            var dc = context.DeviceContext;
+            var half = new Vector2(Width / 2f, Height / 2f);
+            // One export of every frame by a new source (its deferred stores finish when it is disposed).
+            byte[][] Export(bool cache)
+            {
+                TimelineFrameCache.Enabled = cache;
+                var pixels = new byte[Frames][];
+                var source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [context, scene, null], null)!;
+                using (source)
+                    for (int frame = 0; frame < Frames; frame++)
+                    {
+                        source.Update(timeline.VideoInfo.GetTimeFrom(frame), TimelineSourceUsage.Exporting);
+                        pixels[frame] = TimelineFrameCache.Capture(dc, source.Output, Width, Height, -half)!;
+                    }
+                return pixels;
+            }
+            // Exports until one restores every frame (the images are fingerprinted in the background first).
+            (byte[][] Pixels, bool Restored) Restore(int attempts)
+            {
+                for (int attempt = 0; attempt < attempts; attempt++)
+                {
+                    long hits = TimelineFrameCache.RamHits;
+                    var pixels = Export(cache: true);
+                    if (TimelineFrameCache.RamHits - hits == Frames) return (pixels, true);
+                    Thread.Sleep(100);
+                }
+                return ([], false);
+            }
+            Console.WriteLine("Video readers in the order YMM4 tries them: " + string.Join(", ", PluginLoader.VideoFileSourcePlugins.Select(reader => reader.GetType().Name)));
+            var baseline = Export(cache: false);
+            Check(baseline.Distinct(new BytesComparer()).Count() == Frames, "The sequence's frames are not all different (the reader did not play it)");
+            TimelineFrameCache.Clear();
+            var (restored, ok) = Restore(100);
+            Check(ok, "The image sequence frames were never restored from the store: " + TimelineFrameCache.Status);
+            for (int frame = 0; frame < Frames; frame++)
+                Check(restored[frame].SequenceEqual(baseline[frame]), $"Sequence frame {frame} restored from the store differs from the host's render");
+
+            // A key that names another image than the one the reader shows (the next one): every frame is rendered,
+            // matches the host, and is never stored; the status says why. With the right keys they are stored again.
+            patch.Patch(typeof(ImageSequence).GetMethod(nameof(ImageSequence.FrameFiles), BindingFlags.Static | BindingFlags.NonPublic)!,
+                postfix: new HarmonyMethod(typeof(FramePixelChecks), nameof(Mispredict)));
+            TimelineFrameCache.Clear();
+            long restoredMispredicted = 0;
+            bool rejected = false;
+            for (int attempt = 0; attempt < 40 && !rejected; attempt++)
+            {
+                long hits = TimelineFrameCache.RamHits;
+                var pixels = Export(cache: true);
+                restoredMispredicted += TimelineFrameCache.RamHits - hits;
+                rejected = TimelineFrameCache.Status.Contains("デコード完了", StringComparison.Ordinal);
+                for (int frame = 0; frame < Frames; frame++)
+                    Check(pixels[frame].SequenceEqual(baseline[frame]), $"Sequence frame {frame} under a mispredicted key differs from the host's render");
+                if (!rejected) Thread.Sleep(100);
+            }
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                long hits = TimelineFrameCache.RamHits;
+                Export(cache: true);
+                restoredMispredicted += TimelineFrameCache.RamHits - hits;
+            }
+            Check(rejected, "Frames under keys naming other images were never rejected by the render check: " + TimelineFrameCache.Status);
+            Check(restoredMispredicted == 0, $"{restoredMispredicted} frames keyed by another image than the one shown were stored and restored");
+            patch.UnpatchAll(patch.Id);
+            TimelineFrameCache.Clear();
+            Check(Restore(100).Restored, "Sequence frames were not stored again with the right keys: " + TimelineFrameCache.Status);
+        }
+        finally
+        {
+            patch.UnpatchAll(patch.Id);
+            TimelineFrameCache.Enabled = true;
+            try { System.IO.Directory.Delete(directory, true); } catch (System.IO.IOException) { } catch (UnauthorizedAccessException) { }
+        }
+        Console.WriteLine($"Image sequence (WIC reader, {Frames} frames): stored after fingerprinting, restored pixel for pixel; a key naming another image is never stored");
+    }
+
+    private static void Mispredict(ref string[]? __result)
+    {
+        if (__result is { Length: > 1 } shown) __result = [.. shown.Skip(1), shown[0]];
+    }
+
+    // A minimal RGBA PNG (one IDAT, no filtering).
+    private static byte[] Png(int width, int height, Func<int, int, (byte R, byte G, byte B, byte A)> pixel)
+    {
+        var raw = new System.IO.MemoryStream();
+        for (int y = 0; y < height; y++)
+        {
+            raw.WriteByte(0);
+            for (int x = 0; x < width; x++)
+            {
+                var (r, g, b, a) = pixel(x, y);
+                raw.Write([r, g, b, a]);
+            }
+        }
+        var compressed = new System.IO.MemoryStream();
+        using (var zlib = new System.IO.Compression.ZLibStream(compressed, System.IO.Compression.CompressionLevel.Optimal, leaveOpen: true))
+            zlib.Write(raw.ToArray());
+        var png = new System.IO.MemoryStream();
+        png.Write([137, 80, 78, 71, 13, 10, 26, 10]);
+        void Chunk(string type, byte[] data)
+        {
+            byte[] typed = [.. System.Text.Encoding.ASCII.GetBytes(type), .. data];
+            png.Write(BigEndian((uint)data.Length));
+            png.Write(typed);
+            png.Write(BigEndian(Crc32(typed)));
+        }
+        Chunk("IHDR", [.. BigEndian((uint)width), .. BigEndian((uint)height), 8, 6, 0, 0, 0]);
+        Chunk("IDAT", compressed.ToArray());
+        Chunk("IEND", []);
+        return png.ToArray();
+    }
+
+    private static byte[] BigEndian(uint value) => [(byte)(value >> 24), (byte)(value >> 16), (byte)(value >> 8), (byte)value];
+
+    private static uint Crc32(byte[] data)
+    {
+        uint crc = 0xFFFFFFFF;
+        foreach (byte value in data)
+        {
+            crc ^= value;
+            for (int bit = 0; bit < 8; bit++) crc = (crc & 1) != 0 ? 0xEDB88320 ^ (crc >> 1) : crc >> 1;
+        }
+        return ~crc;
     }
 
     private sealed class BytesComparer : IEqualityComparer<byte[]>

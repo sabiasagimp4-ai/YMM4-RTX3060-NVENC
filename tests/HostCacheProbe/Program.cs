@@ -158,7 +158,7 @@ internal static class Program
 }
 
 // The probes bypass the plugin loader; they register the host, the plugin API and the built-in
-// MediaFoundation reader so that video items decode through the real host readers.
+// MediaFoundation and WIC readers so that video and image items decode through the real host readers.
 internal static class ProbeLoader
 {
     // Stands in for PluginAssemblyLoader's static constructor (skipped by the caller's Harmony prefix), which
@@ -172,13 +172,17 @@ internal static class ProbeLoader
                 AccessTools.StaticFieldRefAccess<object>(field)() ??= Activator.CreateInstance(typeof(List<>).MakeGenericType(field.FieldType.GetGenericArguments()))!;
     }
 
+    // The MediaFoundation reader (videos) and the WIC readers (images and image sequences).
     internal static IEnumerable<Assembly> Assemblies(Assembly host)
     {
-        string reader = Path.Combine(Path.GetDirectoryName(host.Location)!, "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.dll");
-        var loaded = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == Path.GetFileNameWithoutExtension(reader));
         var assemblies = new List<Assembly> { host, typeof(YukkuriMovieMaker.Plugin.CacheProvider).Assembly };
-        if (loaded is not null) assemblies.Add(loaded);
-        else if (File.Exists(reader)) assemblies.Add(AssemblyLoadContext.Default.LoadFromAssemblyPath(reader));
+        foreach (string name in new[] { "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation", "YukkuriMovieMaker.Plugin.FileSource.WIC" })
+        {
+            string reader = Path.Combine(Path.GetDirectoryName(host.Location)!, name + ".dll");
+            var loaded = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == name);
+            if (loaded is not null) assemblies.Add(loaded);
+            else if (File.Exists(reader)) assemblies.Add(AssemblyLoadContext.Default.LoadFromAssemblyPath(reader));
+        }
         return assemblies;
     }
 }

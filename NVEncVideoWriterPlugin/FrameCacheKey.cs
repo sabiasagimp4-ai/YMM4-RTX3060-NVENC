@@ -21,7 +21,8 @@ namespace NVEncVideoWriterPlugin;
 internal static class FrameCacheKey
 {
     // Files are fingerprinted in the background and each frame only verifies its own (see FrameDependencyIndex).
-    private const int MaximumFiles = 4096;
+    // Image sequences count every file they show.
+    private const int MaximumFiles = 65536;
     private const int MaximumModelCharacters = 16 * 1024 * 1024;
 
     public static bool TryCreate(Scene scene, out string key) => TryCreate(scene, out key, out _);
@@ -93,8 +94,8 @@ internal static class FrameCacheKey
             var nestedPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             var nestedResources = new SortedSet<string>(StringComparer.Ordinal);
             var rootItems = scene.Timeline.Items.ToArray();
-            var rootDependencies = new List<(SortedSet<string> Paths, SortedSet<string> Resources, bool Uncacheable, bool Session)>(rootItems.Length);
-            bool nestedUncacheable = false, nestedSession = false, audioForeign = false;
+            var rootDependencies = new List<ItemDependencies>(rootItems.Length);
+            bool nestedUncacheable = false, nestedSession = false, nestedCulture = false, audioForeign = false;
             if (sourceReaders.Length != 3) return Bypass("読み込みプラグインの状態を確認できません。", out reason);
             // Files are read by the file source readers (fonts by DirectWrite). With a reader whose code was not
             // read, the items that read files are rendered normally.
@@ -159,26 +160,48 @@ internal static class FrameCacheKey
                         || item is ShapeItem shape && !code.Knows(shape.ShapeType2)
                         || item is TransitionItem transition && transition.TransitionType is { } transitionType && !code.Knows(transitionType)
                         || GetCharacter(item) is { } character && foreignCharacters.Contains(character);
-                    bool session = false;
+                    bool session = false, culture = false;
+                    string[]? frameFiles = null;
                     try
                     {
                         if (!tachie)
                         {
                             foreach (var file in item.GetFiles()) AddPath(file, itemPaths);
                             if (item is VoiceItem voice && !string.IsNullOrWhiteSpace(voice.FilePath)) AddPath(voice.FilePath, itemPaths);
+                            // A numbered image played as a video (ImageSequence): every file it shows is fingerprinted;
+                            // a root frame depends on the one image it shows, a scene item's frames on all of them.
+                            if (item is VideoItem video && ImageSequence.Files(video.FilePath) is { } sequence)
+                            {
+                                if (!ImageSequence.Unchanged(video.FilePath, sequence)) uncacheable = true;
+                                else if (!root) foreach (string file in sequence) AddPath(file, itemPaths);
+                                else if (ImageSequence.FrameFiles(video, sequence, scene.FPS) is { } shown)
+                                {
+                                    frameFiles = shown;
+                                    paths.UnionWith(shown);
+                                }
+                                else uncacheable = true;
+                            }
                         }
                         foreach (var resource in item.GetResources())
                         {
                             uncacheable |= Note(ClassifyResource(resource.Key, code), ref audioForeign);
                             AddResource(resource, tachie ? Unused() : itemPaths, itemResources, itemFonts);
                         }
-                        // Randomness YMM4 seeds with object identities (see IdentitySeeds).
-                        var seeds = IdentitySeeds(item, out bool randomOrder);
+                        // Randomness YMM4 seeds with object identities (see IdentitySeeds), and text drawn by code
+                        // outside YMM4's own assemblies (DrawnText).
+                        var drawn = new DrawnText();
+                        var seeds = IdentitySeeds(item, out bool randomOrder, drawn);
                         uncacheable |= randomOrder;
                         if (seeds.Count != 0)
                         {
                             itemResources.Add("identity://" + string.Join(",", seeds));
                             session = true;
+                        }
+                        foreach (string font in drawn.Fonts) AddFont(font, tachie ? Unused() : itemPaths, itemResources, itemFonts);
+                        if (drawn.Culture)
+                        {
+                            itemResources.Add(CultureResource());
+                            culture = true;
                         }
                         if (item is TextItem or VoiceItem)
                         {
@@ -192,19 +215,20 @@ internal static class FrameCacheKey
                     }
                     catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
                     {
-                        // An uninstalled font, a remote file, or a plugin item failing to list its files.
+                        // A font file that is not local, a remote file, or a plugin item failing to list its files.
                         uncacheable = true;
                     }
                     if (customReaders && itemPaths.Any(path => !itemFonts.Contains(path))) uncacheable = true;
                     paths.UnionWith(itemPaths);
                     resources.UnionWith(itemResources);
-                    if (root) rootDependencies.Add((itemPaths, itemResources, uncacheable, session));
+                    if (root) rootDependencies.Add(new(itemPaths, itemResources) { Uncacheable = uncacheable, Session = session, Culture = culture, FrameFiles = frameFiles });
                     else
                     {
                         nestedPaths.UnionWith(itemPaths);
                         nestedResources.UnionWith(itemResources);
                         nestedUncacheable |= uncacheable;
                         nestedSession |= session;
+                        nestedCulture |= culture;
                     }
                 }
             }
@@ -253,18 +277,17 @@ internal static class FrameCacheKey
             {
                 bool foreignCharacter = GetCharacter(rootItems[i]) is { } character
                     && split.ForeignCharacters.Any(index => ReferenceEquals(characters[index], character));
-                if (split.ForeignItems[i] || foreignCharacter)
-                    rootDependencies[i] = (rootDependencies[i].Paths, rootDependencies[i].Resources, true, rootDependencies[i].Session);
+                if (split.ForeignItems[i] || foreignCharacter) rootDependencies[i].Uncacheable = true;
                 // A random move the identity walk did not reach (GetAnimatables does not list it): not keyed.
                 if (!rootDependencies[i].Session && split.RootItems[i].Contains(RandomMoveJson, StringComparison.Ordinal))
-                    rootDependencies[i] = (rootDependencies[i].Paths, rootDependencies[i].Resources, true, false);
+                    rootDependencies[i].Uncacheable = true;
             }
             nestedUncacheable |= !nestedSession && split.Nested.Contains(RandomMoveJson, StringComparison.Ordinal);
             // A character's random move the crawl did not reach: its voice items are not keyed.
             if (split.Global.Contains(RandomMoveJson, StringComparison.Ordinal) && !characters.Any(c => Seeds(c).Count != 0))
             {
                 for (int i = 0; i < rootItems.Length; i++)
-                    if (rootItems[i] is VoiceItem) rootDependencies[i] = (rootDependencies[i].Paths, rootDependencies[i].Resources, true, rootDependencies[i].Session);
+                    if (rootItems[i] is VoiceItem) rootDependencies[i].Uncacheable = true;
                 nestedUncacheable |= timelines.Where(t => !ReferenceEquals(t, scene.Timeline)).SelectMany(t => t.Items).Any(item => item is VoiceItem);
             }
             nestedUncacheable |= split.NestedForeign || timelines.Where(t => !ReferenceEquals(t, scene.Timeline)).SelectMany(t => t.Items)
@@ -276,7 +299,7 @@ internal static class FrameCacheKey
             // Wide frames (scene items, audio spectrum) read other timelines and the audio: a plugin's audio effect
             // anywhere reaches them.
             frames = DescribeFrames(split, rootItems, rootDependencies, characterPaths, nestedPaths, nestedResources,
-                nestedUncacheable || audioForeign || split.AudioForeign, nestedSession);
+                nestedUncacheable || audioForeign || split.AudioForeign, nestedSession, nestedCulture);
             dependencies = paths.ToArray();
             return true;
         }
@@ -344,7 +367,7 @@ internal static class FrameCacheKey
     // the item's key holds those objects' identity hashes (its frames are keyed for these objects only). Text revealed
     // or hidden in random order is seeded by YMM4's text source, created again when the item comes back into the frame
     // (TextSource, JimakuSource): those items render normally (randomOrder).
-    internal static List<int> IdentitySeeds(IItem item, out bool randomOrder)
+    internal static List<int> IdentitySeeds(IItem item, out bool randomOrder, DrawnText? drawn = null)
     {
         randomOrder = item switch
         {
@@ -355,10 +378,12 @@ internal static class FrameCacheKey
                 && (owner.DisplayDirection == TypewriterAnimationDirection.Random || owner.HideDirection == TypewriterAnimationDirection.Random),
             _ => false,
         };
-        return GetCharacter(item) is { } character ? Seeds(item, character) : Seeds(item);
+        return GetCharacter(item) is { } character ? Walk([item, character], drawn) : Walk([item], drawn);
     }
 
-    private static List<int> Seeds(params object[] roots)
+    private static List<int> Seeds(params object[] roots) => Walk(roots, null);
+
+    private static List<int> Walk(object[] roots, DrawnText? drawn)
     {
         var seeds = new SortedSet<int>();
         var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
@@ -373,6 +398,13 @@ internal static class FrameCacheKey
                 continue;
             }
             var type = value.GetType();
+            if (drawn is not null && !IsBuiltIn(type))
+            {
+                if (FontProperty(type) is { } font) drawn.Fonts.Add(font.GetValue(value) as string ?? string.Empty);
+                drawn.Culture |= type.FullName == NumberTextParameter;
+            }
+            // A shape's parameter draws it (also when its item does not list it as animatable).
+            if (value is ShapeItem { ShapeParameter: { } parameter }) pending.Push(parameter);
             if (IsIdentitySeeded(type))
             {
                 seeds.Add(RuntimeHelpers.GetHashCode(value));
@@ -421,6 +453,54 @@ internal static class FrameCacheKey
                 if (child is not null) pending.Push(child);
         }
         return result.ToArray();
+    }
+
+    // Text that code outside YMM4's own assemblies draws, found on the item's walk: the Community ShuffleText and
+    // ShuffleTextInOut effects and NumberText shape (4.56.1.0) name a font in a string property "Font" and look it up in
+    // the font settings like YMM4 (else Arial); trusted plugins that do the same are keyed the same way. NumberText
+    // formats its number with the current culture (double.ToString with a pattern: separators, signs, NaN).
+    internal sealed class DrawnText
+    {
+        internal readonly SortedSet<string> Fonts = new(StringComparer.Ordinal);
+        internal bool Culture;
+    }
+
+    private const string NumberTextParameter = "YukkuriMovieMaker.Plugin.Community.Shape.NumberText.NumberTextParameter";
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, PropertyInfo?> fontProperties = new();
+
+    private static PropertyInfo? FontProperty(Type type) => fontProperties.GetOrAdd(type, static type =>
+    {
+        try
+        {
+            return type.GetProperty("Font", BindingFlags.Instance | BindingFlags.Public) is { } property && property.PropertyType == typeof(string)
+                && property.GetIndexParameters().Length == 0 && property.GetMethod is not null ? property : null;
+        }
+        catch (AmbiguousMatchException) { return null; }
+    });
+
+    // The number format of the current thread's culture, as NumberText uses it. A frame drawing NumberText is only
+    // keyed on a thread with the same format (FrameDependencyIndex.Culture, checked by KeyDependencyTracker).
+    internal static string CultureIdentity()
+    {
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+        var number = culture.NumberFormat;
+        return string.Join("\u001f", culture.Name, number.NumberDecimalSeparator, number.NumberGroupSeparator, string.Join(",", number.NumberGroupSizes),
+            number.NegativeSign, number.PositiveSign, number.NaNSymbol, number.PositiveInfinitySymbol, number.NegativeInfinitySymbol,
+            number.DigitSubstitution, string.Join(",", number.NativeDigits));
+    }
+
+    private static string CultureResource() => "culture://" + FrameDependencyIndex.Hash(CultureIdentity());
+
+    // What one root item contributes to the frames that draw it (FrameDependencyIndex.Entry).
+    private sealed class ItemDependencies(SortedSet<string> paths, SortedSet<string> resources)
+    {
+        internal SortedSet<string> Paths { get; } = paths;
+        internal SortedSet<string> Resources { get; } = resources;
+        internal bool Uncacheable { get; set; }
+        internal bool Session { get; set; }
+        internal bool Culture { get; set; }
+        internal string[]? FrameFiles { get; init; }
     }
 
     // How a random move serializes (StringEnumConverter): the safety net for one the walk did not reach.
@@ -476,9 +556,8 @@ internal static class FrameCacheKey
     // Splits the serialized model into the part every frame depends on (everything but timeline items), the
     // other timelines (only read by frames with a scene item), and one hash per root timeline item.
     private static FrameDependencyIndex DescribeFrames(FrameModelSplit.Parts split, IItem[] rootItems,
-        List<(SortedSet<string> Paths, SortedSet<string> Resources, bool Uncacheable, bool Session)> rootDependencies,
-        SortedSet<string> characterPaths, SortedSet<string> nestedPaths, SortedSet<string> nestedResources, bool nestedUncacheable,
-        bool nestedSession)
+        List<ItemDependencies> rootDependencies, SortedSet<string> characterPaths, SortedSet<string> nestedPaths,
+        SortedSet<string> nestedResources, bool nestedUncacheable, bool nestedSession, bool nestedCulture)
     {
         var (global, nested, texts) = (split.Global, split.Nested, split.RootItems);
         if (texts.Length != rootItems.Length) throw new InvalidDataException("Serialized root items do not match the timeline");
@@ -491,10 +570,12 @@ internal static class FrameCacheKey
             // Scene items render other timelines; audio spectrum shapes read the timeline's or a scene's audio.
             bool wide = item is SceneItem || text.Contains("AudioSpectrum", StringComparison.Ordinal);
             entries[i] = new(item.Frame, item.Length, item is TransitionItem, wide, FrameDependencyIndex.Hash(identity),
-                rootDependencies[i].Paths.ToArray(), rootDependencies[i].Uncacheable, rootDependencies[i].Session);
+                rootDependencies[i].Paths.ToArray(), rootDependencies[i].Uncacheable, rootDependencies[i].Session, rootDependencies[i].Culture,
+                rootDependencies[i].FrameFiles);
         }
         return new FrameDependencyIndex(FrameDependencyIndex.Hash(global), characterPaths,
-            FrameDependencyIndex.Hash(nested + "\n" + string.Join("\n", nestedResources)), nestedPaths, entries, nestedUncacheable, nestedSession);
+            FrameDependencyIndex.Hash(nested + "\n" + string.Join("\n", nestedResources)), nestedPaths, entries, nestedUncacheable, nestedSession,
+            nestedCulture, CultureIdentity());
     }
 
     internal static Character? GetCharacter(IItem item) => item switch
@@ -599,6 +680,8 @@ internal static class FrameCacheKey
     {
         var (face, files) = ResolveFont(name);
         resources.Add(face);
+        // Font fallback (a family DirectWrite does not have, characters the font lacks) draws from the installed fonts.
+        resources.Add(FontEnvironment.Stamp ?? throw new NotSupportedException("Installed fonts unknown"));
         foreach (string file in files)
         {
             AddPath(file, paths);
@@ -606,11 +689,12 @@ internal static class FrameCacheKey
         }
     }
 
-    // YMM4 draws a font name through its font settings (TextFormatDescription, TextSource, JimakuSource, 4.56.1.0):
-    // the first of SystemFonts then CustomFonts with that name, else Arial, gives a family, weight, style and stretch
-    // that DirectWrite finds in the system font collection (bold and italic pick other faces of the family). The
-    // mapping goes into the key and the family's files are dependencies. A family DirectWrite does not have would be
-    // drawn by font fallback, which is not followed: the item is rendered normally.
+    // YMM4 draws a font name through its font settings (TextFormatDescription, TextSource, JimakuSource, and the
+    // Community ShuffleText, ShuffleTextInOut and NumberText, 4.56.1.0): the first of SystemFonts then CustomFonts with
+    // that name, else Arial, gives a family, weight, style and stretch that DirectWrite finds in the system font
+    // collection (bold and italic pick other faces of the family). The mapping goes into the key and the family's
+    // files are dependencies. A family DirectWrite does not have is drawn by font fallback, from the installed fonts
+    // (FontEnvironment, in the key of every text): it has no files of its own.
     internal static (string Face, string[] Files) ResolveFont(string name)
     {
         var settings = SettingsBase<FontSettings>.Default;
@@ -675,7 +759,7 @@ internal static class FrameCacheKey
             : null;
 
     // The files only change when fonts are installed or removed, so a family's are kept for a short time; a font
-    // file whose content changes is still caught by its fingerprint.
+    // file whose content changes is still caught by its fingerprint, and an install or removal by FontEnvironment.
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string[]? Files, long Until)> familyFiles = new(StringComparer.Ordinal);
     private const long FamilyFilesMilliseconds = 30_000;
 
@@ -688,15 +772,16 @@ internal static class FrameCacheKey
             if (familyFiles.Count > 4096) familyFiles.Clear();
             familyFiles[family] = known;
         }
-        return known.Files ?? throw new NotSupportedException("Unresolved font");
+        return known.Files ?? throw new NotSupportedException("Font file not local");
     }
 
-    // Null when the family is not in the system collection or a file of it is not local.
+    // Empty when the family is not in the system collection (font fallback draws it); null when a file of it is not
+    // local (its content cannot be fingerprinted).
     private static string[]? FindFamilyFiles(string family)
     {
         using var factory = DWrite.DWriteCreateFactory<IDWriteFactory>();
         using var collection = factory.GetSystemFontCollection(false);
-        if (!collection.FindFamilyName(family, out int index)) return null;
+        if (!collection.FindFamilyName(family, out int index)) return [];
         using var fonts = collection.GetFontFamily(index);
         var files = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < fonts.FontCount; i++)
@@ -714,7 +799,7 @@ internal static class FrameCacheKey
         return files.Count == 0 ? null : [.. files];
     }
 
-    private static string? LocalPath(IDWriteFontFile file)
+    internal static string? LocalPath(IDWriteFontFile file)
     {
         using var loader = file.Loader as ComObject;
         using var local = loader?.QueryInterfaceOrNull<IDWriteLocalFontFileLoader>();

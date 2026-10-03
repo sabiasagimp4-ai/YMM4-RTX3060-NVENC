@@ -77,6 +77,39 @@ internal static class FrameDependencyChecks
         var nestedShaking = new FrameDependencyIndex("G", [], "N", [], [a, d], nestedSession: true);
         Check(!nestedShaking.For(10).Session && nestedShaking.For(105).Session, "A session nested timeline must only mark scene frames");
 
+        // An image sequence item depends at each frame on the one image it shows (two frames per image here): its
+        // segments end where the image changes, a transition at its end also shows its image of the frame before,
+        // a wide frame only its frame's image, and the whole project every image.
+        string[] images = Enumerable.Range(0, 5).Select(i => $@"C:\seq\img{i}.png").ToArray();
+        var sequence = new Entry(400, 10, false, false, "S", [@"C:\seq\img0.png"], FrameFiles: Enumerable.Range(0, 10).Select(i => images[i / 2]).ToArray());
+        var afterSequence = t with { Frame = 410, Length = 4 };
+        var sceneOverSequence = d with { Frame = 404, Length = 2 };
+        var withSequence = Index(a, sequence, afterSequence, sceneOverSequence);
+        Check(withSequence.For(400).Files.SequenceEqual([@"C:\chara\voice.txt", images[0]])
+            && withSequence.For(403).Files.SequenceEqual([@"C:\chara\voice.txt", images[0], images[1]]),
+            "A sequence frame must depend on the image it shows (and the item's own files) only");
+        withSequence.For(402, out int imageStart, out int imageEnd);
+        Check(imageStart == 402 && imageEnd == 404, $"A sequence image's frames must be one segment, not [{imageStart}, {imageEnd})");
+        Check(withSequence.For(411).Files.Contains(images[4]) && !withSequence.For(411).Files.Contains(images[3]),
+            "A transition must depend on the image its item showed at the frame before");
+        Check(withSequence.For(404).Wide && withSequence.For(404).Files.Contains(images[2]) && !withSequence.For(404).Files.Contains(images[3])
+            && withSequence.For(405).Files.Contains(images[2]) && withSequence.For(404) != withSequence.Whole,
+            "A wide frame must depend on its own image only");
+        Check(images.All(withSequence.Whole.Files.Contains), "The whole project must depend on every image shown");
+        Check(withSequence.For(10).Files.SequenceEqual(at10.Files), "A sequence must not change other frames");
+        bool rejected = false;
+        try { _ = Index(sequence with { FrameFiles = images }); } catch (ArgumentException) { rejected = true; }
+        Check(rejected, "Frame files of another length than the item must be rejected");
+
+        // An item formatting numbers with the thread's culture marks its frames (and a transition after it).
+        var number = new Entry(500, 10, false, false, "U", [], Culture: true);
+        var withNumber = Index(a, number, t with { Frame = 510, Length = 5 });
+        Check(!withNumber.For(10).Culture && withNumber.For(505).Culture && withNumber.For(512).Culture && withNumber.For(505).Cacheable,
+            "Culture items must only mark their frames (and transitions after them)");
+        var nestedNumber = new FrameDependencyIndex("G", [], "N", [], [a, d], nestedCulture: true, culture: "ja-JP");
+        Check(!nestedNumber.For(10).Culture && nestedNumber.For(105).Culture && nestedNumber.Culture == "ja-JP",
+            "A culture nested timeline must only mark scene frames");
+
         // The segment range: every frame in [start, end) has the same dependencies, and the frames just outside do not.
         foreach (int frame in new[] { -5, 0, 10, 19, 20, 29, 30, 55, 60, 65, 69, 70, 105, 110, 5000 })
         {
@@ -95,7 +128,7 @@ internal static class FrameDependencyChecks
         var clock = System.Diagnostics.Stopwatch.StartNew();
         for (int f = 0; f < 50_000; f++) frames += big.For(f).Files.Length;
         clock.Stop();
-        Console.WriteLine($"Frame dependencies: overlap, end frame, transitions (recursive), wide scene frames, partial invalidation; 50k lookups over 5k items {clock.Elapsed.TotalMilliseconds:F0} ms.");
+        Console.WriteLine($"Frame dependencies: overlap, end frame, transitions (recursive), wide scene frames, partial invalidation, image sequences, culture; 50k lookups over 5k items {clock.Elapsed.TotalMilliseconds:F0} ms.");
     }
 
     private static void Check(bool condition, string message)

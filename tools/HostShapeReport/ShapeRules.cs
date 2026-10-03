@@ -22,6 +22,7 @@ internal static class ShapeRules
             "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.MFVideoFileSource" => StreamClock(type, false) ? "MF-legacy" : "unverified",
             "YukkuriMovieMaker.Plugin.FileSource.FFmpeg.FFmpegVideoFileSource" => StreamClock(type, true) ? "FFmpeg" : "unverified",
             "YukkuriMovieMaker.Plugin.FileSource.WIC.WICGifVideoSource" or "YukkuriMovieMaker.Plugin.FileSource.WIC.WICWebpVideoSource" => "WIC",
+            "YukkuriMovieMaker.Plugin.FileSource.WIC.WICSequentialImageVideoSource" => Sequence(type) ? "image" : "unverified",
             "YukkuriMovieMaker.Plugin.CachedVideoFileSource" => WrappedSource(type, videoSource) is not null ? "wrapper" : "unverified",
             _ => "unverified",
         };
@@ -44,6 +45,13 @@ internal static class ShapeRules
         return source?.GetMethod is not null && source.GetIndexParameters().Length == 0 && videoSource.IsAssignableFrom(source.PropertyType)
             ? source : null;
     }
+
+    // frames (string[]), currentFrame (int), source (a reference) and GetFrameIndex(TimeSpan) -> int.
+    private static bool Sequence(Type type) =>
+        FindField(type, "frames")?.FieldType.FullName == "System.String[]" && FindField(type, "currentFrame")?.FieldType.FullName == "System.Int32"
+        && FindField(type, "source") is { FieldType.IsValueType: false }
+        && type.GetMethods(BindingFlags.Public | BindingFlags.Instance).Any(method => method.Name == "GetFrameIndex"
+            && method.ReturnType.FullName == "System.Int32" && method.GetParameters() is [{ ParameterType.FullName: "System.TimeSpan" }]);
 
     private static bool StreamClock(Type type, bool needsDuration) =>
         HasTime(type, "currentTime") && HasTime(type, "currentDuration") && HasTime(type, "streamStartTime")

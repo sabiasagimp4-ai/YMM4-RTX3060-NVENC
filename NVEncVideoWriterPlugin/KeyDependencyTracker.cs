@@ -43,6 +43,8 @@ internal sealed class KeyDependencyTracker : IDisposable
     private Type[][] cachedSourceReaders = [[], [], []];
     // KnownCode.Generation the description was made with: trusting another plugin describes the project again.
     private long cachedCode = -1;
+    // FontEnvironment.Generation the description was made with: installing or removing a font describes it again.
+    private long cachedFonts = -1;
     private Guid[] cachedParents = [];
     // FrameCacheKey.DrawingSettings of the description (null before the first one).
     private volatile string? cachedSettings;
@@ -118,7 +120,7 @@ internal sealed class KeyDependencyTracker : IDisposable
     }
 
     private sealed record Description(bool Eligible, string Model, string[] Paths, FrameDependencyIndex? Frames, string Reason,
-        Type[][] SourceReaders, long Ticks, long Code, string Settings);
+        Type[][] SourceReaders, long Ticks, long Code, string Settings, long Fonts);
 
     private bool Capture(int? frame, out KeyCapture? capture, out string reason, bool settle, bool background = false)
     {
@@ -128,8 +130,10 @@ internal sealed class KeyDependencyTracker : IDisposable
             reason = "描画キャッシュの状態監視は終了しています。";
             if (disposed) return false;
             // Only when still current: repeating it would keep refreshing the settle window forever.
+            FontEnvironment.RefreshIfDue();
             if (cachedRevision >= 0 && cachedRevision == Revision && (!scene.ParentScenes.AsSpan().SequenceEqual(cachedParents)
-                || !FrameCacheKey.SourceReadersMatch(cachedSourceReaders) || cachedCode != KnownCode.Generation)) Invalidate();
+                || !FrameCacheKey.SourceReadersMatch(cachedSourceReaders) || cachedCode != KnownCode.Generation
+                || cachedFonts != FontEnvironment.Generation)) Invalidate();
             long before = Revision;
             if (cachedRevision != before)
             {
@@ -164,7 +168,13 @@ internal sealed class KeyDependencyTracker : IDisposable
             var dependencies = frame is int at ? cachedFrames!.For(at) : null;
             if (!(dependencies ?? cachedFrames!.Whole).Cacheable)
             {
-                reason = "立ち絵（非同期の口パク）、外部プラグインのコード（エフェクト・図形・アイテム・トランジション）、確認できない素材（DirectWrite にないフォントや外部の場所のファイル）のいずれかを使うアイテムが映るため、通常描画を使用します。";
+                reason = "立ち絵（非同期の口パク）、外部プラグインのコード（エフェクト・図形・アイテム・トランジション）、確認できない素材（外部の場所のファイル、起動中に構成が変わった連番画像）のいずれかを使うアイテムが映るため、通常描画を使用します。";
+                return false;
+            }
+            // NumberText formats with the rendering thread's culture: only keyed where it is the described one.
+            if (dependencies is { Culture: true } && FrameCacheKey.CultureIdentity() != cachedFrames!.Culture)
+            {
+                reason = "このスレッドの数値の書式（カルチャ）が検査時と異なるため、数値テキストを含むフレームは通常描画を使用します。";
                 return false;
             }
             string[] files = dependencies?.Files ?? cachedPaths;
@@ -185,7 +195,7 @@ internal sealed class KeyDependencyTracker : IDisposable
                     "dynamic-frame-v1:" + KeyFor(dependencies, files) + string.Concat(dynamicSnapshots.Select(pair => pair.Snapshot.Key).Order(StringComparer.Ordinal)))));
             if (files.Length == 0)
             {
-                capture = new KeyCapture(this, DynamicKey(), cachedModel, before, cachedParents, null, dynamicSnapshots);
+                capture = new KeyCapture(this, DynamicKey(), cachedModel, before, cachedParents, null, dynamicSnapshots, dependencies?.Shown);
                 return true;
             }
             if (fingerprintTask is { IsCompleted: true }) AdoptFingerprints(before);
@@ -206,7 +216,7 @@ internal sealed class KeyDependencyTracker : IDisposable
                         reason = HostContent.Reason;
                         return false;
                     }
-                    capture = new KeyCapture(this, DynamicKey(), cachedModel, before, cachedParents, lease, dynamicSnapshots);
+                    capture = new KeyCapture(this, DynamicKey(), cachedModel, before, cachedParents, lease, dynamicSnapshots, dependencies?.Shown);
                     reason = string.Empty;
                     return true;
                 }
@@ -259,8 +269,9 @@ internal sealed class KeyDependencyTracker : IDisposable
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { return null; }
         long code = KnownCode.Generation;
+        long fonts = FontEnvironment.Generation;
         bool eligible = FrameCacheKey.TryDescribe(scene, sourceReaders, out string model, out string[] paths, out var frames, out string reason);
-        return new(eligible, model, paths, frames, reason, sourceReaders, System.Diagnostics.Stopwatch.GetTimestamp() - started, code, settings);
+        return new(eligible, model, paths, frames, reason, sourceReaders, System.Diagnostics.Stopwatch.GetTimestamp() - started, code, settings, fonts);
     }
 
     // Under gate: adopts a description of revision `current` unless the project or the readers changed since.
@@ -279,6 +290,7 @@ internal sealed class KeyDependencyTracker : IDisposable
         frameKeys.Clear();
         cachedSourceReaders = description.SourceReaders;
         cachedCode = description.Code;
+        cachedFonts = description.Fonts;
         cachedSettings = description.Settings;
         cachedParents = scene.ParentScenes.ToArray();
         cachedReason = description.Reason;
@@ -686,8 +698,13 @@ internal sealed class KeyCapture : IDisposable
     public string Model { get; }
     public long Revision { get; }
     internal KeyCapture(KeyDependencyTracker tracker, string key, string model, long revision, Guid[] parents, FileDependencyLease? lease,
-        (ICacheDependencyProvider Provider, CacheDependencySnapshot Snapshot)[]? dynamicSnapshots = null)
-    { this.tracker = tracker; Key = key; Model = model; Revision = revision; this.parents = parents; this.lease = lease; this.dynamicSnapshots = dynamicSnapshots ?? []; }
+        (ICacheDependencyProvider Provider, CacheDependencySnapshot Snapshot)[]? dynamicSnapshots = null, string[]? shown = null)
+    {
+        this.tracker = tracker; Key = key; Model = model; Revision = revision; this.parents = parents; this.lease = lease;
+        this.dynamicSnapshots = dynamicSnapshots ?? []; Shown = shown ?? [];
+    }
+    // The images of image sequences this key says the frame shows: the render must have shown each (FrameRenderReadiness).
+    public string[] Shown { get; }
     private bool DynamicCurrent()
     {
         try { return dynamicSnapshots.All(pair => pair.Provider.CanCaptureOnCurrentThread && pair.Provider.IsCurrent(pair.Snapshot)); }

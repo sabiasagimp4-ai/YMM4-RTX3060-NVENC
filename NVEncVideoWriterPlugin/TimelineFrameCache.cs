@@ -557,7 +557,7 @@ internal static partial class TimelineFrameCache
             if (__state.CacheHit) return;
             __state.State.Released(); // The host update disposed the previous source-owned output.
             if (__state.WantRects) __state.State.Rects.Rendered(); // the host computed this frame's rects
-            if (!FrameRenderReadiness.IsUpdateReady(__instance))
+            if (!FrameRenderReadiness.IsUpdateReady(__instance, __state.Capture.Shown))
             {
                 status = FrameRenderReadiness.CoverageProblem ?? "動画のデコード完了を確認できないフレームは保存しません。";
                 return;
@@ -843,6 +843,8 @@ internal static partial class TimelineFrameCache
             using (owned)
             {
                 if (expectedModelKey is not null && capture!.Key != expectedModelKey) return false;
+                // The images the key names must be the ones the render showed.
+                if (!FrameRenderReadiness.WasLastUpdateReady(timelineSource, time, capture!.Shown)) return false;
                 var traits = modelTraits.GetValue(capture!.Model, static model => new ModelTraits(model));
                 string usageKey = exporting ? usageName : PreviewUsage.KeyFor(usageName, traits.ShowOnlyPreview);
                 var key = MakeKey(capture.Key, time, scene.FPS, usageKey, context, viewport);

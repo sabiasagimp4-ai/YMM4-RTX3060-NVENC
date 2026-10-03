@@ -22,9 +22,11 @@ internal sealed class KnownCode
     // identity and are keyed by it (FrameCacheKey.IdentitySeeds). Left out: AfterImage and MotionBlur (draw from
     // the frames drawn before), AudioVolume (audio), ArrangeGroupItems, RadialArrangeGroupItems, TilingGroupItems,
     // Container and the Scene brush (other items or scenes), OpenFx (external binaries), Lut and GradientMap (files
-    // not reported), ShuffleText, ShuffleTextInOut and NumberText (fonts not resolved for the key), and
-    // DirectionalColorKey, FillSameground, FillSametype, ParticleOutput, Particlize, PuppetDeformation,
-    // VectorFieldWarp and Pen (not read in full).
+    // not reported), and DirectionalColorKey, FillSameground, FillSametype, ParticleOutput, Particlize,
+    // PuppetDeformation, VectorFieldWarp and Pen (not read in full). ShuffleText and ShuffleTextInOut draw random
+    // characters from a MersenneTwister seeded with the frame (and input index) only, and NumberText formats its value;
+    // their fonts are resolved for the key from their Font property, and NumberText's culture with it
+    // (FrameCacheKey.DrawnText).
     internal static readonly string[] VerifiedCommunity =
     [
         "Effect.Video.AlphaMask", "Effect.Video.AmbientOcclusion", "Effect.Video.AnisotropicKuwahara", "Effect.Video.Binarization",
@@ -38,11 +40,12 @@ internal sealed class KnownCode
         "Effect.Video.OutputComposite", "Effect.Video.OutputMapComposite", "Effect.Video.OutputSwitch", "Effect.Video.PageTurn",
         "Effect.Video.PartialOutline", "Effect.Video.PerspectiveShadow", "Effect.Video.PixelSort", "Effect.Video.Radiance",
         "Effect.Video.RatioCrop", "Effect.Video.RectangleGlitchNoise", "Effect.Video.ReelSpin", "Effect.Video.ReflectionAndExtrusion",
-        "Effect.Video.Ripple", "Effect.Video.SpiralTransform", "Effect.Video.SpreadPageTurn", "Effect.Video.Stretch",
+        "Effect.Video.Ripple", "Effect.Video.ShuffleText", "Effect.Video.ShuffleTextInOut", "Effect.Video.SpiralTransform",
+        "Effect.Video.SpreadPageTurn", "Effect.Video.Stretch",
         "Effect.Video.StripeGlitchNoise", "Effect.Video.ThreeDimensional", "Effect.Video.TrimMargin", "Effect.Video.Tritone",
         "Effect.Video.UnidirectionalBlur", "Effect.Video.VignetteBlur", "Effect.Video.Wave", "Effect.Video.WaveClipping",
         "Effect.Video.ZoomPixel",
-        "Shape.LensFlare", "Shape.PdfPage",
+        "Shape.LensFlare", "Shape.NumberText", "Shape.PdfPage",
         "Brush.Pattern", "Brush.Rainbow",
         "Transition.PageTurn", "Transition.Pixelize", "Transition.ReelSpin", "Transition.SpreadPageTurn",
     ];

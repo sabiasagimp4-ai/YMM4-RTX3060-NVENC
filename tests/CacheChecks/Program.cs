@@ -49,6 +49,7 @@ internal static class Program
         CheckPeekedKeys();
         CheckIdentitySeeds();
         CheckCommunity();
+        CheckImageSequence();
         CheckDynamicDependencies();
         Type[][] readerTypes = FrameCacheKey.CaptureSourceReaderTypes();
         Check(FrameCacheKey.SourceReadersMatch(readerTypes), "Unchanged source reader stamp mismatched");
@@ -600,7 +601,11 @@ internal static class Program
 
         // Fonts are resolved as YMM4 draws them (FrameCacheKey.ResolveFont): an unknown name is drawn in Arial, so it
         // is cached like Arial; a font settings entry maps a name to a face, and changing it changes the frames'
-        // keys; a family DirectWrite does not have disables only the frames showing it.
+        // keys; a family DirectWrite does not have is drawn by font fallback from the installed fonts, whose identity
+        // (FontEnvironment) every text frame holds.
+        string? installed = FontEnvironment.Stamp;
+        Check(installed is not null && installed.StartsWith("fonts://", StringComparison.Ordinal) && FontEnvironment.Stamp == installed,
+            "The installed fonts could not be identified (or not stably): " + installed);
         var arial = FrameCacheKey.ResolveFont("Arial");
         Check(arial.Files.Any(file => Path.GetFileName(file).StartsWith("arial", StringComparison.OrdinalIgnoreCase)),
             "Arial did not resolve to its files: " + string.Join(", ", arial.Files));
@@ -619,10 +624,12 @@ internal static class Program
             Check(boldFrame != unknownFrame, "Mapping a font name to another face did not change its frames");
             alias.CanonicalFontWeight = YukkuriMovieMaker.Settings.FontWeight.Normal;
             Check(WaitForFrameKey(tracker, 305) != boldFrame, "Editing a font settings entry did not change its frames");
+            string normalFrame = WaitForFrameKey(tracker, 305);
             alias.CanonicalFontName = "ymm-cache-no-such-family";
-            WaitForFrameKey(tracker, 10);
-            Check(!tracker.TryCapture(305, out _, out _), "A frame drawn with a family DirectWrite does not have was cached");
-            Check(WaitForFrameKey(tracker, 10) == at10, "An unresolvable font elsewhere disabled or changed unrelated frames");
+            Check(FrameCacheKey.ResolveFont("ymm-cache-alias").Files.Length == 0, "A family DirectWrite does not have was given files");
+            string fallbackFrame = WaitForFrameKey(tracker, 305);
+            Check(fallbackFrame != normalFrame && fallbackFrame != boldFrame, "A frame drawn by font fallback shared the key of the named family's frame");
+            Check(WaitForFrameKey(tracker, 10) == at10, "A family DirectWrite does not have changed unrelated frames");
         }
         finally { fontSettings.CustomFonts.Remove(alias); }
         Check(WaitForFrameKey(tracker, 305) == unknownFrame, "Removing the font settings entry did not restore the frames");
@@ -785,6 +792,114 @@ internal static class Program
         Check(WaitForFrameKey(tracker, 130) is { Length: > 0 } && tracker.RendersNormally(130), "Community CameraShake was not keyed by its identity");
         Check(WaitForFrameKey(tracker, 190) is { Length: > 0 }, "A Community shape that was read was not keyed");
         Console.WriteLine("Community (4.56.1.0): read effects and shapes keyed, MotionBlur rendered normally, CameraShake keyed by its identity");
+
+        // ShuffleText and ShuffleTextInOut (random characters seeded by the frame) and NumberText (a number formatted
+        // with the culture) are keyed with the files of the font their Font property names; NumberText's frames only
+        // on a thread with the culture they were described with.
+        var numberType = community.GetType("YukkuriMovieMaker.Plugin.Community.Shape.NumberText.NumberText", true)!;
+        var number = ((YukkuriMovieMaker.Plugin.Shape.IShapePlugin)Activator.CreateInstance(numberType, nonPublic: true)!).CreateShapeParameter(null);
+        var shuffle = Effect("ShuffleText.ShuffleTextEffect");
+        var shuffleInOut = Effect("ShuffleTextInOut.ShuffleTextInOutEffect");
+        foreach (object part in new object[] { number, shuffle, shuffleInOut }) part.GetType().GetProperty("Font")!.SetValue(part, "Arial");
+        timeline.Items = timeline.Items.Add(With(240, shuffle)).Add(With(270, shuffleInOut))
+            .Add(new ShapeItem { Frame = 300, Length = 30, Layer = 10, ShapeType2 = numberType, ShapeParameter = number });
+        string[] arialFiles = FrameCacheKey.ResolveFont("Arial").Files;
+        foreach (int frame in new[] { 250, 280, 310 }) Check(WaitForFrameKey(tracker, frame) is { Length: > 0 }, $"A Community text at frame {frame} was not keyed");
+        Check(FrameCacheKey.TryDescribe(new Scene(timeline, scenes, []), FrameCacheKey.CaptureSourceReaderTypes(), out _, out _, out var frames, out string reason), reason);
+        foreach (int frame in new[] { 250, 280, 310 })
+            Check(arialFiles.Length != 0 && arialFiles.All(frames!.For(frame).Files.Contains), $"The Community text at frame {frame} does not depend on its font's files");
+        Check(!frames!.For(10).Files.Intersect(arialFiles).Any(), "A frame without text depends on font files");
+        Check(frames.For(310).Culture && !frames.For(250).Culture && !frames.For(10).Culture, "Only NumberText's frames format with the culture");
+        string numberKey = WaitForFrameKey(tracker, 310), shuffleKey = WaitForFrameKey(tracker, 250);
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo(culture.Name == "de-DE" ? "en-US" : "de-DE");
+        try
+        {
+            Check(!tracker.TryCapture(310, out _, out _), "A NumberText frame was keyed on a thread with another number format");
+            Check(WaitForFrameKey(tracker, 250) == shuffleKey, "Another culture changed a frame without NumberText");
+        }
+        finally { System.Globalization.CultureInfo.CurrentCulture = culture; }
+        Check(WaitForFrameKey(tracker, 310) == numberKey, "NumberText was not keyed again on the described culture");
+        Console.WriteLine("Community text (4.56.1.0): ShuffleText, ShuffleTextInOut and NumberText keyed with their font files; NumberText only on its culture");
+    }
+
+    // A numbered image played as a video (YMM4's sequence reader): a root frame depends on the one image it shows, at
+    // 60 images per second through the item's time mapping (frame rate, playback rate, loop), and the files the reader
+    // listed must not change while YMM4 runs.
+    private static void CheckImageSequence()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "ymm-cache-sequence-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string Image(int index) => Path.Combine(directory, $"shot{index}.png");
+            for (int i = 0; i < 12; i++) File.WriteAllBytes(Image(i), [(byte)i]);
+            File.WriteAllBytes(Image(20), [20]); // after a gap: not part of the sequence
+            File.WriteAllBytes(Path.Combine(directory, "other3.png"), [3]);
+            Check(ImageSequence.Files(Image(0)) is { } listed && listed.SequenceEqual(Enumerable.Range(0, 12).Select(Image)),
+                "The sequence is not the contiguous numbers from the file's");
+            Check(ImageSequence.Files(Image(5))?.Length == 7 && ImageSequence.Files(Path.Combine(directory, "other3.png"))?.Length == 1
+                && ImageSequence.Files(Path.Combine(directory, "missing7.png")) is null, "A sequence must start at the file's own number");
+
+            var timeline = new Timeline();
+            timeline.VideoInfo.FPS = 30;
+            var scenes = new Scenes(false);
+            scenes.AddScene(timeline);
+            var video = new VideoItem { FilePath = Image(0), Frame = 0, Length = 12, Layer = 0 };
+            timeline.Items = timeline.Items.Add(video);
+            var scene = new Scene(timeline, scenes, []);
+            FrameDependencyIndex Describe()
+            {
+                Check(FrameCacheKey.TryDescribe(scene, FrameCacheKey.CaptureSourceReaderTypes(), out _, out _, out var frames, out string reason), reason);
+                return frames!;
+            }
+            void Expect(string setting, Func<int, int> image)
+            {
+                var frames = Describe();
+                for (int frame = 0; frame < video.Length; frame++)
+                {
+                    var files = frames.For(frame).Files;
+                    string expected = Image(image(frame));
+                    Check(frames.For(frame).Cacheable && files.Contains(expected) && files.All(file => file == expected || file == Image(0)),
+                        $"{setting}: frame {frame} must depend on {Path.GetFileName(expected)} only, not {string.Join(", ", files.Select(Path.GetFileName))}");
+                }
+            }
+            Expect("30 fps", frame => Math.Min(2 * frame, 11));
+            video.IsLooped = true;
+            Expect("30 fps, looped", frame => 2 * frame % 12);
+            video.IsLooped = false;
+            video.PlaybackRate2.SetFirstValue(50);
+            Expect("30 fps, 50 %", frame => frame);
+            video.PlaybackRate2.SetFirstValue(100);
+            timeline.VideoInfo.FPS = 60;
+            Expect("60 fps", frame => frame);
+            timeline.VideoInfo.FPS = 30;
+
+            using var tracker = new KeyDependencyTracker(scene);
+            string second = WaitForFrameKey(tracker, 2), third = WaitForFrameKey(tracker, 3);
+            Check(second != third, "Two frames showing different images share a key");
+            // An image overwritten while YMM4 runs: only the frame showing it stops being keyed by its old content.
+            File.WriteAllBytes(Image(6), [66, 66]);
+            File.SetLastWriteTimeUtc(Image(6), DateTime.UtcNow.AddMinutes(1));
+            long deadline = Environment.TickCount64 + 15_000;
+            bool stale = true;
+            while (stale && Environment.TickCount64 < deadline)
+            {
+                stale = tracker.TryCapture(3, out var capture, out _) && capture!.Key == third;
+                capture?.Dispose();
+                if (stale) Thread.Sleep(20);
+            }
+            Check(!stale, "A frame kept the key of an image overwritten since");
+            Check(WaitForFrameKey(tracker, 2) == second, "Overwriting one image changed a frame showing another");
+
+            // The reader keeps the list it read: a sequence whose files changed since is not keyed until a restart.
+            File.WriteAllBytes(Image(12), [12]);
+            Check(!Describe().For(0).Cacheable, "A sequence whose files changed while YMM4 runs was keyed");
+            File.Delete(Image(12));
+            Check(Describe().For(0).Cacheable, "A sequence back to the list first read was not keyed");
+        }
+        finally { try { Directory.Delete(directory, true); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+        Console.WriteLine("Image sequence: each frame depends on the image it shows (30/60 fps, loop, playback rate), an overwritten image only re-keys its frames, a changed file list is not keyed");
     }
 
     private static bool SkipLoader() => false;

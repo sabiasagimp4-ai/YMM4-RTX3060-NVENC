@@ -278,7 +278,7 @@ internal static class Program
         Expect(typeof(MFVideoFileSource), "MF-legacy");
         Expect(typeof(FFmpegVideoFileSource), "FFmpeg");
         Expect(typeof(WICGifVideoSource), "WIC");
-        Expect(typeof(WICSequentialImageVideoSource), "unverified");
+        Expect(typeof(WICSequentialImageVideoSource), "image");
         Expect(typeof(CachedVideoFileSource), "wrapper");
         Expect(typeof(ExplicitSource), "unverified");
         Expect(typeof(OverridingSource), "unverified");
@@ -299,7 +299,7 @@ internal static class Program
     private static void CheckHostVideoSources()
     {
         // Renders frame 2, applies the change, then renders frame 3 (or frame 2 again).
-        bool Ready(Func<IVideoFileSource[]> create, Action<IVideoFileSource[]>? before = null, bool repeatTime = false)
+        bool Ready(Func<IVideoFileSource[]> create, Action<IVideoFileSource[]>? before = null, bool repeatTime = false, string[]? images = null)
         {
             var sources = create();
             var root = Scene(decoders: 0);
@@ -307,8 +307,10 @@ internal static class Program
             Render(root, Frame * 2);
             before?.Invoke(sources);
             var time = repeatTime ? Frame * 2 : Frame * 3;
-            Render(root, time);
-            return CacheLike.Last(root) == true && FrameRenderReadiness.WasLastUpdateReady(root, time);
+            CacheLike.Images = images ?? [];
+            try { Render(root, time); }
+            finally { CacheLike.Images = []; }
+            return CacheLike.Last(root) == true && FrameRenderReadiness.WasLastUpdateReady(root, time, images ?? []);
         }
         void Mode(IVideoFileSource source, VideoMode mode)
         {
@@ -340,7 +342,19 @@ internal static class Program
         Check(!Ready(() => [new FFmpegVideoFileSource()], s => Mode(s[0], VideoMode.Stretch)),
             "FFmpeg frame stretched to the stream end after an early stop reported ready");
         Check(!Ready(() => [new WICGifVideoSource()], s => Mode(s[0], VideoMode.Throw)), "WIC decode exception reported ready");
-        Check(!Ready(() => [new WICSequentialImageVideoSource()]), "Sequential images (silent load failures) reported ready");
+        // An image sequence holds t while the image of GetFrameIndex(t) is loaded; the image the key names must be the one
+        // shown. Images shown besides (a source read ahead for a later item) do not matter.
+        int index = new WICSequentialImageVideoSource().GetFrameIndex(Frame * 3);
+        string shown = Path.GetFullPath($"seq{index}.png"), other = Path.GetFullPath($"seq{index - 1}.png");
+        Check(Ready(() => [new WICSequentialImageVideoSource()], images: [shown]), "A loaded sequence image the key names was not ready");
+        Check(!Ready(() => [new WICSequentialImageVideoSource()], images: [other]), "A key naming another image than the one shown reported ready");
+        Check(!Ready(() => [new WICSequentialImageVideoSource()], images: [shown, other]), "A key naming an image not shown reported ready");
+        Check(Ready(() => [new WICSequentialImageVideoSource()]), "An image shown besides those the key names made the frame not ready");
+        Check(!Ready(() => [new WICSequentialImageVideoSource()], s => ((WICSequentialImageVideoSource)s[0]).Unreadable = true),
+            "A sequence image no reader opened (silent empty bitmap) reported ready");
+        Check(Ready(() => [new CachedVideoFileSource(new WICSequentialImageVideoSource())], images: [shown])
+            && !Ready(() => [new CachedVideoFileSource(new WICSequentialImageVideoSource())], images: [other]),
+            "A wrapped sequence did not pass on the image it showed");
         Check(!Ready(() => [new ExplicitSource()]) && !Ready(() => [new OverridingSource()]) && !Ready(() => [new OddSource()]),
             "Unverified video source reported ready");
         Check(!Ready(() => [new CachedVideoFileSource(new MFVideoFileSource2())], s => ((CachedVideoFileSource)s[0]).ServeWithoutInner = true),
@@ -462,6 +476,8 @@ internal static class Program
     private static class CacheLike
     {
         internal static bool SkipNext;
+        // The sequence images the cache's key says the frame shows (the capture's).
+        internal static IReadOnlyCollection<string> Images = [];
         private static readonly ConditionalWeakTable<object, StrongBox<bool>> observed = new();
 
         internal static bool Prefix()
@@ -472,7 +488,7 @@ internal static class Program
         }
 
         internal static void Postfix(object __instance) =>
-            observed.AddOrUpdate(__instance, new StrongBox<bool>(FrameRenderReadiness.IsUpdateReady(__instance)));
+            observed.AddOrUpdate(__instance, new StrongBox<bool>(FrameRenderReadiness.IsUpdateReady(__instance, Images)));
 
         internal static void Observe() { }
 
@@ -670,10 +686,25 @@ namespace YukkuriMovieMaker.Plugin.FileSource.WIC
         }
     }
 
+    // Like the host: the image of GetFrameIndex(t) is loaded; one no reader opens leaves source null (an empty bitmap).
     internal sealed class WICSequentialImageVideoSource : IVideoFileSource
     {
+        private readonly string[] frames = Enumerable.Range(0, 20).Select(index => "seq" + index + ".png").ToArray();
+        private int currentFrame = -1;
+        private object? source;
+        internal bool Unreadable;
+
+        public int GetFrameIndex(TimeSpan time) => (int)(time.Ticks * 60 / TimeSpan.TicksPerSecond);
+
         [MethodImpl(MethodImplOptions.NoInlining)]
-        public void Update(TimeSpan time) => Thread.Sleep(1);
+        public void Update(TimeSpan time)
+        {
+            Thread.Sleep(1);
+            int index = GetFrameIndex(time);
+            if (currentFrame == index) return;
+            currentFrame = index;
+            source = Unreadable ? null : frames[Math.Clamp(index, 0, frames.Length - 1)];
+        }
     }
 }
 

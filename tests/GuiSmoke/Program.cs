@@ -47,8 +47,7 @@ internal static class Program
         var text = new TextItem { Frame = 30, Length = 540, Layer = 2, Text = "cache smoke", Font = "Arial" };
         text.Y.SetFirstValue(200);
         timeline.Items = timeline.Items.Add(first).Add(second).Add(text);
-        // A shape from the Community plugin YMM4 ships (code the cache does not read): only 2 s to 3 s render normally,
-        // and the idle pre-renderer reads ahead past it.
+        // A shape from the Community plugin YMM4 ships (NumberText: read, keyed with its font and the culture).
         string communityFile = Path.Combine(Path.GetDirectoryName(typeof(Scene).Assembly.Location)!, "YukkuriMovieMaker.Plugin.Community.dll");
         if (File.Exists(communityFile)
             && Assembly.LoadFrom(communityFile).GetType("YukkuriMovieMaker.Plugin.Community.Shape.NumberText.NumberText") is { } numberType

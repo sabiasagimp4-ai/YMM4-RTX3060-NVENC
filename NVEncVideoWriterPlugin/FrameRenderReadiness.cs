@@ -30,7 +30,11 @@ internal static class FrameRenderReadiness
     // Returns whether the decoded frame the decoder now holds covers the requested time.
     // Unhookable: when Harmony cannot rebuild Update, called instead of failing the install if (and only if)
     // frames using the source are rejected another way; it must make sure they are.
-    internal sealed record DecoderCheck(string Name, MethodBase Update, Func<object, TimeSpan, bool> HoldsFrame, Action? Unhookable = null);
+    // Shown: the file a source that holds its frame shows (an image sequence's current image), or null. A frame is
+    // only ready for a caller whose key names images that were all shown in it. (Not the converse: TimelineSource
+    // also updates the sources of items that start within a second, in the frame's scope, to read them ahead.)
+    internal sealed record DecoderCheck(string Name, MethodBase Update, Func<object, TimeSpan, bool> HoldsFrame, Action? Unhookable = null,
+        Func<object, string?>? Shown = null);
 
     private sealed class Scope(object source, TimeSpan time, Scope? parent, int epoch)
     {
@@ -40,9 +44,14 @@ internal static class FrameRenderReadiness
         internal readonly int Epoch = epoch;
         internal int Failed;
         internal int Completed;
+        private List<string>? shown;
+
+        internal void Show(string file) { lock (this) (shown ??= []).Add(file); }
+
+        internal string[] Shown { get { lock (this) return shown?.ToArray() ?? []; } }
     }
 
-    private sealed record UpdateResult(bool Ready, TimeSpan Time);
+    private sealed record UpdateResult(bool Ready, TimeSpan Time, string[] Shown);
 
     private sealed class HostBinding(Harmony harmony, Type videoSource, MethodInfo interfaceUpdate, string hostDirectory, HostFeatures features)
     {
@@ -58,10 +67,13 @@ internal static class FrameRenderReadiness
         internal readonly HashSet<string> Assemblies = new(StringComparer.Ordinal);
         internal readonly ConcurrentDictionary<Type, Func<object, TimeSpan, bool>> Verified = new();
         internal readonly ConcurrentDictionary<Type, Func<object, TimeSpan, bool>> Classifiers = new();
+        internal readonly ConcurrentDictionary<Type, Func<object, string?>> ShownFiles = new();
         internal readonly List<string> Coverage = [];
 
         internal bool HoldsFrame(object instance, TimeSpan time) =>
             Classifiers.TryGetValue(instance.GetType(), out var holds) && holds(instance, time);
+
+        internal string? ShownFile(object instance) => ShownFiles.TryGetValue(instance.GetType(), out var shown) ? shown(instance) : null;
     }
 
     internal static bool Installed => Volatile.Read(ref installed) != 0;
@@ -84,15 +96,23 @@ internal static class FrameRenderReadiness
     }
 
     // For TimelineSource.Update postfixes: the scope is still open (finalizers run after postfixes).
-    internal static bool IsUpdateReady(object timelineSource) => Installed && CoverageProblem is null
+    // images: the images (full paths) the caller's key says the frame shows; each must have been shown.
+    internal static bool IsUpdateReady(object timelineSource, IReadOnlyCollection<string> images) => Installed && CoverageProblem is null
         && current.Value is { } scope && ReferenceEquals(scope.Source, timelineSource)
-        && Volatile.Read(ref scope.Completed) == 0 && Volatile.Read(ref scope.Failed) == 0 && Stable(scope);
+        && Volatile.Read(ref scope.Completed) == 0 && Volatile.Read(ref scope.Failed) == 0 && Stable(scope) && AllShown(images, scope.Shown);
+
+    internal static bool IsUpdateReady(object timelineSource) => IsUpdateReady(timelineSource, []);
+
+    private static bool AllShown(IReadOnlyCollection<string> images, string[] shown) =>
+        images.Count == 0 || images.All(image => shown.Contains(image, StringComparer.OrdinalIgnoreCase));
 
     private static bool Stable(Scope scope) => (scope.Epoch & 1) == 0 && scope.Epoch == Volatile.Read(ref bindEpoch);
 
     // For callers that inspect a source after its Update returned (idle pre-render).
-    internal static bool WasLastUpdateReady(object timelineSource, TimeSpan time) => Installed && CoverageProblem is null
-        && lastResults.TryGetValue(timelineSource, out var result) && result.Ready && result.Time == time;
+    internal static bool WasLastUpdateReady(object timelineSource, TimeSpan time, IReadOnlyCollection<string> images) => Installed && CoverageProblem is null
+        && lastResults.TryGetValue(timelineSource, out var result) && result.Ready && result.Time == time && AllShown(images, result.Shown);
+
+    internal static bool WasLastUpdateReady(object timelineSource, TimeSpan time) => WasLastUpdateReady(timelineSource, time, []);
 
     internal static bool TryInstall(Assembly host, Harmony harmony, out string reason)
     {
@@ -238,7 +258,7 @@ internal static class FrameRenderReadiness
             if (__exception is not null) Fail(__state);
             Volatile.Write(ref __state.Completed, 1);
             active.TryRemove(__state, out _);
-            lastResults.AddOrUpdate(__instance, new UpdateResult(Volatile.Read(ref __state.Failed) == 0 && Stable(__state), __state.Time));
+            lastResults.AddOrUpdate(__instance, new UpdateResult(Volatile.Read(ref __state.Failed) == 0 && Stable(__state), __state.Time, __state.Shown));
         }
         catch { Fail(__state); lastResults.Remove(__instance); }
         finally { current.Value = __state.Parent; }
@@ -271,8 +291,12 @@ internal static class FrameRenderReadiness
         bool holds;
         try
         {
-            holds = __exception is null && __args is [TimeSpan time] && Volatile.Read(ref decoders).TryGetValue(__originalMethod.MethodHandle, out var check)
+            DecoderCheck? check = null;
+            holds = __exception is null && __args is [TimeSpan time] && Volatile.Read(ref decoders).TryGetValue(__originalMethod.MethodHandle, out check)
                 && check.HoldsFrame(__instance, time);
+            // The file shown goes to this frame and the frames composited from it (a nested scene's).
+            if (holds && check!.Shown?.Invoke(__instance) is { } file)
+                for (var value = scope; value is not null; value = value.Parent) value.Show(Path.GetFullPath(file));
         }
         catch { holds = false; }
         using var readiness = CacheTrace.Measure("decoder-readiness", "state", __instance.GetType().FullName);
@@ -366,6 +390,7 @@ internal static class FrameRenderReadiness
             if (hostBinding.Features.DecoderVerified(type) && DescribeVerified(type) is { } verified)
             {
                 hostBinding.Verified[type] = verified.Holds;
+                if (verified.Shown is { } shown) hostBinding.ShownFiles[type] = shown;
                 names[type] = verified.Name;
             }
         foreach (var type in types)
@@ -390,7 +415,8 @@ internal static class FrameRenderReadiness
             .Where(group => !hooked.ContainsKey(group.Key.MethodHandle))
             .Select(group => new DecoderCheck(string.Join(", ", group.Select(type => type.FullName)), group.Key, hostBinding.HoldsFrame,
                 // The wrapper itself must always be hooked; any other source it holds is then rejected by it.
-                wrapped && group.All(type => type.FullName != WrapperTypeName) ? () => Demote(hostBinding, group) : null))
+                wrapped && group.All(type => type.FullName != WrapperTypeName) ? () => Demote(hostBinding, group) : null,
+                hostBinding.ShownFile))
             .ToList();
     }
 
@@ -401,6 +427,7 @@ internal static class FrameRenderReadiness
             foreach (var type in types)
             {
                 hostBinding.Verified.TryRemove(type, out _);
+                hostBinding.ShownFiles.TryRemove(type, out _);
                 hostBinding.Classifiers[type] = static (_, _) => false;
                 int line = hostBinding.Coverage.FindIndex(entry => entry.StartsWith(type.FullName + ": ", StringComparison.Ordinal));
                 string text = $"{type.FullName}: unverified (its Update cannot be hooked; CachedVideoFileSource never accepts it)";
@@ -473,18 +500,40 @@ internal static class FrameRenderReadiness
     internal const string FFmpegTypeName = "YukkuriMovieMaker.Plugin.FileSource.FFmpeg.FFmpegVideoFileSource";
     internal const string WicGifTypeName = "YukkuriMovieMaker.Plugin.FileSource.WIC.WICGifVideoSource";
     internal const string WicWebpTypeName = "YukkuriMovieMaker.Plugin.FileSource.WIC.WICWebpVideoSource";
+    internal const string WicSequenceTypeName = "YukkuriMovieMaker.Plugin.FileSource.WIC.WICSequentialImageVideoSource";
     internal const string WrapperTypeName = "YukkuriMovieMaker.Plugin.CachedVideoFileSource";
 
-    private static (string Name, Func<object, TimeSpan, bool> Holds)? DescribeVerified(Type type) => type.FullName switch
+    private sealed record Verified(string Name, Func<object, TimeSpan, bool> Holds, Func<object, string?>? Shown = null);
+
+    private static Verified? DescribeVerified(Type type) => type.FullName switch
     {
-        Mf2TypeName => DescribeMf2(type),
-        MfLegacyTypeName => DescribeStreamClock(type, "MF-legacy", excludeStretchedToEnd: false),
-        FFmpegTypeName => DescribeStreamClock(type, "FFmpeg", excludeStretchedToEnd: true),
+        Mf2TypeName => Plain(DescribeMf2(type)),
+        MfLegacyTypeName => Plain(DescribeStreamClock(type, "MF-legacy", excludeStretchedToEnd: false)),
+        FFmpegTypeName => Plain(DescribeStreamClock(type, "FFmpeg", excludeStretchedToEnd: true)),
         // Synchronous WIC decode: failures throw (the decoder finalizer fails the frame). The only swallowed
         // GIF error clears the frame deterministically for that file.
-        WicGifTypeName or WicWebpTypeName => ("WIC (synchronous decode; an exception fails the frame)", static (_, _) => true),
+        WicGifTypeName or WicWebpTypeName => new("WIC (synchronous decode; an exception fails the frame)", static (_, _) => true),
+        WicSequenceTypeName => DescribeSequence(type),
         _ => null,
     };
+
+    private static Verified? Plain((string Name, Func<object, TimeSpan, bool> Holds)? described) =>
+        described is { } value ? new(value.Name, value.Holds) : null;
+
+    // WICSequentialImageVideoSource.Update(t) sets currentFrame to GetFrameIndex(t) (FrameTime.TimeToFrame(t, 60)) and
+    // loads frames[clamp(currentFrame)] synchronously through ImageFileSourceFactory; a file no reader opens leaves
+    // source null and draws an empty bitmap. It holds t while source is set for GetFrameIndex(t), and shows that file.
+    private static Verified? DescribeSequence(Type type)
+    {
+        if (FindField(type, "frames") is not { } frames || frames.FieldType != typeof(string[])
+            || FindField(type, "currentFrame") is not { } current || current.FieldType != typeof(int)
+            || FindField(type, "source") is not { } source || source.FieldType.IsValueType
+            || type.GetMethod("GetFrameIndex", BindingFlags.Public | BindingFlags.Instance, [typeof(TimeSpan)]) is not { } index
+            || index.ReturnType != typeof(int)) return null;
+        return new("image sequence (the image of GetFrameIndex(t) is loaded; it must be the one the key names)",
+            (instance, time) => source.GetValue(instance) is not null && (int)current.GetValue(instance)! == (int)index.Invoke(instance, [time])!,
+            instance => frames.GetValue(instance) is string[] { Length: > 0 } files ? files[Math.Clamp((int)current.GetValue(instance)!, 0, files.Length - 1)] : null);
+    }
 
     // MFVideoFileSource2 itself treats the frame as valid exactly while decodedFrame is set and its sample
     // interval contains t; a failed TryDecodeAt leaves it null and draws transparency.
