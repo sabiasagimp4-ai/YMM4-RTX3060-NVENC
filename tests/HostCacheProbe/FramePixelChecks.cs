@@ -241,13 +241,13 @@ internal static class FramePixelChecks
         Console.WriteLine($"Export store: {Frames} frames stored without waiting for the GPU (the last on disposal), restored by a second export pixel for pixel OK");
     }
 
-    // A numbered PNG played by YMM4's own sequence reader: frames are stored once their images are fingerprinted and
+    // A numbered PNG played by YMM4's own sequence reader: once its images are fingerprinted, every frame is stored and
     // restored pixel for pixel; a key that names another image than the one the reader showed is never stored.
     private static void CheckImageSequence(Assembly host, IGraphicsDevicesAndContext context, Harmony harmony)
     {
         Check(FrameRenderReadiness.Coverage.Any(line => line.StartsWith(FrameRenderReadiness.WicSequenceTypeName + ": image sequence", StringComparison.Ordinal)),
             "The image sequence reader was not verified: " + string.Join(" | ", FrameRenderReadiness.Coverage));
-        const int Frames = 6, Width = 160, Height = 90;
+        const int Frames = 6, Width = 160, Height = 90, Attempts = 100;
         string directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ymm-cache-sequence-" + Guid.NewGuid().ToString("N"));
         System.IO.Directory.CreateDirectory(directory);
         var patch = new Harmony("ymm.tests.sequence-misprediction");
@@ -263,70 +263,81 @@ internal static class FramePixelChecks
             var scene = new Scene(timeline, scenes, []);
             var dc = context.DeviceContext;
             var half = new Vector2(Width / 2f, Height / 2f);
-            // One export of every frame by a new source (its deferred stores finish when it is disposed).
-            byte[][] Export(bool cache)
+            ITimelineSource NewSource() => (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [context, scene, null], null)!;
+            byte[] Render(ITimelineSource source, int frame)
             {
-                TimelineFrameCache.Enabled = cache;
-                var pixels = new byte[Frames][];
-                var source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [context, scene, null], null)!;
-                using (source)
-                    for (int frame = 0; frame < Frames; frame++)
-                    {
-                        source.Update(timeline.VideoInfo.GetTimeFrom(frame), TimelineSourceUsage.Exporting);
-                        pixels[frame] = TimelineFrameCache.Capture(dc, source.Output, Width, Height, -half)!;
-                    }
-                return pixels;
+                source.Update(timeline.VideoInfo.GetTimeFrom(frame), TimelineSourceUsage.Exporting);
+                return TimelineFrameCache.Capture(dc, source.Output, Width, Height, -half)!;
             }
-            // Exports until one restores every frame (the images are fingerprinted in the background first).
-            (byte[][] Pixels, bool Restored) Restore(int attempts)
+            // A frame is ready to store once rendering it again at once reuses it (the images are fingerprinted in the
+            // background first; the live reuse is only kept for frames the render check accepted).
+            bool Accepted(ITimelineSource source, int frame)
             {
-                for (int attempt = 0; attempt < attempts; attempt++)
+                for (int attempt = 0; attempt < Attempts; attempt++)
                 {
-                    long hits = TimelineFrameCache.RamHits;
-                    var pixels = Export(cache: true);
-                    if (TimelineFrameCache.RamHits - hits == Frames) return (pixels, true);
-                    Thread.Sleep(100);
+                    Render(source, frame);
+                    long hits = TimelineFrameCache.Hits;
+                    Render(source, frame);
+                    if (TimelineFrameCache.Hits > hits) return true;
+                    Thread.Sleep(50);
                 }
-                return ([], false);
+                return false;
             }
             Console.WriteLine("Video readers in the order YMM4 tries them: " + string.Join(", ", PluginLoader.VideoFileSourcePlugins.Select(reader => reader.GetType().Name)));
-            var baseline = Export(cache: false);
+            TimelineFrameCache.Enabled = false;
+            var baseline = new byte[Frames][];
+            using (var source = NewSource())
+                for (int frame = 0; frame < Frames; frame++) baseline[frame] = Render(source, frame);
             Check(baseline.Distinct(new BytesComparer()).Count() == Frames, "The sequence's frames are not all different (the reader did not play it)");
-            TimelineFrameCache.Clear();
-            var (restored, ok) = Restore(100);
-            Check(ok, "The image sequence frames were never restored from the store: " + TimelineFrameCache.Status);
-            for (int frame = 0; frame < Frames; frame++)
-                Check(restored[frame].SequenceEqual(baseline[frame]), $"Sequence frame {frame} restored from the store differs from the host's render");
 
-            // A key that names another image than the one the reader shows (the next one): every frame is rendered,
-            // matches the host, and is never stored; the status says why. With the right keys they are stored again.
+            TimelineFrameCache.Enabled = true;
+            TimelineFrameCache.Clear();
+            using (var source = NewSource()) // its pending stores finish when it is disposed
+                for (int frame = 0; frame < Frames; frame++)
+                    Check(Accepted(source, frame), $"Sequence frame {frame} was never accepted for the store: " + TimelineFrameCache.Status);
+            using (var source = NewSource())
+                for (int frame = 0; frame < Frames; frame++)
+                {
+                    bool restored = false;
+                    for (int attempt = 0; attempt < Attempts && !restored; attempt++)
+                    {
+                        long ramHits = TimelineFrameCache.RamHits;
+                        var pixels = Render(source, frame);
+                        restored = TimelineFrameCache.RamHits > ramHits;
+                        if (restored) Check(pixels.SequenceEqual(baseline[frame]), $"Sequence frame {frame} restored from the store differs from the host's render");
+                        else
+                        {
+                            Check(pixels.SequenceEqual(baseline[frame]), $"Sequence frame {frame} rendered with the cache differs from the host's render");
+                            Thread.Sleep(50);
+                        }
+                    }
+                    Check(restored, $"Sequence frame {frame} was never restored from the store: " + TimelineFrameCache.Status);
+                }
+
+            // A key that names another image than the one the reader shows (the next one): each frame is keyed and
+            // rendered, matches the host, and is never kept; the status says why. With the right keys they are again.
             patch.Patch(typeof(ImageSequence).GetMethod(nameof(ImageSequence.FrameFiles), BindingFlags.Static | BindingFlags.NonPublic)!,
                 postfix: new HarmonyMethod(typeof(FramePixelChecks), nameof(Mispredict)));
             TimelineFrameCache.Clear();
-            long restoredMispredicted = 0;
-            bool rejected = false;
-            for (int attempt = 0; attempt < 40 && !rejected; attempt++)
-            {
-                long hits = TimelineFrameCache.RamHits;
-                var pixels = Export(cache: true);
-                restoredMispredicted += TimelineFrameCache.RamHits - hits;
-                rejected = TimelineFrameCache.Status.Contains("デコード完了", StringComparison.Ordinal);
+            using (var source = NewSource())
                 for (int frame = 0; frame < Frames; frame++)
-                    Check(pixels[frame].SequenceEqual(baseline[frame]), $"Sequence frame {frame} under a mispredicted key differs from the host's render");
-                if (!rejected) Thread.Sleep(100);
-            }
-            for (int attempt = 0; attempt < 2; attempt++)
-            {
-                long hits = TimelineFrameCache.RamHits;
-                Export(cache: true);
-                restoredMispredicted += TimelineFrameCache.RamHits - hits;
-            }
-            Check(rejected, "Frames under keys naming other images were never rejected by the render check: " + TimelineFrameCache.Status);
-            Check(restoredMispredicted == 0, $"{restoredMispredicted} frames keyed by another image than the one shown were stored and restored");
+                {
+                    bool rejected = false;
+                    for (int attempt = 0; attempt < Attempts && !rejected; attempt++)
+                    {
+                        long hits = TimelineFrameCache.Hits;
+                        Check(Render(source, frame).SequenceEqual(baseline[frame]) && Render(source, frame).SequenceEqual(baseline[frame]),
+                            $"Sequence frame {frame} under a mispredicted key differs from the host's render");
+                        Check(TimelineFrameCache.Hits == hits, $"Sequence frame {frame} under a key naming another image was reused");
+                        rejected = TimelineFrameCache.Status.Contains("デコード完了", StringComparison.Ordinal);
+                        if (!rejected) Thread.Sleep(50);
+                    }
+                    Check(rejected, $"Sequence frame {frame} under a key naming another image was not rejected by the render check: " + TimelineFrameCache.Status);
+                }
             patch.UnpatchAll(patch.Id);
-            TimelineFrameCache.Clear();
-            Check(Restore(100).Restored, "Sequence frames were not stored again with the right keys: " + TimelineFrameCache.Status);
+            using (var source = NewSource())
+                Check(Accepted(source, 2), "Sequence frames were not accepted again with the right keys: " + TimelineFrameCache.Status);
         }
         finally
         {
@@ -334,7 +345,7 @@ internal static class FramePixelChecks
             TimelineFrameCache.Enabled = true;
             try { System.IO.Directory.Delete(directory, true); } catch (System.IO.IOException) { } catch (UnauthorizedAccessException) { }
         }
-        Console.WriteLine($"Image sequence (WIC reader, {Frames} frames): stored after fingerprinting, restored pixel for pixel; a key naming another image is never stored");
+        Console.WriteLine($"Image sequence (WIC reader, {Frames} frames): accepted after fingerprinting, restored pixel for pixel; a key naming another image is never kept");
     }
 
     private static void Mispredict(ref string[]? __result)
