@@ -14,9 +14,9 @@ internal static class HostProbe
     internal static void Run(string hostDir)
     {
         Console.WriteLine("=== HOSTPROBE BEGIN ===");
-        Try("tachie-implementations", TachieImplementations);
+        Try("reflection", Reflection);
+        Try("callers", () => Callers(hostDir));
         Try("decompile", () => Decompile(hostDir));
-        Try("types", () => Types(hostDir));
         Console.WriteLine("=== HOSTPROBE END ===");
         Console.Out.Flush();
     }
@@ -74,10 +74,23 @@ internal static class HostProbe
 
     private static readonly string[] CalledMembers =
     [
-        "AddFontResourceEx", "AddFontResource", "AddFontMemResourceEx", "AddFontResourceExW", "AddFontResourceW", "CreateCustomFontCollection",
-        "RegisterFontCollectionLoader", "RegisterFontFileLoader", "CreateFontSetBuilder", "AddFontFile", "CreateFontCollectionFromFontSet",
-        "CreateFontFileReference", "GetSystemFontCollection", "get_CustomFonts", "get_SystemFonts", "CreateTextFormat", "GetFontCollection",
+        "set_DefaultThreadCurrentCulture", "set_DefaultThreadCurrentUICulture", "set_CurrentCulture", "set_CurrentUICulture",
+        "GetCultureInfo", "CreateSpecificCulture",
     ];
+
+    private static void Reflection()
+    {
+        const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+        var video = typeof(YukkuriMovieMaker.Project.Items.VideoItem);
+        foreach (var property in video.GetProperties(all).Where(p => p.Name.Contains("Playback", StringComparison.Ordinal) || p.Name.Contains("Content", StringComparison.Ordinal)))
+            Console.WriteLine($"  VideoItem.{property.Name} : {property.PropertyType.FullName} get={property.GetMethod?.Attributes}");
+        var source = video.Assembly.GetType("YukkuriMovieMaker.Player.Video.Items.VideoSource");
+        foreach (var method in source?.GetMethods(all).Where(m => m.Name == "CalculateSourceTime") ?? [])
+            Console.WriteLine($"  VideoSource.{method.Name}({string.Join(", ", method.GetParameters().Select(p => p.ParameterType.Name + " " + p.Name))}) {method.Attributes}");
+        foreach (var method in typeof(YukkuriMovieMaker.Commons.FrameTime).GetMethods(BindingFlags.Public | BindingFlags.Static))
+            Console.WriteLine($"  FrameTime.{method.Name}({string.Join(", ", method.GetParameters().Select(p => p.ParameterType.Name + " " + p.Name))})");
+        Console.WriteLine($"  culture: current={System.Globalization.CultureInfo.CurrentCulture.Name} default={System.Globalization.CultureInfo.DefaultThreadCurrentCulture?.Name ?? "(null)"} ui={System.Globalization.CultureInfo.CurrentUICulture.Name}");
+    }
 
     private static void Callers(string hostDir)
     {
@@ -186,10 +199,9 @@ internal static class HostProbe
         // Simple names searched in every host assembly, with a line cap each.
         (string Name, int Lines)[] simple =
         [
-            ("VideoSource", 600), ("VideoItemSource", 600), ("CachedVideoFileSource", 300), ("VideoFileSourceFactory", 300),
-            ("PlaybackRateMap", 400), ("ImageFileSourceFactory", 200), ("ImageSource", 300),
+            ("RandomText", 400), ("ShuffleTextEffect", 300), ("ShuffleTextInOutEffect", 300), ("NumberTextParameter", 300), ("NumberText", 120),
+            ("VideoSourceTime", 200), ("CharType", 60),
         ];
-        foreach (var name in tachieTypes) simple = [.. simple, (name, 400)];
         var done = new HashSet<string>(StringComparer.Ordinal);
         foreach (var file in HostFiles(hostDir).Select(Path.GetFileName))
         {
@@ -199,8 +211,7 @@ internal static class HostProbe
             {
                 if (type.DeclaringTypeDefinition is not null) continue;
                 var match = simple.FirstOrDefault(s => s.Name == type.Name);
-                if (match.Name is null && type.Name.Contains("Tachie", StringComparison.Ordinal) && type.Name.EndsWith("Source", StringComparison.Ordinal)
-                    && type.Name != "TachieSource") match = (type.Name, 400);
+                if (match.Name is null && type.Name == "Layer" && type.Namespace.Contains("AnimationTachie", StringComparison.Ordinal)) match = (type.Name, 300);
                 bool owner = false;
                 if (match.Name is null && !owner) continue;
                 if (match.Name == "Font" && !type.Namespace.Contains("Setting", StringComparison.Ordinal) && !type.Namespace.Contains("Font", StringComparison.Ordinal)) continue;
