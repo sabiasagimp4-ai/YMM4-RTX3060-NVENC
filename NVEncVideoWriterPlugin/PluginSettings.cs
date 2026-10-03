@@ -9,6 +9,13 @@ internal static class PluginSettings
 
     internal static void Apply()
     {
+        EnsureSaving();
+        ApplyNow(FrameCacheToolSettings.Default);
+    }
+
+    // From now on every change is applied and saved (without applying the current settings now).
+    internal static void EnsureSaving()
+    {
         var settings = FrameCacheToolSettings.Default;
         if (Interlocked.Exchange(ref subscribed, 1) == 0)
             settings.PropertyChanged += (_, _) =>
@@ -21,7 +28,6 @@ internal static class PluginSettings
                 }
                 catch (Exception exception) { SaveError = exception.GetBaseException().Message; }
             };
-        ApplyNow(settings);
     }
 
     private static void ApplyNow(FrameCacheToolSettings settings)

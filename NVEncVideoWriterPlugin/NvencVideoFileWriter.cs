@@ -144,7 +144,30 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
         }
     }
 
+    // The staging file becomes the output only when the export completes; otherwise (cancelled, failed, frames
+    // missing) it is deleted once the encoder has closed it, so no partial MP4 stays next to the output. A complete
+    // file that cannot replace the output (in use) is kept and named in the error.
     private void DisposeCore()
+    {
+        bool complete = false;
+        try { complete = FinishEncoding(); }
+        finally { if (!complete) DeleteStaging(); }
+        if (!complete) return;
+        try { File.Move(_stagingPath, _outputPath, true); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            throw new IOException($"NVENC 出力は完成しましたが、{_outputPath} に置けませんでした（他のアプリが開いている可能性があります）。完成したファイルは {_stagingPath} に残しています。", error);
+        }
+    }
+
+    private void DeleteStaging()
+    {
+        try { File.Delete(_stagingPath); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+    }
+
+    // Finalizes or abandons the encoder; true when the staging file holds the complete export.
+    private bool FinishEncoding()
     {
         var hadEncoder = _encoderHandle != IntPtr.Zero;
         if (_exportScope is not null && !_exportScope.CanPublish(_acceptedVideoFrames))
@@ -185,8 +208,7 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
             _failed = true;
         if (!_failed && hadEncoder && !File.Exists(_stagingPath))
             throw new IOException($"NVENC の出力ファイルが見つかりません: {_stagingPath}");
-        if (!_failed && hadEncoder)
-            File.Move(_stagingPath, _outputPath, true);
+        return !_failed && hadEncoder;
     }
 
     private void InitializeEncoder(ID3D11Texture2D texture)

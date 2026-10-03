@@ -77,6 +77,31 @@ public sealed class FrameCacheToolSettings : SettingsBase<FrameCacheToolSettings
         set => Set(ref nvencOutput, value);
     }
 
+    // The NVENC output's options in YMM4's export dialog (NvencConfigView), kept between sessions.
+    private NvencCodec nvencCodec = NvencCodec.H264;
+    private int nvencBitrateKbps = 12000;
+    private NvencQuality nvencQuality = NvencQuality.Balanced;
+    private NvencRateControl nvencRateControl = NvencRateControl.YouTubeRecommended;
+    private bool nvencHevcAsync = true, nvencDebugLog;
+    public NvencCodec NvencCodec
+    {
+        get => nvencCodec;
+        set => Set(ref nvencCodec, Enum.IsDefined(value) ? value : NvencCodec.H264);
+    }
+    public int NvencBitrateKbps { get => nvencBitrateKbps; set => Set(ref nvencBitrateKbps, Math.Clamp(value, 100, 200000)); }
+    public NvencQuality NvencQuality
+    {
+        get => nvencQuality;
+        set => Set(ref nvencQuality, Enum.IsDefined(value) ? value : NvencQuality.Balanced);
+    }
+    public NvencRateControl NvencRateControl
+    {
+        get => nvencRateControl;
+        set => Set(ref nvencRateControl, Enum.IsDefined(value) ? value : NvencRateControl.YouTubeRecommended);
+    }
+    public bool NvencHevcAsync { get => nvencHevcAsync; set => Set(ref nvencHevcAsync, value); }
+    public bool NvencDebugLog { get => nvencDebugLog; set => Set(ref nvencDebugLog, value); }
+
     public int SettingsVersion
     {
         get => settingsVersion;

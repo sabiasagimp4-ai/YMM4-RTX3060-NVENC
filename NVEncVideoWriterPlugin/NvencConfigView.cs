@@ -13,7 +13,8 @@ internal sealed class NvencConfigView : UserControl
     private readonly CheckBox _debugLogCheckBox;
     private readonly NvencSettings _settings;
 
-    public NvencConfigView(NvencSettings settings)
+    // changed: after every edit of `settings` (the plugin saves them).
+    public NvencConfigView(NvencSettings settings, Action changed)
     {
         _settings = settings;
         var panel = new StackPanel
@@ -46,8 +47,8 @@ internal sealed class NvencConfigView : UserControl
             IsEnabled = _settings.Codec == NvencCodec.H265,
             Margin = new Thickness(0, 0, 0, 12),
         };
-        _hevcAsyncCheckBox.Checked += (_, _) => _settings.HevcAsync = false;
-        _hevcAsyncCheckBox.Unchecked += (_, _) => _settings.HevcAsync = true;
+        _hevcAsyncCheckBox.Checked += (_, _) => { _settings.HevcAsync = false; changed(); };
+        _hevcAsyncCheckBox.Unchecked += (_, _) => { _settings.HevcAsync = true; changed(); };
         panel.Children.Add(_hevcAsyncCheckBox);
         
         _codecComboBox.SelectionChanged += (_, _) =>
@@ -58,12 +59,11 @@ internal sealed class NvencConfigView : UserControl
                 _ => NvencCodec.H264,
             };
             _hevcAsyncCheckBox.IsEnabled = _settings.Codec == NvencCodec.H265;
-            if (_settings.Codec != NvencCodec.H265)
+            if (_settings.Codec == NvencCodec.H265)
             {
-                return;
+                _settings.HevcAsync = !_hevcAsyncCheckBox.IsChecked.GetValueOrDefault(false);
             }
-
-            _settings.HevcAsync = !_hevcAsyncCheckBox.IsChecked.GetValueOrDefault(false);
+            changed();
         };
 
         _debugLogCheckBox = new CheckBox
@@ -72,8 +72,8 @@ internal sealed class NvencConfigView : UserControl
             IsChecked = _settings.EnableDebugLog,
             Margin = new Thickness(0, 0, 0, 12),
         };
-        _debugLogCheckBox.Checked += (_, _) => _settings.EnableDebugLog = true;
-        _debugLogCheckBox.Unchecked += (_, _) => _settings.EnableDebugLog = false;
+        _debugLogCheckBox.Checked += (_, _) => { _settings.EnableDebugLog = true; changed(); };
+        _debugLogCheckBox.Unchecked += (_, _) => { _settings.EnableDebugLog = false; changed(); };
         panel.Children.Add(_debugLogCheckBox);
 
         panel.Children.Add(new TextBlock
@@ -110,6 +110,7 @@ internal sealed class NvencConfigView : UserControl
         _qualityComboBox.SelectionChanged += (_, _) =>
         {
             _settings.Quality = (NvencQuality)Math.Clamp(_qualityComboBox.SelectedIndex, 0, 2);
+            changed();
         };
         panel.Children.Add(_qualityComboBox);
 
@@ -133,6 +134,7 @@ internal sealed class NvencConfigView : UserControl
                 2 => NvencRateControl.YouTubeRecommended,
                 _ => NvencRateControl.Fixed,
             };
+            changed();
             if (_settings.RateControl == NvencRateControl.YouTubeRecommended)
             {
                 _bitrateTextBox.IsEnabled = false;
@@ -147,6 +149,7 @@ internal sealed class NvencConfigView : UserControl
             if (int.TryParse(_bitrateTextBox.Text, out var value))
             {
                 _settings.BitrateKbps = Math.Clamp(value, 100, 200000);
+                changed();
             }
         };
         panel.Children.Add(_bitrateTextBox);
