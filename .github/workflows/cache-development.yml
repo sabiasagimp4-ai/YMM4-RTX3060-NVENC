@@ -105,6 +105,9 @@ jobs:
             if ($code -eq 0 -or ($output -join "`n") -notmatch 'Edit between capture and live lookup reused stale output') {
               throw 'Negative control did not fail at the stale-live-output regression'
             }
+            # The native failure above is the expected observation. GitHub's pwsh wrapper
+            # otherwise propagates LASTEXITCODE after this script successfully validates it.
+            $global:LASTEXITCODE = 0
           } finally {
             [IO.File]::WriteAllText($path, $original)
           }
