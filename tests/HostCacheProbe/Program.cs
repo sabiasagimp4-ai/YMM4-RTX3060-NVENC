@@ -30,9 +30,14 @@ internal static class Program
         bool unread = args.Contains("--unread");
         bool known = HostIntegration.VerifyHost(host, out var hostReason);
         if (!unread) Check(known, "Host binary verification failed: " + hostReason);
-        if (args.Contains("--edit-description-measure"))
+        if (args.Contains("--edit-description-check"))
         {
-            EditDescriptionMeasurements.Run(host);
+            EditDescriptionChecks.Run(host);
+            return 0;
+        }
+        if (args.Contains("--edit-description-measure") || args.Contains("--edit-description-measure-incremental"))
+        {
+            EditDescriptionMeasurements.Run(host, args.Contains("--edit-description-measure-incremental"));
             return 0;
         }
         if (args.Contains("--idle-parallel-measure"))

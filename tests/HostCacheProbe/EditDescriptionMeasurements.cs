@@ -9,7 +9,7 @@ using YukkuriMovieMaker.Project.Items;
 
 internal static class EditDescriptionMeasurements
 {
-    internal static void Run(Assembly host)
+    internal static void Run(Assembly host, bool incremental = false)
     {
         foreach (bool text in new[] { false, true })
         {
@@ -17,7 +17,7 @@ internal static class EditDescriptionMeasurements
             using var finished = new ManualResetEventSlim();
             var thread = new Thread(() =>
             {
-                try { RunCase(host, text); }
+                try { RunCase(host, text, incremental); }
                 catch (Exception error) { failure = error; }
                 finally { finished.Set(); }
             }) { IsBackground = true, Name = "Edit description measurement" };
@@ -26,7 +26,7 @@ internal static class EditDescriptionMeasurements
             if (failure is not null) throw new InvalidOperationException("Edit description measurement", failure);
         }
     }
-    private static void RunCase(Assembly host, bool text)
+    private static void RunCase(Assembly host, bool text, bool incremental)
     {
         const int Count = 1000;
         var harmony = new Harmony("ymm.tests.edit-description");
@@ -41,7 +41,7 @@ internal static class EditDescriptionMeasurements
                     : new ShapeItem { Frame = 0, Length = 60, Layer = index }));
             timeline.RefreshTimelineLengthAndMaxLayer();
             var scenes = new Scenes(false); scenes.AddScene(timeline); var scene = new Scene(timeline, scenes, []);
-            using var tracker = new KeyDependencyTracker(scene);
+            using var tracker = incremental ? new KeyDependencyTracker(scene, true) : new KeyDependencyTracker(scene);
             string reason = string.Empty;
             Check(SpinWait.SpinUntil(() =>
             {
@@ -67,7 +67,8 @@ internal static class EditDescriptionMeasurements
                     { kind = text ? "texts" : "shapes", items = Count, edited_items = 1, repeat,
                         edit_to_capture_ms = editMilliseconds, full_description_ms = fullMilliseconds,
                         normalized_time = editMilliseconds / fullMilliseconds, model_characters = full.Length,
-                        exact_match = true, debounce_included = false, graphics_render_included = false }));
+                        exact_match = true, debounce_included = false, graphics_render_included = false,
+                        incremental, reused_fragments = tracker.FragmentReused, serialized_fragments = tracker.FragmentSerialized }));
                 }
             }
         }

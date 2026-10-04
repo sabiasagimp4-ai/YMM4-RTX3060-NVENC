@@ -208,10 +208,26 @@ jobs:
           }
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --idle-parallel-measure
           if ($LASTEXITCODE -ne 0) { throw 'After idle rendering measurements failed' }
-      - name: Single-item edit description measurements (1000 shapes and texts, two samples)
+      - name: Incremental descriptions match 1000 actual host edits before enabling production
         run: |
-          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --edit-description-measure
-          if ($LASTEXITCODE -ne 0) { throw 'Edit description measurements failed' }
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --edit-description-check
+          if ($LASTEXITCODE -ne 0) { throw 'Incremental description oracle failed' }
+      - name: Single-item edit descriptions before and after (two samples each)
+        run: |
+          $before = Join-Path $env:RUNNER_TEMP 'edit-description-before'
+          git fetch origin 7ef3980d0b192c0d9009aa1984c226122ae06415
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch edit description baseline' }
+          git worktree add --detach $before 7ef3980d0b192c0d9009aa1984c226122ae06415
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create edit description baseline' }
+          try {
+            $project = Join-Path $before 'tests/HostCacheProbe/HostCacheProbe.csproj'
+            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --edit-description-measure
+            if ($LASTEXITCODE -ne 0) { throw 'Before edit description measurement failed' }
+          } finally {
+            git worktree remove --force $before
+          }
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --edit-description-measure-incremental
+          if ($LASTEXITCODE -ne 0) { throw 'After edit description measurement failed' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

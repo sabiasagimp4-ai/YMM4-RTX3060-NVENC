@@ -10,6 +10,8 @@ namespace NVEncVideoWriterPlugin;
 // Only the cache description uses hashes. Project saving and the host's serializer settings stay untouched.
 internal static class FrameDescriptionJson
 {
+    // A tracker supplies this only for its own scene description. Fresh full descriptions have no converter.
+    [ThreadStatic] internal static JsonConverter? ItemFragments = null;
     internal const int HashThreshold = 4096;
     private sealed record Payload(byte[] Bytes, byte[] Digest, bool SharedVoice);
     private sealed record Payloads(Dictionary<string, Payload> Paths);
@@ -27,6 +29,7 @@ internal static class FrameDescriptionJson
         var settings = Settings();
         settings.Converters.Insert(0, new EmbeddedBytes(paths, writing: true,
             voiceBuffers is null ? [] : new HashSet<byte[]>(voiceBuffers, ReferenceEqualityComparer.Instance), voicePaths));
+        if (ItemFragments is { } fragments) settings.Converters.Add(fragments);
         string model = Json.GetJsonText(snapshot, settings);
         payloads.Add(model, new(paths));
         return model;
