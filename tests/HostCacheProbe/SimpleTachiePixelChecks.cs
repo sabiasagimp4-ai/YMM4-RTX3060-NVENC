@@ -81,8 +81,21 @@ internal static class SimpleTachiePixelChecks
                 long hits = TimelineFrameCache.Hits; Update(30);
                 return TimelineFrameCache.Hits > hits;
             }, TimeSpan.FromSeconds(10)), "The simple player never finished keying: " + TimelineFrameCache.Status);
-            KeyCapture? capture = null;
-            Check(SpinWait.SpinUntil(() => tracker.TryCapture(30, out capture, out _), TimeSpan.FromSeconds(10)), "The live simple tracker never keyed");
+            string preparationReason = string.Empty;
+            Check(SpinWait.SpinUntil(() =>
+            {
+                bool complete = true;
+                foreach (int frame in frames)
+                {
+                    if (tracker.TryCapture(frame, out var prepared, out preparationReason)) prepared!.Dispose();
+                    else complete = false;
+                    Update(frame); TimelineFrameCache.CompletePendingStore(player);
+                    long previousHits = TimelineFrameCache.Hits; Update(frame);
+                    if (TimelineFrameCache.Hits == previousHits) complete = false;
+                }
+                return complete;
+            }, TimeSpan.FromSeconds(10)), "All simple frame dependencies did not become ready: " + preparationReason + "; " + TimelineFrameCache.Status);
+            Check(tracker.TryCapture(30, out var capture, out preparationReason), preparationReason);
             IdleFramePreRenderer.BatchRenderer batch;
             using (capture) batch = new(tracker, capture!.Model);
             using (batch)
