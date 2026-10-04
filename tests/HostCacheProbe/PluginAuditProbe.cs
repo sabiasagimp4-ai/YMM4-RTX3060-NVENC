@@ -49,6 +49,12 @@ internal static class PluginAuditProbe
         string file = Path.Combine(Path.GetDirectoryName(host.Location)!, KnownCode.CommunityAssembly + ".dll");
         if (!File.Exists(file)) { Console.WriteLine("AUDIT|skipped: no Community plugin"); return; }
         var community = Assembly.LoadFrom(file);
+        // Community loads its shaders from pack://application URIs, as inside YMM4 (a WPF application): register the
+        // scheme and an application object for the resource lookup.
+        _ = System.IO.Packaging.PackUriHelper.UriSchemePack;
+        if (System.Windows.Application.Current is null)
+            try { _ = new System.Windows.Application { ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown }; }
+            catch (Exception error) { Console.WriteLine("TRIAL|no WPF application: " + error.Message); }
         Console.WriteLine($"AUDIT|community MVID {community.ManifestModule.ModuleVersionId}");
         // The static scan's results are in run 37178809870 (this rerun only renders).
         try { RunTrials(host, context, community); }
