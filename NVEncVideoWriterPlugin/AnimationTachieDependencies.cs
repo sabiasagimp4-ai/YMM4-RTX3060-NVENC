@@ -77,7 +77,9 @@ internal static class AnimationTachieDependencies
 
     // Image lists and INI existence are read synchronously. Watcher delivery can lag a host file read.
     // The first list is never replaced: an already-created native source can retain its old parts count.
-    internal static bool Listing(string path, out string[] files, out int count)
+    internal static bool Listing(string path, out string[] files, out int count) => Listing(path, out files, out count, null);
+
+    private static bool Listing(string path, out string[] files, out int count, IReadOnlyDictionary<string, string[]>? inventories)
     {
         files = []; count = 0;
         if (!Path.IsPathFullyQualified(path) || !Path.GetExtension(path).Equals(".png", StringComparison.OrdinalIgnoreCase)
@@ -86,7 +88,9 @@ internal static class AnimationTachieDependencies
         if (changedListings.ContainsKey(path)) return false;
         if (!File.Exists(path)) { if (firstListings.ContainsKey(path)) changedListings.TryAdd(path, 0); return false; }
         string directory = Path.GetDirectoryName(path)!, stem = Path.GetFileNameWithoutExtension(path);
-        var list = Directory.EnumerateFiles(directory, stem + "*").Where(file =>
+        IEnumerable<string> candidates = inventories?.TryGetValue(directory, out var inventory) == true
+            ? inventory : Directory.EnumerateFiles(directory, stem + "*");
+        var list = candidates.Where(file =>
         {
             string name = Path.GetFileNameWithoutExtension(file), suffix = name.StartsWith(stem + ".", StringComparison.OrdinalIgnoreCase) ? name[(stem.Length + 1)..].ToLowerInvariant() : "";
             return name.Equals(stem, StringComparison.OrdinalIgnoreCase) || suffix is "a" or "i" or "u" or "e" or "o"
@@ -119,9 +123,22 @@ internal static class AnimationTachieDependencies
             if (!(ReadinessInstalled?.Invoke() == true) || timelineSource.GetType().FullName != "YukkuriMovieMaker.Player.Video.TimelineSource") return false;
             var resources = timelineSource.GetType().GetField("timelineResources", Instance)?.GetValue(timelineSource) as IDictionary;
             if (resources is null) return false;
+            var inventories = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+            // One fresh directory enumeration serves parts that share a folder, without deferring validation.
             foreach (var item in active)
             {
-                if (!witnesses.TryGetValue(item, out var witness) || witness.Paths.Any(path => !Listing(path, out _, out _))
+                if (!witnesses.TryGetValue(item, out var witness)) return false;
+                foreach (string directory in witness.Paths.Select(Path.GetDirectoryName).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    if (inventories.ContainsKey(directory)) continue;
+                    string[] inventory = Directory.EnumerateFiles(directory).Take(16385).Select(Path.GetFullPath).ToArray();
+                    if (inventory.Length > 16384) return false;
+                    inventories.Add(directory, inventory);
+                }
+            }
+            foreach (var item in active)
+            {
+                if (!witnesses.TryGetValue(item, out var witness) || witness.Paths.Any(path => !Listing(path, out _, out _, inventories))
                     || resources[item] is not { } effected) return false;
                 var coreSource = effected.GetType().GetProperty("Source", Instance)?.GetValue(effected);
                 if (coreSource?.GetType().FullName != "YukkuriMovieMaker.Player.Video.Items.TachieSource"
@@ -143,7 +160,7 @@ internal static class AnimationTachieDependencies
                 foreach (string part in new[] { "eye", "mouth" })
                 {
                     if (native.GetType().GetField(part + "File", Instance)!.GetValue(native) is string path && !string.IsNullOrEmpty(path)
-                        && (!Listing(path, out _, out int count) || (int)native.GetType().GetField(part + "PartsCount", Instance)!.GetValue(native)! != count)) return false;
+                        && (!Listing(path, out _, out int count, inventories) || (int)native.GetType().GetField(part + "PartsCount", Instance)!.GetValue(native)! != count)) return false;
                 }
             }
             return true;
