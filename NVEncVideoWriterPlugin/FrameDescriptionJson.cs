@@ -14,6 +14,29 @@ internal static class FrameDescriptionJson
     private sealed record Payload(byte[] Bytes, byte[] Digest, bool SharedVoice);
     private sealed record Payloads(Dictionary<string, Payload> Paths);
     private static readonly ConditionalWeakTable<string, Payloads> payloads = new();
+    private sealed record ComparableModel(string Text);
+    private static readonly ConditionalWeakTable<string, ComparableModel> comparableModels = new();
+
+    // The description contains process object identities for every random item, including inactive ones.
+    // Clone identities necessarily differ. Keep all drawing fields and the identity entry count, and compare
+    // frame keys separately: an active Session frame still cannot pass the clone path.
+    internal static bool SameRenderModel(string live, string clone)
+    {
+        if (live == clone) return true;
+        try { return comparableModels.GetValue(live, WithoutIdentities).Text == comparableModels.GetValue(clone, WithoutIdentities).Text; }
+        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException) { return false; }
+    }
+    private static ComparableModel WithoutIdentities(string model)
+    {
+        var root = Newtonsoft.Json.Linq.JObject.Parse(model);
+        if ((int?)root["Format"] != 3 || root["Resources"] is not Newtonsoft.Json.Linq.JArray resources
+            || resources.Any(value => value.Type != Newtonsoft.Json.Linq.JTokenType.String))
+            throw new InvalidDataException("描画記述の同一性情報を確認できません。");
+        for (int index = 0; index < resources.Count; index++)
+            if (((string)resources[index]!).StartsWith("identity://", StringComparison.Ordinal))
+                resources[index] = "identity://[object identity]";
+        return new(root.ToString(Formatting.None));
+    }
 
     private static JsonSerializerSettings Settings() =>
         typeof(Json).GetField("settings", BindingFlags.Static | BindingFlags.NonPublic)?.GetValue(null)

@@ -17,6 +17,13 @@ internal static class IdleParallelMeasurements
     internal static void Run(Assembly host) => RunBounded(host, 2, false, false);
     internal static void RunChecks(Assembly host)
     {
+        const string identityA = "{\"Format\":3,\"Resources\":[\"identity://1\",\"font://Arial\"],\"X\":10}";
+        const string identityB = "{\"Format\":3,\"Resources\":[\"identity://2\",\"font://Arial\"],\"X\":10}";
+        Check(FrameDescriptionJson.SameRenderModel(identityA, identityB), "Clone object identities prevented a model comparison");
+        Check(!FrameDescriptionJson.SameRenderModel(identityA, identityB.Replace("10", "11"))
+            && !FrameDescriptionJson.SameRenderModel(identityA, identityB.Replace("Arial", "Tahoma"))
+            && !FrameDescriptionJson.SameRenderModel(identityA, identityB.Replace("identity://2", "other://2")),
+            "Model comparison ignored drawing state or non-identity resources");
         var defaults = new FrameCacheToolSettings();
         Check(defaults.IdleWorkers == 0, "Idle workers must default to Auto");
         defaults.IdleWorkers = 99; Check(defaults.IdleWorkers == 4, "Idle worker setting exceeded four");
@@ -24,9 +31,33 @@ internal static class IdleParallelMeasurements
         var saved = YukkuriMovieMaker.Json.Json.LoadFromText<FrameCacheToolSettings>("{\"IdleWorkers\":2}");
         var old = YukkuriMovieMaker.Json.Json.LoadFromText<FrameCacheToolSettings>("{}");
         Check(saved?.IdleWorkers == 2 && old?.IdleWorkers == 0, "Idle worker setting did not preserve manual / old saved settings");
+        CheckBudgetSettingsDiscardOldSample();
         RunBounded(host, 2, false, true);
         RunBounded(host, 4, false, true);
         RunBounded(host, 4, true, true);
+    }
+    private static void CheckBudgetSettingsDiscardOldSample()
+    {
+        const BindingFlags flags = BindingFlags.Static | BindingFlags.NonPublic;
+        var type = typeof(GpuMemoryController);
+        string[] fields = ["configured", "automatic", "maximum", "latestSample"];
+        var previous = fields.Select(name => type.GetField(name, flags)!.GetValue(null)).ToArray();
+        long oldBudget = TimelineFrameCache.GpuRetentionBudgetNow;
+        try
+        {
+            GpuMemoryController.Configure(true, 2049 * GpuMemoryPolicy.MiB);
+            var state = type.GetNestedType("SampleState", BindingFlags.NonPublic)!;
+            type.GetField("latestSample", flags)!.SetValue(null,
+                Activator.CreateInstance(state, [new GpuMemorySnapshot(8L << 30, 1L << 30, 12L << 30, false)]));
+            Check(GpuMemoryController.LatestSample is not null, "Synthetic last sample was not installed");
+            GpuMemoryController.Configure(false, 2048 * GpuMemoryPolicy.MiB);
+            Check(GpuMemoryController.LatestSample is null, "Manual GPU settings left an old Auto sample available to idle workers");
+        }
+        finally
+        {
+            for (int index = 0; index < fields.Length; index++) type.GetField(fields[index], flags)!.SetValue(null, previous[index]);
+            TimelineFrameCache.SetGpuRetentionBudgetDeferred(oldBudget);
+        }
     }
     private static void RunBounded(Assembly host, int workers, bool random, bool checks)
     {
@@ -153,6 +184,23 @@ internal static class IdleParallelMeasurements
                             Check(!tracker.IsSessionKeyed(frame) || worker == 0, "Session frame assigned to another worker");
                             var result = IdleFramePreRenderer.PrimeBatchFrame(tracker, scene, batch, frame, view,
                                 () => true, CancellationToken.None, out string workerReason, allowLive: worker == 0);
+                            if (result != IdleFramePreRenderer.IdleFrameResult.Rendered
+                                && tracker.TryCapture(frame, out var failedLive, out _) && failedLive is not null)
+                            {
+                                using (failedLive)
+                                    if (batch.CloneTracker.TryCapture(frame, out var failedClone, out _) && failedClone is not null)
+                                        using (failedClone)
+                                        {
+                                            int different = 0;
+                                            while (different < Math.Min(failedLive.Model.Length, failedClone.Model.Length)
+                                                && failedLive.Model[different] == failedClone.Model[different]) different++;
+                                            string Snippet(string model) => model.Substring(Math.Max(0, different - 50),
+                                                Math.Min(200, model.Length - Math.Max(0, different - 50)));
+                                            Console.WriteLine($"Idle failed capture frame={frame}: sameModel={FrameDescriptionJson.SameRenderModel(failedLive.Model, failedClone.Model)}; "
+                                                + $"sameKey={failedLive.Key == failedClone.Key}; liveValid={failedLive.Validate()}; cloneValid={failedClone.Validate()}; "
+                                                + $"modelDifference={different}; live={Snippet(failedLive.Model)}; clone={Snippet(failedClone.Model)}");
+                                        }
+                            }
                             Check(result == IdleFramePreRenderer.IdleFrameResult.Rendered, $"Idle frame {frame}: {result}: {workerReason}");
                         }
                     });

@@ -33,6 +33,7 @@ internal static class GpuMemoryController
         {
             if (configured && automatic == allocateAutomatically && maximum == maximumBytes) return;
             configured = true;
+            Volatile.Write(ref latestSample, null);
             automatic = allocateAutomatically;
             maximum = maximumBytes;
             policy.Reset();

@@ -51,6 +51,7 @@ internal static partial class IdleFramePreRenderer
             idleDelaySeconds = delaySeconds;
             cacheOrder = order;
             requestedWorkers = workers;
+            Volatile.Write(ref workerCount, 1);
             rangeStart = Math.Max(0, startFrame); rangeEnd = Math.Max(0, endFrameExclusive);
             CancelActiveJobLocked();
             if (session is { } current)
@@ -109,6 +110,7 @@ internal static partial class IdleFramePreRenderer
         lock (gate)
         {
             previous = session;
+            Volatile.Write(ref workerCount, 1);
             session = next;
             CancelActiveJobLocked();
         }
@@ -432,7 +434,7 @@ internal static partial class IdleFramePreRenderer
             liveCapture = null;
             return false;
         }
-        if (liveCapture!.Model != cloneCapture!.Model || liveCapture.Key != cloneCapture.Key
+        if (!FrameDescriptionJson.SameRenderModel(liveCapture!.Model, cloneCapture!.Model) || liveCapture.Key != cloneCapture.Key
             || !liveCapture.Validate(files: false) || !cloneCapture.Validate(files: false))
         {
             liveCapture.Dispose();
@@ -449,7 +451,7 @@ internal static partial class IdleFramePreRenderer
         KeyCapture liveCapture, KeyCapture cloneCapture, TimelineFrameCache.PrimeTicket? ticket = null)
     {
         if (token.IsCancellationRequested || liveCapture.Key != cloneCapture.Key
-            || liveCapture.Model != cloneCapture.Model || !liveCapture.Validate(files: false) || !cloneCapture.Validate(files: false)
+            || !FrameDescriptionJson.SameRenderModel(liveCapture.Model, cloneCapture.Model) || !liveCapture.Validate(files: false) || !cloneCapture.Validate(files: false)
             || liveScene.ID != cloneScene.ID || liveScene.Timeline.ID != cloneScene.Timeline.ID
             || viewport.SceneId != cloneScene.ID || viewport.TimelineId != cloneScene.Timeline.ID)
             return false;
