@@ -35,6 +35,7 @@ jobs:
       - run: dotnet run --project tests/StoreChecksHarness/StoreChecks.csproj -c Release
       - run: dotnet run --project tests/ReadinessChecks/ReadinessChecks.csproj -c Release
       - run: dotnet run --project tests/CacheAdversarialChecks/CacheAdversarialChecks.csproj -c Release
+      - run: dotnet run --project tests/DescriptionJsonChecks/DescriptionJsonChecks.csproj -c Release
 
   host:
     runs-on: ubuntu-latest
@@ -111,7 +112,21 @@ jobs:
           } finally {
             [IO.File]::WriteAllText($path, $original)
           }
-      - name: Dependency keys against the real host
+      - name: Voice descriptions before hashing (two samples on the same runner)
+        run: |
+          $before = Join-Path $env:RUNNER_TEMP 'voice-description-before'
+          git fetch --no-tags origin c6bbe36364948799130ca6c0100ab5d4932f4078
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch the measurement-only baseline' }
+          git worktree add --detach $before c6bbe36364948799130ca6c0100ab5d4932f4078
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create the baseline worktree' }
+          try {
+            $project = Join-Path $before 'tests/CacheChecks/CacheChecks.csproj'
+            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --voice-measure
+            if ($LASTEXITCODE -ne 0) { throw 'Baseline voice measurement failed' }
+          } finally {
+            git worktree remove --force $before
+          }
+      - name: Dependency keys against the real host (includes two after measurements)
         run: |
           dotnet run --project tests/CacheChecks/CacheChecks.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR
           if ($LASTEXITCODE -ne 0) { throw 'Cache checks failed' }

@@ -36,6 +36,7 @@ internal static class Program
                 AccessTools.StaticFieldRefAccess<object>(field)() ??= Activator.CreateInstance(typeof(List<>).MakeGenericType(field.FieldType.GetGenericArguments()))!;
         VoiceDescriptionMeasurements.Run();
         if (voiceMeasureOnly) return 0; // Additional paired benchmark process; the full CI suite still runs separately.
+        VoiceDescriptionChecks.Run();
         var timeline = new Timeline();
         var scenes = new Scenes(false);
         scenes.AddScene(timeline);

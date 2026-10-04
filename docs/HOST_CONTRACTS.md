@@ -44,6 +44,7 @@ Harmony 2.4.2は一部の例外フィルター付きmethodを作り直せない�
 - Harmony finalizerは例外がなくても走る。遅延保存へ渡すcaptureは `Pending.HandOver()` で移管し、`DeferredStore.Dispose` がReleaseする。
 - 停止時の遅延保存は対応playerのBeforeEditで仕上げる。refresh契約がない版は同期readbackが必要となる場合があり、GPU非待機を一律保証しない。
 - idle複製はTimeline.Lengthも写し、liveの検証済み指紋を引き継ぐ。キーとlease指紋の一致を省略しない。複製・tracker・`TimelineSourceAndDevices` は1本のworker threadで作成・使用・破棄し、モデルと検証済み指紋が同じ間はバッチをまたいで使い回す。仕事が2秒途切れたら解放する。
+- ボイスの圧縮配列は4.56.1.0のホストでは読み取り専用で、生成時は配列を差し替える。idleの複製には記述の内容と一致した配列だけを共有する。JSONに入らない音声パスは `VoiceItem.customVoiceFilePath` に設定し、ライブの `TemporaryFile` の所有権は移さない。元のパスの変更はcaptureの採用時にも確認し、通知がなくても記述し直す。このfieldと `FilePath` は、既存のcoreのGetFiles witnessが収集するVoiceItem全体のfingerprintに含まれる。fieldを確認できない版では、その複製を拒否する。
 - フレーム時刻はホスト同様 `VideoInfo.GetTimeFrom` で作り、正確なticksをキーにする。丸めて別sampleを共有しない。
 - 素材をホストが保持したまま上書きすると、新しい指紋で古い画像を保存し得る。`HostContent` の再起動までのbypassを、ファイルwatch通知だけで解除しない。
 

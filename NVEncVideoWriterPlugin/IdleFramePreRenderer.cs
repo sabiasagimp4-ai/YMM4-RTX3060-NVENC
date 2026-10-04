@@ -499,9 +499,13 @@ internal static partial class IdleFramePreRenderer
         return new Scene(root, cloneScenes, snapshot.ParentScenes);
     }
 
-    internal static Scene CloneSceneFromModel(string model) =>
-        CloneScene(YukkuriMovieMaker.Json.Json.LoadFromText<ModelSnapshot>(model)
+    internal static Scene CloneSceneFromModel(string model)
+    {
+        var clone = CloneScene(FrameDescriptionJson.Load<ModelSnapshot>(model)
             ?? throw new InvalidDataException("描画状態を読み込めませんでした。"));
+        FrameVoiceCloneState.Restore(clone, model);
+        return clone;
+    }
 
     private static void OnInput(object sender, PreProcessInputEventArgs args)
     {

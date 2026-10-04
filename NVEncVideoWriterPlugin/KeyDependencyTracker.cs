@@ -156,7 +156,7 @@ internal sealed class KeyDependencyTracker : IDisposable
             // A setting changed without a notification is caught here too: describe again rather than issue captures
             // that every validation would reject.
             if (cachedRevision >= 0 && cachedRevision == Revision && (!scene.ParentScenes.AsSpan().SequenceEqual(cachedParents)
-                || !CachedEnvironment.IsCurrent())) Invalidate();
+                || !CachedEnvironment.IsCurrent() || !FrameVoiceCloneState.Current(cachedModel))) Invalidate();
             long before = Revision;
             if (cachedRevision != before)
             {
@@ -303,7 +303,8 @@ internal sealed class KeyDependencyTracker : IDisposable
     {
         lastDescribeTicks = description.Ticks;
         if (current != Revision
-            || !new EnvironmentWitness(description.Code, description.Fonts, description.SourceReaders, description.Settings).IsCurrent())
+            || !new EnvironmentWitness(description.Code, description.Fonts, description.SourceReaders, description.Settings).IsCurrent()
+            || !FrameVoiceCloneState.Current(description.Model))
         {
             if (current == Revision) Invalidate();
             return false;
@@ -743,7 +744,8 @@ internal sealed class KeyCapture : IDisposable
     // (edits, settings, scene parents, dynamic inputs) stays on every call.
     public bool Validate(bool files = true)
     {
-        if (Volatile.Read(ref disposed) != 0 || !tracker.ValidateRevision(Revision) || !environment.IsCurrent() || !tracker.HasParents(parents))
+        if (Volatile.Read(ref disposed) != 0 || !tracker.ValidateRevision(Revision) || !environment.IsCurrent() || !tracker.HasParents(parents)
+            || !FrameVoiceCloneState.Current(Model))
             return false;
         // Without callbacks (no provider, no path check) nothing can change between the checks above and the return.
         bool checkPaths = files && lease is not null;
@@ -752,7 +754,8 @@ internal sealed class KeyCapture : IDisposable
         // A provider's IsCurrent can re-enter the editor: the project and environment are checked again after the
         // callbacks. (Each provider is asked once: one that changes another provider's state during its own check, after
         // that provider was asked, is not caught.)
-        return tracker.ValidateRevision(Revision) && environment.IsCurrent() && tracker.HasParents(parents) && Volatile.Read(ref disposed) == 0;
+        return tracker.ValidateRevision(Revision) && environment.IsCurrent() && tracker.HasParents(parents)
+            && FrameVoiceCloneState.Current(Model) && Volatile.Read(ref disposed) == 0;
     }
     public void Dispose() { if (Interlocked.Exchange(ref disposed, 1) == 0) lease?.Dispose(); }
 }

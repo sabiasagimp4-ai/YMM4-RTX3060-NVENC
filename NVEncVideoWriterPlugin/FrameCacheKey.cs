@@ -88,6 +88,7 @@ internal static class FrameCacheKey
             var timelines = scene.Scenes.Timelines.Append(scene.Timeline).Distinct().OrderBy(t => t.ID).ToArray();
             var items = timelines.SelectMany(t => t.Items).ToArray();
             if (items.Length > 100_000) return Bypass("プロジェクトがキャッシュ検査の上限を超えています。", out reason);
+            var voiceInputs = FrameVoiceCloneState.Capture(timelines);
             var characters = items.Select(GetCharacter).OfType<Character>().Distinct().OrderBy(c => c.Name, StringComparer.Ordinal).ToArray();
             var paths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             var resources = new SortedSet<string>(StringComparer.Ordinal);
@@ -239,7 +240,7 @@ internal static class FrameCacheKey
             var loaders = SettingsBase<PluginLoaderSettings>.Default;
             var snapshot = new
             {
-                Format = 2,
+                Format = 3,
                 Host = typeof(Scene).Assembly.ManifestModule.ModuleVersionId,
                 PluginApi = typeof(CacheProvider).Assembly.ManifestModule.ModuleVersionId,
                 Root = scene.ID,
@@ -264,9 +265,13 @@ internal static class FrameCacheKey
                     Audio = SourceReaderIdentities(sourceReaders[2]),
                 },
             };
-            model = YukkuriMovieMaker.Json.Json.GetJsonText(snapshot);
+            model = FrameDescriptionJson.Serialize(snapshot, items.OfType<VoiceItem>()
+                .Where(FrameVoiceCloneState.CanShare).Select(voice => voice.VoiceCache).OfType<byte[]>(),
+                voiceInputs.Where(input => FrameVoiceCloneState.CanShare(input.Live)).Select(input =>
+                    $"Timelines[{input.TimelineIndex}].Items[{input.ItemIndex}].VoiceCache").ToHashSet(StringComparer.Ordinal));
+            FrameVoiceCloneState.Bind(model, voiceInputs);
             if (model.Length > MaximumModelCharacters)
-                return Bypass("プロジェクトの描画状態がキャッシュ検査の上限を超えています。", out reason);
+                return Bypass($"プロジェクトの描画状態がキャッシュ検査の上限を超えています（埋め込みデータ {FrameDescriptionJson.EmbeddedBytesCount(model) / 1024:N0} KiB、うちボイス {items.OfType<VoiceItem>().Sum(voice => (long)(voice.VoiceCache?.Length ?? 0)) / 1024:N0} KiB）。", out reason);
             // Runtime types in polymorphic parameters and effects are checked while the model is split (strings stay
             // strings, so distinct texts never serialize to the same token): a plugin's type disables the item,
             // timeline or character holding it; elsewhere (project-wide settings) the whole project.
