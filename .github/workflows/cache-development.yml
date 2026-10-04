@@ -92,6 +92,10 @@ jobs:
         run: |
           dotnet run --project tests/CacheChecks/CacheChecks.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR
           if ($LASTEXITCODE -ne 0) { throw 'Cache checks failed' }
+      - name: Lip-sync experiments (temporary)
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --lipsync
+          if ($LASTEXITCODE -ne 0) { throw 'Lip-sync experiments failed' }
       - name: Host integration and WARP pixel parity
         run: |
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --integration

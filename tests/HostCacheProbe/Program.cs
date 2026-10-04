@@ -25,6 +25,13 @@ internal static class Program
         };
         var host = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(hostDir, "YukkuriMovieMaker.dll"));
         var plugin = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.Combine(hostDir, "YukkuriMovieMaker.Plugin.dll"));
+        // Temporary (to be reverted): lip-sync experiments.
+        if (args.Contains("--lipsync-child")) return LipSyncExperiments.Child(host, hostDir, args);
+        if (args.Contains("--lipsync"))
+        {
+            LipSyncExperiments.Run(host, hostDir);
+            return 0;
+        }
         // --unread: a YMM4 build that is not one of the read builds (the ymm4-watch workflow). The cache checks run
         // with the features its contracts allow, as the plugin would use them.
         bool unread = args.Contains("--unread");
