@@ -52,6 +52,7 @@ internal static class Program
         CheckImageSequence();
         CheckDynamicDependencies();
         CheckAmbiguousDrawingOrder();
+        MeasureValidation();
         Type[][] readerTypes = FrameCacheKey.CaptureSourceReaderTypes();
         Check(FrameCacheKey.SourceReadersMatch(readerTypes), "Unchanged source reader stamp mismatched");
         Check(!FrameCacheKey.SourceReadersMatch([readerTypes[0].Append(typeof(Program)).ToArray(), readerTypes[1], readerTypes[2]]), "Source reader list change was not detected");
@@ -972,6 +973,48 @@ internal static class Program
         }
         finally { KnownCode.Trusted = previousTrust; }
     }
+    // Measurement, not a check: what validating a capture and its parts cost per call on one thread (the render thread
+    // runs a capture's validation several times per frame: live, GPU and RAM reuse, the postfix and the deferred store).
+    private static void MeasureValidation()
+    {
+        var timeline = new Timeline();
+        var scenes = new Scenes(false);
+        scenes.AddScene(timeline);
+        var shape = new ShapeItem { Frame = 0, Length = 30, Layer = 1 };
+        timeline.Items = timeline.Items.Add(shape);
+        var previousTrust = KnownCode.Trusted;
+        using var tracker = new KeyDependencyTracker(new Scene(timeline, scenes, []));
+        static double Time(string name, int count, Func<bool> action)
+        {
+            for (int i = 0; i < 2000; i++) if (!action()) throw new InvalidOperationException(name + " failed");
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            for (int i = 0; i < count; i++) if (!action()) throw new InvalidOperationException(name + " failed");
+            double micro = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMicroseconds / count;
+            Console.WriteLine($"  {name}: {micro:F2} us/call ({count} calls)");
+            return micro;
+        }
+        Console.WriteLine("Validation costs on the real host (one thread, no threshold):");
+        var readers = FrameCacheKey.CaptureSourceReaderTypes();
+        Time("FrameCacheKey.DrawingSettings", 20000, () => FrameCacheKey.DrawingSettings().Length > 0);
+        Time("FrameCacheKey.SourceReadersMatch", 20000, () => FrameCacheKey.SourceReadersMatch(readers));
+        WaitForFrameKey(tracker, 5);
+        Check(tracker.TryCapture(5, out var plain, out string reason), reason);
+        using (plain)
+        {
+            Time("KeyCapture.Validate(files: false), no providers", 20000, () => plain!.Validate(files: false));
+            Time("KeyDependencyTracker.TryCapture, described, no files", 5000, () => { bool ok = tracker.TryCapture(5, out var c, out _); c?.Dispose(); return ok; });
+        }
+        try
+        {
+            KnownCode.Trusted = previousTrust.Append(typeof(Program).Assembly.GetName().Name!).ToArray();
+            shape.VideoEffects = [new DynamicBlurEffect()];
+            WaitForFrameKey(tracker, 5);
+            Check(tracker.TryCapture(5, out var dynamic, out reason), reason);
+            using (dynamic) Time("KeyCapture.Validate(files: false), one dynamic provider", 20000, () => dynamic!.Validate(files: false));
+        }
+        finally { KnownCode.Trusted = previousTrust; }
+    }
+
     private static void CheckAmbiguousDrawingOrder()
     {
         var timeline = new Timeline(); var scenes = new Scenes(false); scenes.AddScene(timeline);

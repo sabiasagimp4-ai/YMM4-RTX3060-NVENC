@@ -87,11 +87,19 @@ internal static class FramePixelChecks
                 source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
                 Check(TimelineFrameCache.Hits > oldHits, "Actual source did not hit: " + TimelineFrameCache.Status);
                 oldHits = TimelineFrameCache.Hits;
+                const int ReuseSamples = 200;
+                var reuseTimes = new double[ReuseSamples];
                 var reuseClock = System.Diagnostics.Stopwatch.StartNew();
-                for (int i = 0; i < 8; i++) source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                for (int i = 0; i < ReuseSamples; i++)
+                {
+                    long started = System.Diagnostics.Stopwatch.GetTimestamp();
+                    source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                    reuseTimes[i] = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                }
                 reuseClock.Stop();
-                Check(TimelineFrameCache.Hits - oldHits == 8, "Repeated source cache hit count changed during timing sample");
-                Console.WriteLine($"Measured TimelineSource.Update: baseline {baselineClock.Elapsed.TotalMilliseconds / 3:F2} ms/update; live reuse {reuseClock.Elapsed.TotalMilliseconds / 8:F2} ms/update (3/8 samples; no performance threshold)");
+                Check(TimelineFrameCache.Hits - oldHits == ReuseSamples, "Repeated source cache hit count changed during timing sample");
+                Array.Sort(reuseTimes);
+                Console.WriteLine($"Measured TimelineSource.Update: baseline {baselineClock.Elapsed.TotalMilliseconds / 3:F2} ms/update; live reuse {reuseClock.Elapsed.TotalMilliseconds / ReuseSamples:F3} ms/update, p50 {reuseTimes[ReuseSamples / 2]:F3} ms, p95 {reuseTimes[ReuseSamples * 95 / 100]:F3} ms (3/{ReuseSamples} samples; no performance threshold)");
                 var cached = TimelineFrameCache.Capture(dc, source.Output, 321, 181, new(-160.5f, -90.5f))!;
                 Check(baseline.SequenceEqual(cached), "Actual background/ShapeItem source pixel parity failed");
                 CheckEditDuringLiveLookup(source, timeline, dc);
@@ -118,6 +126,7 @@ internal static class FramePixelChecks
             Console.WriteLine("Actual host automatic source cache: hit/parity/invalidation/GPU cleanup OK");
             CheckExportStore(host, context);
             Check(TimelineFrameCache.GpuBytes == 0, "Export store checks leaked global GPU reservation");
+            DrawOrderMeasurements.Run(host, context);
             if (features.DecoderVerified("YukkuriMovieMaker.Plugin.FileSource.WIC")) CheckImageSequence(host, context, harmony);
             else Console.WriteLine("Image sequence check skipped: the WIC reader is not trusted on this build");
             if (features is { Preview: true, SelectionRects: true })
