@@ -161,7 +161,7 @@
 
 ## 6. GPU に置くフレームを増やす
 
-**検査中：PR #9**（`codex/speedup-6-gpu-retention`）。計測だけの55e9a47のCIが成功。新規保存後の最初の再訪は2回ともGPU 0/8 hit。実装・検査・同一ジョブ前後の実測を [結果](SPEEDUP_RESULTS_2026-10.md) に記録する。
+**済：PR #9**（`codex/speedup-6-gpu-retention`）。検証済みの新規コピーを保持し、再生中の先回り転送、OS予算を使うAuto、device lost時の破棄を追加。同一jobの最初の再訪はGPU 0/8から8/8へ、4.314／1.839から0.664／0.559 ms/frameへ短縮した。WARPの実測・模擬障害・実機で残る確認を [結果](SPEEDUP_RESULTS_2026-10.md) に記録した。
 
 ### 今
 
