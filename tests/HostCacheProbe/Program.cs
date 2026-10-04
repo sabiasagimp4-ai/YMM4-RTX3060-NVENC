@@ -35,6 +35,11 @@ internal static class Program
             IdleParallelMeasurements.Run(host);
             return 0;
         }
+        if (args.Contains("--idle-parallel-check"))
+        {
+            IdleParallelMeasurements.RunChecks(host);
+            return 0;
+        }
         if (args.Contains("--gpu-first-revisit-measure"))
         {
             GpuFirstRevisitMeasurements.Run(host);

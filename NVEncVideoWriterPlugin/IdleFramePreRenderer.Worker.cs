@@ -19,13 +19,17 @@ namespace NVEncVideoWriterPlugin;
 // and TimelineSourceAndDevices).
 internal static partial class IdleFramePreRenderer
 {
-    // Every batch runs on one worker thread, which creates, uses and disposes the batches' renderer (BatchRenderer).
+    // Each worker creates, uses and disposes its own renderer (BatchRenderer) on its owning STA thread.
     // The renderer is kept from batch to batch and released once no batch has come for RendererIdleTime.
-    private static readonly BlockingCollection<Action> work = new();
-    private static Thread? worker;
+    private static readonly BlockingCollection<Action>[] work = Enumerable.Range(0, 4).Select(_ => new BlockingCollection<Action>()).ToArray();
+    private static readonly Thread?[] workers = new Thread?[4];
+    private static readonly int[] dropPending = new int[4];
+    private static long measuredWorkerBytes;
+    internal static void ResetWorkerMemory() => Interlocked.Exchange(ref measuredWorkerBytes, 0);
+    internal static long MeasuredWorkerBytes => Interlocked.Read(ref measuredWorkerBytes);
     private static readonly TimeSpan RendererIdleTime = TimeSpan.FromSeconds(2);
-    private static BatchRenderer? renderer; // worker thread only
-    private static Session? rendererSession; // worker thread only
+    [ThreadStatic] private static BatchRenderer? renderer;
+    [ThreadStatic] private static Session? rendererSession;
 
     // The renderer of an idle clone (BatchRenderer; tests drive batches through this and PrimeFrame). Its Updates
     // skip the live preview's cache: PrimeFrame keys and stores its frames itself.
@@ -42,12 +46,33 @@ internal static partial class IdleFramePreRenderer
     {
         internal BatchRenderer(KeyDependencyTracker liveTracker, string model)
         {
+            MemoryGeneration = GpuMemoryController.AdapterGeneration;
+            MemoryBefore = GpuMemoryController.Probe()?.Sample;
             Model = model;
             Fingerprints = liveTracker.VerifiedFingerprints;
             CloneScene = CloneSceneFromModel(model);
             CloneTracker = new KeyDependencyTracker(CloneScene, Fingerprints);
             try { Source = CreateBatchSource(CloneScene); }
             catch { CloneTracker.Dispose(); throw; }
+        }
+        private long MemoryGeneration { get; }
+        private GpuMemorySnapshot? MemoryBefore { get; }
+        internal void ObserveMemory()
+        {
+            var now = GpuMemoryController.Probe()?.Sample;
+            if (MemoryGeneration != GpuMemoryController.AdapterGeneration) return;
+            if (MemoryBefore is not { Software: false } before || now is not { Software: false } after) return;
+            long delta = after.CurrentUsage - before.CurrentUsage;
+            if (delta <= 0) return;
+            // Include concurrent process allocations and a 2x margin; never lower a measured high-water mark.
+            long reserve = delta > long.MaxValue / 2 ? long.MaxValue : delta * 2;
+            long previous;
+            do
+            {
+                previous = Interlocked.Read(ref measuredWorkerBytes);
+                if (reserve <= previous) return;
+            } while (Interlocked.CompareExchange(ref measuredWorkerBytes, reserve, previous) != previous);
+            if (MemoryGeneration != GpuMemoryController.AdapterGeneration) ResetWorkerMemory();
         }
         internal string Model { get; }
         // The live tracker's verified fingerprints the clone compares its files with (replaced, never changed, when
@@ -95,25 +120,43 @@ internal static partial class IdleFramePreRenderer
         catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException) { }
     }
 
-    private static void Post(Action action)
+    private static void DropAllRenderers()
     {
         lock (gate)
-        {
-            if (worker is null)
-            {
-                var thread = new Thread(WorkerLoop) { IsBackground = true, Name = "YMM4-RTX3060-NVENC idle pre-render" };
-                thread.Start();
-                Volatile.Write(ref worker, thread);
-            }
-        }
-        work.Add(action);
+            for (int index = 0; index < workers.Length; index++)
+                if (workers[index] is not null && Interlocked.Exchange(ref dropPending[index], 1) == 0)
+                {
+                    int assigned = index;
+                    Post(() =>
+                    {
+                        try { DropRenderer(); }
+                        finally { Volatile.Write(ref dropPending[assigned], 0); }
+                    }, assigned);
+                }
     }
 
-    private static void WorkerLoop()
+    private static void Post(Action action, int index = 0)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(index);
+        if (index >= workers.Length) throw new ArgumentOutOfRangeException(nameof(index));
+        lock (gate)
+        {
+            if (workers[index] is null)
+            {
+                var thread = new Thread(() => WorkerLoop(index)) { IsBackground = true, Name = "YMM4 idle pre-render " + index };
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                workers[index] = thread;
+            }
+        }
+        work[index].Add(action);
+    }
+
+    private static void WorkerLoop(int index)
     {
         while (true)
         {
-            if (!work.TryTake(out var action, RendererIdleTime))
+            if (!work[index].TryTake(out var action, RendererIdleTime))
             {
                 DropRenderer(); // a pause in the work: give the renderer's GPU memory back
                 continue;
@@ -121,5 +164,46 @@ internal static partial class IdleFramePreRenderer
             try { action(); }
             catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException) { }
         }
+    }
+
+    // Called on worker 0. All participants finish before the job/token/cursor can be released.
+    private static void DispatchWorkers(int count, Action<int> action)
+    {
+        count = Math.Clamp(count, 1, 4);
+        using var done = new CountdownEvent(count);
+        var failures = new ConcurrentQueue<Exception>();
+        void Run(int index)
+        {
+            try { action(index); }
+            catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
+            { DropRenderer(); failures.Enqueue(error); }
+            finally { done.Signal(); }
+        }
+        for (int index = 1; index < count; index++) { int assigned = index; Post(() => Run(assigned), assigned); }
+        Run(0); done.Wait();
+        if (failures.TryDequeue(out var failure)) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+    }
+
+    internal static void RunWorkersForTests(int count, Action<int> action)
+    {
+        Exception? failure = null;
+        using var finished = new ManualResetEventSlim();
+        Post(() =>
+        {
+            try { DispatchWorkers(count, action); }
+            catch (Exception error) { failure = error; }
+            finally { finished.Set(); }
+        });
+        if (!finished.Wait(TimeSpan.FromSeconds(30))) throw new TimeoutException("Parallel idle workers exceeded 30 seconds");
+        if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+    }
+
+    // A session frame uses the live objects and is assigned exclusively to worker 0.
+    internal static IEnumerable<long> AssignedOrdinals(long first, long last, int worker, int count, Func<long, bool> session)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(first);
+        if (count is < 1 or > 4 || worker < 0 || worker >= count) throw new ArgumentOutOfRangeException(nameof(count));
+        for (long ordinal = first; ordinal <= last; ordinal++)
+            if (session(ordinal) ? worker == 0 : (ordinal - first) % count == worker) yield return ordinal;
     }
 }

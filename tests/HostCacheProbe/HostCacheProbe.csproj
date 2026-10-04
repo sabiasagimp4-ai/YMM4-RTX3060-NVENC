@@ -50,6 +50,7 @@
     <Compile Include="..\..\NVEncVideoWriterPlugin\FileDependencyLease.cs" Link="FileDependencyLease.cs" />
     <!-- The performance harness drives idle batches with this assembly's TimelineFrameCache (IdleCacheOrder is the plugin's public type). -->
     <Compile Include="..\..\NVEncVideoWriterPlugin\IdleFramePlan.cs" Link="IdleFramePlan.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\IdleWorkerPolicy.cs" Link="IdleWorkerPolicy.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\IdleFramePreRenderer.cs" Link="IdleFramePreRenderer.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\IdleFramePreRenderer.Worker.cs" Link="IdleFramePreRenderer.Worker.cs" />
     <Reference Include="YukkuriMovieMaker"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.dll</HintPath><Private>false</Private></Reference>

@@ -37,7 +37,7 @@ internal static class PluginSettings
         GpuMemoryController.Configure(settings.AutomaticGpuBudget,
             (settings.GpuLimitMiB < 0 ? 8192 : settings.GpuLimitMiB) * GpuMemoryPolicy.MiB);
         TimelineFrameCache.SetEnabled(available && settings.PreviewCache, available && settings.ExportCache);
-        IdleFramePreRenderer.Configure(settings.IdleDelaySeconds, settings.IdleOrder, settings.IdleRangeStartFrame, settings.IdleRangeEndFrame);
+        IdleFramePreRenderer.Configure(settings.IdleDelaySeconds, settings.IdleOrder, settings.IdleRangeStartFrame, settings.IdleRangeEndFrame, settings.IdleWorkers);
         IdleFramePreRenderer.Enabled = available && settings.PreviewCache && settings.CacheFramesWhenIdle;
         KnownCode.Trusted = settings.TrustedPlugins;
         // Switched on after start: hook the export now, before the next one begins.

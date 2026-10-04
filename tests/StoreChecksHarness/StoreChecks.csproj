@@ -15,6 +15,7 @@
     <Compile Include="../../NVEncVideoWriterPlugin/CacheMemoryPolicy.cs" Link="CacheMemoryPolicy.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/GpuMemoryPolicy.cs" Link="GpuMemoryPolicy.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/NvencErrors.cs" Link="NvencErrors.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/IdleWorkerPolicy.cs" Link="IdleWorkerPolicy.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/IdleFramePlan.cs" Link="IdleFramePlan.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/IdleCacheOrder.cs" Link="IdleCacheOrder.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameTimeKey.cs" Link="FrameTimeKey.cs" />

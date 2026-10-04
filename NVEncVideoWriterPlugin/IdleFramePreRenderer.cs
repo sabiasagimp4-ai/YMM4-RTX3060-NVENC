@@ -21,6 +21,8 @@ internal static partial class IdleFramePreRenderer
     private static double idleDelaySeconds = 8;
     private static IdleCacheOrder cacheOrder;
     private static int rangeStart, rangeEnd;
+    private static int requestedWorkers;
+    private static int workerCount = 1;
     private static readonly object gate = new();
     private static DispatcherTimer? timer;
     private static Session? session;
@@ -36,14 +38,19 @@ internal static partial class IdleFramePreRenderer
     }
 
     internal static string Status => Volatile.Read(ref status);
+    internal static int WorkerCount => Volatile.Read(ref workerCount);
 
-    internal static void Configure(double delaySeconds, IdleCacheOrder order, int startFrame = 0, int endFrameExclusive = 0) => OnUi(() =>
+    internal static void Configure(double delaySeconds, IdleCacheOrder order, int startFrame = 0, int endFrameExclusive = 0,
+        int workers = 0) => OnUi(() =>
     {
         lock (gate)
         {
-            if (idleDelaySeconds == delaySeconds && cacheOrder == order && rangeStart == startFrame && rangeEnd == endFrameExclusive) return;
+            workers = Math.Clamp(workers, 0, 4);
+            if (idleDelaySeconds == delaySeconds && cacheOrder == order && rangeStart == startFrame && rangeEnd == endFrameExclusive
+                && requestedWorkers == workers) return;
             idleDelaySeconds = delaySeconds;
             cacheOrder = order;
+            requestedWorkers = workers;
             rangeStart = Math.Max(0, startFrame); rangeEnd = Math.Max(0, endFrameExclusive);
             CancelActiveJobLocked();
             if (session is { } current)
@@ -67,9 +74,10 @@ internal static partial class IdleFramePreRenderer
         Volatile.Write(ref enabled, value ? 1 : 0);
         if (!value)
         {
+            Volatile.Write(ref workerCount, 1);
             CancelActiveJob();
             if (timer?.IsEnabled == true) timer.Stop();
-            if (Volatile.Read(ref worker) is not null) Post(DropRenderer);
+            DropAllRenderers();
             UnsubscribeInput();
             SetStatus("アイドル時の先読みは無効です。");
             return;
@@ -142,6 +150,7 @@ internal static partial class IdleFramePreRenderer
         int frame = current.Info.Timeline.CurrentFrame;
         if (frame != current.ObservedFrame)
         {
+            Volatile.Write(ref workerCount, 1);
             lock (gate)
             {
                 MarkActivity(current, "タイムライン移動を検知したため、先読みを中断しました。");
@@ -155,6 +164,7 @@ internal static partial class IdleFramePreRenderer
         Volatile.Write(ref current.IsBusy, busy ? 1 : 0);
         if (busy)
         {
+            Volatile.Write(ref workerCount, 1);
             MarkActivity(current, "YMM4が処理中のため、先読みを中断しました。");
             return;
         }
@@ -171,6 +181,7 @@ internal static partial class IdleFramePreRenderer
         }
         if (viewport.IsPlaying)
         {
+            Volatile.Write(ref workerCount, 1);
             MarkActivity(current, "プレビュー再生中のため、先読みを中断しました。");
             return;
         }
@@ -207,14 +218,16 @@ internal static partial class IdleFramePreRenderer
             SetStatus("指定範囲の停止中キャッシュを確認しました。");
             return;
         }
-        var job = new Job(current);
+        int count = IdleWorkerPolicy.Count(requestedWorkers, Environment.ProcessorCount, GpuMemoryController.LatestSample, measuredWorkerBytes: MeasuredWorkerBytes);
+        Volatile.Write(ref workerCount, count);
+        var job = new Job(current, start, end, count);
         lock (gate)
         {
             if (!ReferenceEquals(session, current) || activeJob is not null) return;
             activeJob = job;
             Post(() => RenderBatch(current, job, viewport, frame, start, end));
         }
-        SetStatus($"停止中キャッシュを進めています（{start:N0} / {length:N0} フレーム）。");
+        SetStatus($"停止中キャッシュを進めています（描画器 {count} 本、{start:N0} / {length:N0} フレーム）。");
     }
 
     private static void RenderBatch(Session current, Job job, TimelineFrameCache.PreviewViewport viewport,
@@ -238,7 +251,7 @@ internal static partial class IdleFramePreRenderer
             {
                 if (first > endOrdinal)
                 {
-                    Advance(current, job, endOrdinal + 1);
+                    for (long skippedOrdinal = startOrdinal; skippedOrdinal <= endOrdinal; skippedOrdinal++) Advance(current, job, skippedOrdinal + 1);
                     SetStatus("通常描画が必要なフレームを飛ばし、停止中キャッシュを続けます。");
                 }
                 else SetStatus(reason);
@@ -248,54 +261,61 @@ internal static partial class IdleFramePreRenderer
             using (initial)
             {
                 if (!initial!.Validate() || !CanContinue(current, job.Token, anchorFrame)) return;
-                var batch = RendererFor(current, initial.Model);
-
-                for (long ordinal = first; ordinal <= endOrdinal; ordinal++)
+                for (long skippedOrdinal = startOrdinal; skippedOrdinal < first; skippedOrdinal++) Advance(current, job, skippedOrdinal + 1);
+                int halted = 0;
+                DispatchWorkers(job.Workers, worker =>
                 {
-                    if (!IdleFramePlan.TryGetFrame(range.Start, range.End, anchorFrame, order, ordinal, out int frame)) return;
-                    if (TimelineFrameCache.StoreIfCreated is { } cache && cache.RamBudget < 32L + 4L * viewport.Width * viewport.Height)
+                    if (!CanContinue(current, job.Token, anchorFrame)) { Interlocked.Exchange(ref halted, 1); return; }
+                    var batch = RendererFor(current, initial.Model);
+                    bool SessionOrdinal(long ordinal) => IdleFramePlan.TryGetFrame(range.Start, range.End, anchorFrame, order, ordinal, out int position)
+                        && current.Tracker.IsSessionKeyed(position);
+                    foreach (long ordinal in AssignedOrdinals(first, endOrdinal, worker, job.Workers, SessionOrdinal))
                     {
-                        SetStatus("1フレームを保存できるRAMの空きを待っています。");
-                        return;
+                        if (!IdleFramePlan.TryGetFrame(range.Start, range.End, anchorFrame, order, ordinal, out int frame))
+                        { Interlocked.Exchange(ref halted, 1); return; }
+                        if (TimelineFrameCache.StoreIfCreated is { } cache && cache.RamBudget < 32L + 4L * viewport.Width * viewport.Height)
+                        {
+                            SetStatus("1フレームを保存できるRAMの空きを待っています。");
+                            Interlocked.Exchange(ref halted, 1); return;
+                        }
+                        if (requestedWorkers == 0 && IdleWorkerPolicy.Count(0, Environment.ProcessorCount,
+                            GpuMemoryController.LatestSample, measuredWorkerBytes: MeasuredWorkerBytes) < job.Workers)
+                        {
+                            lock (gate) { if (ReferenceEquals(activeJob, job)) CancelActiveJobLocked(); }
+                            Volatile.Write(ref workerCount, 1);
+                            Interlocked.Exchange(ref halted, 1); return;
+                        }
+                        if (!CanContinue(current, job.Token, anchorFrame)
+                            || !TimelineFrameCache.TryGetLatestPreviewViewport(current.Info.Timeline, current.Info.Scenes, out var latestViewport)
+                            || !SameView(latestViewport, viewport) || latestViewport.IsPlaying)
+                        { Interlocked.Exchange(ref halted, 1); return; }
+                        using var frameTrace = CacheTrace.Enabled ? CacheTrace.Measure("idle-frame", component: $"worker {worker}",
+                            frameTimeTicks: current.Info.Timeline.VideoInfo.GetTimeFrom(frame).Ticks, usage: "Idle") : null;
+                        var result = PrimeBatchFrame(current.Tracker, current.LiveScene, batch, frame, latestViewport,
+                            () => CanContinue(current, job.Token, anchorFrame), job.Token, out string workerReason, allowLive: worker == 0);
+                        batch.ObserveMemory();
+                        if (frameTrace is not null)
+                        {
+                            frameTrace.Outcome = result.ToString();
+                            frameTrace.Detail = $"workers={job.Workers}; measured-worker-reserve={MeasuredWorkerBytes}";
+                        }
+                        switch (result)
+                        {
+                            case IdleFrameResult.Normal: Interlocked.Increment(ref normal); break;
+                            case IdleFrameResult.Stored: Interlocked.Increment(ref skipped); break;
+                            case IdleFrameResult.NotKeyed when workerReason == CloneMismatch: Interlocked.Increment(ref mismatched); break;
+                            case IdleFrameResult.NotKeyed:
+                                SetStatus(workerReason); Interlocked.Exchange(ref halted, 1); return;
+                            case IdleFrameResult.Stopped: Interlocked.Exchange(ref halted, 1); return;
+                            case IdleFrameResult.Rendered: Interlocked.Increment(ref rendered); break;
+                            default: Interlocked.Increment(ref unavailable); break;
+                        }
+                        Advance(current, job, ordinal + 1);
+                        Thread.Yield();
                     }
-                    if (!CanContinue(current, job.Token, anchorFrame)
-                        || !TimelineFrameCache.TryGetLatestPreviewViewport(current.Info.Timeline, current.Info.Scenes, out var latestViewport)
-                        || !SameView(latestViewport, viewport) || latestViewport.IsPlaying)
-                        return;
-                    switch (PrimeBatchFrame(current.Tracker, current.LiveScene, batch, frame, latestViewport,
-                        () => CanContinue(current, job.Token, anchorFrame), job.Token, out reason))
-                    {
-                        case IdleFrameResult.Normal:
-                            normal++;
-                            Advance(current, job, ordinal + 1);
-                            continue;
-                        case IdleFrameResult.Stored:
-                            skipped++;
-                            Advance(current, job, ordinal + 1);
-                            continue;
-                        // A frame whose clone does not key like the live scene (a plugin that does not survive the
-                        // copy) is passed over: stopping there kept every later frame from
-                        // ever being pre-rendered. A key that is not ready yet (files still being verified) stops the
-                        // batch, to come back to it.
-                        case IdleFrameResult.NotKeyed when reason == CloneMismatch:
-                            mismatched++;
-                            Advance(current, job, ordinal + 1);
-                            continue;
-                        case IdleFrameResult.NotKeyed:
-                            SetStatus(reason);
-                            return;
-                        case IdleFrameResult.Stopped:
-                            return;
-                        case IdleFrameResult.Rendered:
-                            rendered++;
-                            break;
-                        default:
-                            unavailable++;
-                            break;
-                    }
-                    Advance(current, job, ordinal + 1);
-                    Thread.Yield();
-                }
+                });
+                finished = Volatile.Read(ref halted) == 0;
+                if (!finished) return;
             }
             finished = true;
             string stored = (skipped == 0 ? string.Empty : $"（保存済みの {skipped} フレームは描画せず）")
@@ -359,11 +379,12 @@ internal static partial class IdleFramePreRenderer
     // One frame of a batch, as RenderBatch renders it: a frame keyed by the live objects' identities (identity-seeded
     // randomness) from the live scene, since the clone would draw other random values; any other from the clone.
     internal static IdleFrameResult PrimeBatchFrame(KeyDependencyTracker liveTracker, Scene liveScene, BatchRenderer batch, int frame,
-        TimelineFrameCache.PreviewViewport viewport, Func<bool> canContinue, CancellationToken token, out string reason)
+        TimelineFrameCache.PreviewViewport viewport, Func<bool> canContinue, CancellationToken token, out string reason, bool allowLive = true)
     {
         reason = string.Empty;
         if (liveTracker.IsSessionKeyed(frame))
         {
+            if (!allowLive) return IdleFrameResult.Unavailable;
             var live = batch.LiveSourceFor(liveScene);
             return PrimeLiveFrame(liveTracker, liveScene, live, time => live.Update(time, TimelineSourceUsage.Playing),
                 frame, viewport, canContinue, token);
@@ -387,12 +408,13 @@ internal static partial class IdleFramePreRenderer
             if (!canContinue() || !capture!.Validate(files: false)) return IdleFrameResult.Stopped;
             var time = liveScene.Timeline.VideoInfo.GetTimeFrom(frame);
             if (TimelineFrameCache.IsPreviewStored(source, time, capture, viewport)) return IdleFrameResult.Stored;
+            var ticket = TimelineFrameCache.BeginPrime();
             render(time);
             if (!canContinue()) return IdleFrameResult.Stopped;
             if (token.IsCancellationRequested || !capture.Validate(files: false)
                 || viewport.SceneId != liveScene.ID || viewport.TimelineId != liveScene.Timeline.ID)
                 return IdleFrameResult.Unavailable;
-            return TimelineFrameCache.TryPrimePreviewIfCurrent(source, time, TimelineSourceUsage.Playing, viewport, capture.Key, token, capture)
+            return TimelineFrameCache.TryPrimePreviewIfCurrent(source, time, TimelineSourceUsage.Playing, viewport, capture.Key, token, capture, ticket)
                 ? IdleFrameResult.Rendered : IdleFrameResult.Unavailable;
         }
     }
@@ -448,7 +470,7 @@ internal static partial class IdleFramePreRenderer
     {
         lock (gate)
             if (ReferenceEquals(session, current) && ReferenceEquals(activeJob, job) && !job.Token.IsCancellationRequested)
-                Interlocked.Exchange(ref current.NextOrdinal, ordinal);
+                Interlocked.Exchange(ref current.NextOrdinal, job.Cursor.Complete(ordinal - 1));
     }
 
     // A redraw of the same view only refreshes the timestamp; it must not abort the batch.
@@ -566,6 +588,7 @@ internal static partial class IdleFramePreRenderer
 
     private static void MarkActivity(Session current, string message)
     {
+        Volatile.Write(ref workerCount, 1);
         Interlocked.Exchange(ref current.LastActivity, Environment.TickCount64);
         CancelActiveJob(current);
         SetStatus(message);
@@ -583,6 +606,8 @@ internal static partial class IdleFramePreRenderer
     {
         try { activeJob?.Cancellation.Cancel(); }
         catch (ObjectDisposedException) { }
+        // Queue behind each worker's in-flight action: release devices on their owning thread after cancellation.
+        DropAllRenderers();
     }
 
     private static void OnUi(Action action)
@@ -639,8 +664,10 @@ internal static partial class IdleFramePreRenderer
         }
     }
 
-    private sealed class Job(Session session) : IDisposable
+    private sealed class Job(Session session, long first, long last, int workers) : IDisposable
     {
+        internal int Workers { get; } = workers;
+        internal IdleCompletionCursor Cursor { get; } = new(first, last);
         internal IdleCacheOrder Order { get; } = cacheOrder;
         internal int RangeStart { get; } = rangeStart;
         internal int RangeEnd { get; } = rangeEnd;

@@ -31,6 +31,8 @@ public sealed class FrameCacheToolSettings : SettingsBase<FrameCacheToolSettings
     private double idleDelaySeconds = 8;
     private IdleCacheOrder idleOrder;
     private int idleRangeStartFrame, idleRangeEndFrame;
+    private int idleWorkers;
+    public int IdleWorkers { get => idleWorkers; set => Set(ref idleWorkers, Math.Clamp(value, 0, 4)); }
     public int IdleRangeStartFrame { get => idleRangeStartFrame; set => Set(ref idleRangeStartFrame, Math.Max(0, value)); }
     // Exclusive end. Zero means the timeline's end; this is an explicit cache range, not YMM4 selection mirroring.
     public int IdleRangeEndFrame { get => idleRangeEndFrame; set => Set(ref idleRangeEndFrame, Math.Max(0, value)); }
@@ -204,6 +206,9 @@ public sealed class PluginSettingsPanel : StackPanel
             new[] { -1, 0, 128, 256, 512, 1024, 2048, 4096, 8192 }.Append(settings.GpuLimitMiB).Distinct().Order()
                 .Select(value => (value == -1 ? "Auto（GPU予算から配分）" : value == 0 ? "使わない" : $"{value:N0} MiB", (object)value)));
         // The pre-renderer reads the timeline from the tool (IdleFramePreRenderer.SetTimelineToolInfo).
+        AddChoice("停止中の描画器", nameof(FrameCacheToolSettings.IdleWorkers),
+            new[] { 0, 1, 2, 4 }.Append(settings.IdleWorkers).Distinct().Order()
+                .Select(value => (value == 0 ? "Auto（コア数とVRAMから決定）" : $"{value} 本", (object)value)));
         var idle = new CheckBox
         {
             Content = new TextBlock { Text = "停止中にフレームをキャッシュする（ツール「描画キャッシュ」を開いている間）", TextWrapping = TextWrapping.Wrap },

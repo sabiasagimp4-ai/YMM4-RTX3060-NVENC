@@ -152,6 +152,10 @@ jobs:
         run: |
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu-retention-check
           if ($LASTEXITCODE -ne 0) { throw 'GPU retention extension checks failed' }
+      - name: Idle parallel workers, pixel parity and cancellation (2 and 4 workers)
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --idle-parallel-check
+          if ($LASTEXITCODE -ne 0) { throw 'Idle parallel worker checks failed' }
       - name: GPU retention, invalidation and trace measurement (WARP)
         run: |
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR --preview-performance
@@ -188,10 +192,22 @@ jobs:
           }
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu-first-revisit-measure
           if ($LASTEXITCODE -ne 0) { throw 'GPU first revisit measurement failed' }
-      - name: Idle single-worker measurements (two samples, WARP)
+      - name: Idle before and after measurements (two samples each, WARP)
         run: |
+          $before = Join-Path $env:RUNNER_TEMP 'idle-parallel-before'
+          git fetch origin 30abd8cc1e4cbeb4dc95cab172cd4cff731871b9
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch idle rendering baseline' }
+          git worktree add --detach $before 30abd8cc1e4cbeb4dc95cab172cd4cff731871b9
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create idle rendering baseline' }
+          try {
+            $project = Join-Path $before 'tests/HostCacheProbe/HostCacheProbe.csproj'
+            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --idle-parallel-measure
+            if ($LASTEXITCODE -ne 0) { throw 'Before idle rendering measurement failed' }
+          } finally {
+            git worktree remove --force $before
+          }
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --idle-parallel-measure
-          if ($LASTEXITCODE -ne 0) { throw 'Idle single-worker measurements failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'After idle rendering measurements failed' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
