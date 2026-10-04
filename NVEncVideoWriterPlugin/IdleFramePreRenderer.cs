@@ -461,20 +461,24 @@ internal static partial class IdleFramePreRenderer
 
     private static CursorPoint lastCursor;
 
-    // Keys, text, buttons, wheel, pen and touch, and mouse moves that move the cursor. WPF also raises mouse moves
-    // without any input whenever the layout under the cursor may have changed, for example when the cache bars
-    // repaint because a frame was stored; counting those let the pre-renderer cancel itself.
+    // Keys, text, buttons, wheel, pen and touch, and drags (mouse moves that move the cursor with a button held). A
+    // plain move over YMM4 is not an edit: counting it kept the pre-renderer from ever starting while the cursor rested
+    // on the window and drifted (a user's trace: 8 s without a move never came). WPF also raises mouse moves without
+    // any input whenever the layout under the cursor may have changed, for example when the cache bars repaint
+    // because a frame was stored; counting those let the pre-renderer cancel itself.
     private static bool IsUserInput(InputEventArgs? input)
     {
         switch (input)
         {
             case MouseButtonEventArgs or MouseWheelEventArgs:
                 return true;
-            case MouseEventArgs when input.RoutedEvent == Mouse.PreviewMouseMoveEvent:
+            case MouseEventArgs move when input.RoutedEvent == Mouse.PreviewMouseMoveEvent:
                 if (!GetCursorPos(out var cursor)) return true;
                 bool moved = cursor.X != lastCursor.X || cursor.Y != lastCursor.Y;
                 lastCursor = cursor;
-                return moved;
+                return moved && (move.LeftButton == MouseButtonState.Pressed || move.RightButton == MouseButtonState.Pressed
+                    || move.MiddleButton == MouseButtonState.Pressed || move.XButton1 == MouseButtonState.Pressed
+                    || move.XButton2 == MouseButtonState.Pressed);
             case MouseEventArgs or KeyboardFocusChangedEventArgs:
                 return false;
             case KeyboardEventArgs or TextCompositionEventArgs or StylusEventArgs or TouchEventArgs:

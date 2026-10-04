@@ -175,24 +175,32 @@ internal static partial class TimelineFrameCache
             scope = new ContextScope(context);
             target = TargetFor(context, viewport, pool, out pooled);
             context.Target = target;
-            if (sceneOrigin is { } origin)
+            // Where a stored frame's extra time goes (drawing the host's output here, or the copy): traced separately.
+            var draw = CacheTrace.Measure("readback-draw", "cpu-wall");
+            if (draw is not null) draw.Detail = $"{viewport.Width}x{viewport.Height} dpi {viewport.DpiX:0.#}";
+            try
             {
-                context.Transform = Matrix3x2.Identity;
-                scope.BeginDraw();
-                context.Clear(new Color4(0, 0, 0, 0));
-                context.DrawImage(output, -origin);
+                if (sceneOrigin is { } origin)
+                {
+                    context.Transform = Matrix3x2.Identity;
+                    scope.BeginDraw();
+                    context.Clear(new Color4(0, 0, 0, 0));
+                    context.DrawImage(output, -origin);
+                }
+                else
+                {
+                    context.Transform = viewport.Transform;
+                    ApplyModes(context, viewport);
+                    scope.BeginDraw();
+                    context.Clear(new Color4(0, 0, 0, 1));
+                    context.DrawImage(output, viewport.TargetOffset);
+                }
+                scope.EndDraw();
             }
-            else
-            {
-                context.Transform = viewport.Transform;
-                ApplyModes(context, viewport);
-                scope.BeginDraw();
-                context.Clear(new Color4(0, 0, 0, 1));
-                context.DrawImage(output, viewport.TargetOffset);
-            }
-            scope.EndDraw();
+            finally { draw?.Dispose(); }
             context.Target = null;
-            if (!QueueStagingCopy(target, viewport, pool, ref readable, ref immediate)) return null;
+            using (CacheTrace.Measure("readback-copy", "cpu-wall"))
+                if (!QueueStagingCopy(target, viewport, pool, ref readable, ref immediate)) return null;
             if (show && sceneOrigin is null)
             {
                 // The target is not drawn to again while the copy is shown: like UploadPreview's bitmap, an unchanging
