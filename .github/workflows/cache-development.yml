@@ -208,6 +208,10 @@ jobs:
           }
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --idle-parallel-measure
           if ($LASTEXITCODE -ne 0) { throw 'After idle rendering measurements failed' }
+      - name: Single-item edit description measurements (1000 shapes and texts, two samples)
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --edit-description-measure
+          if ($LASTEXITCODE -ne 0) { throw 'Edit description measurements failed' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
