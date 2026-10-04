@@ -178,6 +178,7 @@ internal static partial class TimelineFrameCache
     internal static bool TryInstall(Assembly host, Harmony harmony, out string reason)
     {
         var patched = new List<MethodBase>();
+        bool readinessAdded = false;
         try
         {
             var features = HostFeatures.For(host);
@@ -254,6 +255,7 @@ internal static partial class TimelineFrameCache
             }
             if (!FrameRenderReadiness.TryInstall(host, harmony, out reason))
                 throw new NotSupportedException(reason);
+            readinessAdded = true;
             if (!NativeTachieReadiness.TryInstall(host, harmony, out reason))
                 throw new NotSupportedException(reason);
             reason = string.Empty;
@@ -261,6 +263,7 @@ internal static partial class TimelineFrameCache
         }
         catch (Exception error)
         {
+            if (readinessAdded) FrameRenderReadiness.Uninstall(harmony);
             foreach (var target in patched)
                 try { harmony.Unpatch(target, HarmonyPatchType.All, harmony.Id); } catch { }
             reason = "キャッシュ用フックを接続できません: " + error.GetBaseException().Message;

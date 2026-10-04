@@ -17,7 +17,7 @@ internal static class AnimationTachieChecks
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     internal static void Run(Assembly host)
     {
-        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite" })
+        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback" })
         {
             Exception? failure = null;
             using var finished = new ManualResetEventSlim();
@@ -37,6 +37,7 @@ internal static class AnimationTachieChecks
 
     private static void RunCase(Case test, string name, Assembly host)
     {
+        if (name == "rollback") { test.CheckInstallRollback(host); return; }
         if (name == "retained-ini")
         {
             string ini = Path.ChangeExtension(test.Fixture.Images[0], ".ini");
@@ -76,6 +77,10 @@ internal static class AnimationTachieChecks
             Check(TimelineFrameCache.Hits == hits, "Changed part was served from cache");
             return;
         }
+        if (name == "hidden-vowels")
+            Check(AnimationTachieDependencies.TryFiles(test.Fixture.Tachies[0], test.Fixture.Timeline, out var files)
+                && files.Contains(Path.Combine(test.Fixture.Root, "mouth.A.png"), StringComparer.OrdinalIgnoreCase),
+                "Upper-case vowel accepted by the host was omitted from dependencies");
         int[] frames = [0, 29, 30, 31, 35, 40, 45, 50, 59, 60, 74, 89, 90, 104, 119, 120, 149, 150];
         var reference = frames.ToDictionary(frame => frame, frame => { test.Update(frame); return test.Pixels(); });
         if (name == "hidden-vowels")
@@ -133,13 +138,16 @@ internal static class AnimationTachieChecks
                 var session = Activator.CreateInstance(sessionType, Instance, null, [30], null)!;
                 sessionType.GetMethod("Publish", Instance)!.Invoke(session, [0, 0.0]);
                 sessionType.GetMethod(terminal, Instance)!.Invoke(session, null);
-                sessionField.SetValue(core, session); taskField.SetValue(core, Task.CompletedTask);
-                object[] args = [TimelineSourceUsage.Playing, 0, 30, session, Task.CompletedTask, TimeSpan.Zero, null!, null!];
+                var completedTask = Task.CompletedTask;
+                sessionField.SetValue(core, session); taskField.SetValue(core, completedTask);
+                Check((int)sessionType.GetProperty("PublishedFrameCount")!.GetValue(session)! == 1 && completedTask.IsCompletedSuccessfully, "Partial-session control was not published successfully");
+                object[] args = [TimelineSourceUsage.Playing, 0, 30, session, completedTask, TimeSpan.Zero, null!, null!];
                 Check(!NativeTachieReadiness.ValueReady(core, 4, args, 0), "Partially published " + terminal + " was accepted as completed zero");
             }
         }
         finally { sessionField.SetValue(core, originalSession); taskField.SetValue(core, originalTask); }
     }
+    private static void NoOp() { }
     private static void ShortWait(object[] __args) => __args[5] = TimeSpan.Zero;
     private static object CoreSource(object source, TachieItem item)
     {
@@ -172,7 +180,7 @@ internal static class AnimationTachieChecks
             {
                 var shapes = new[] { MouthShape.A, MouthShape.I, MouthShape.U, MouthShape.E, MouthShape.O };
                 for (int i = 0; i < shapes.Length; i++)
-                    File.WriteAllBytes(Path.Combine(Fixture.Root, "mouth." + shapes[i].ToString().ToLowerInvariant() + ".png"),
+                    File.WriteAllBytes(Path.Combine(Fixture.Root, "mouth." + (i == 0 ? "A" : shapes[i].ToString().ToLowerInvariant()) + ".png"),
                         FramePixelChecks.Png(80, 100, (x, y) => ((byte)(40 + i * 40), (byte)20, (byte)220, (byte)(y >= 60 && y < 64 + i * 3 ? 255 : 0))));
                 foreach (var voice in voices)
                 {
@@ -195,6 +203,25 @@ internal static class AnimationTachieChecks
             TimelineFrameCache.Enabled = false; TimelineFrameCache.GpuRetentionEnabled = false;
             Check(TimelineFrameCache.TryInstall(host, harmony, out var reason), reason);
             TimelineFrameCache.UseStore(Store); TimelineFrameCache.TestViewport = value => ReferenceEquals(value, Source) ? View : null;
+        }
+        internal void CheckInstallRollback(Assembly host)
+        {
+            FrameRenderReadiness.Uninstall(harmony); harmony.UnpatchAll(harmony.Id);
+            var foreign = new Harmony("ymm.tests.animation-foreign-read");
+            var method = host.GetType("YukkuriMovieMaker.Player.Video.Items.TachieSource", true)!
+                .GetMethod("ReadVolumeAfterRequiredWait", BindingFlags.Static | BindingFlags.NonPublic)!;
+            try
+            {
+                foreign.Patch(method, prefix: new(typeof(AnimationTachieChecks), nameof(NoOp)));
+                Check(!TimelineFrameCache.TryInstall(host, harmony, out var reason) && reason.Contains("external Harmony owner", StringComparison.Ordinal),
+                    "Conflicting lip-sync patch was admitted");
+                Check(!FrameRenderReadiness.Installed && !NativeTachieReadiness.Installed,
+                    "A failed native install left readiness state installed");
+                Check(Harmony.GetPatchInfo(method)?.Owners.Contains(foreign.Id) == true,
+                    "Rollback removed someone else's patch");
+            }
+            finally { foreign.UnpatchAll(foreign.Id); }
+            Check(TimelineFrameCache.TryInstall(host, harmony, out var recovered), "Install did not recover after rollback: " + recovered);
         }
         internal void Update(int frame) => Source.Update(Fixture.Timeline.VideoInfo.GetTimeFrom(frame), TimelineSourceUsage.Playing);
         internal byte[] Pixels() => TimelineFrameCache.CapturePreview(Context.DeviceContext, Source.Output, View)!;

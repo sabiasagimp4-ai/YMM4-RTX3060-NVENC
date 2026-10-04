@@ -88,8 +88,12 @@ internal static class NativeTachieReadiness
     private static void Begin(object __instance, out Call? __state)
     {
         __state = null;
-        if (itemField?.GetValue(__instance) is TachieItem item && AnimationTachieDependencies.Character(item.Character))
-            current.Value = __state = new(__instance, item, current.Value);
+        try
+        {
+            if (itemField?.GetValue(__instance) is TachieItem item && AnimationTachieDependencies.Character(item.Character))
+                current.Value = __state = new(__instance, item, current.Value);
+        }
+        catch { FrameRenderReadiness.ObserveAuxiliary(false, "lip-sync-source-inspection"); }
     }
 
     private static void End(Exception? __exception, Call? __state)

@@ -195,6 +195,9 @@ internal static class AnimationTachieMeasurements
                 for (int frame = 0; frame < reference.Length; frame++)
                 {
                     Update(frame);
+                    Check(FrameRenderReadiness.WasLastUpdateReady(source, fixture.Timeline.VideoInfo.GetTimeFrom(frame)),
+                        "Animation ordinary reference was not completed at frame " + frame);
+                    if (frame == 0) DumpNative(source, "ordinary-reference-0");
                     reference[frame] = TimelineFrameCache.Capture(dc, source.Output, AnimationTachieFixture.Width,
                         AnimationTachieFixture.Height, new(-AnimationTachieFixture.Width / 2f, -AnimationTachieFixture.Height / 2f))!;
                     Check(reference[frame].Any(value => value != 0), "Animation reference was empty");
@@ -202,13 +205,21 @@ internal static class AnimationTachieMeasurements
                 Check(reference.Any(pixels => !pixels.SequenceEqual(reference[0])), "Animated eye or mouth never changed pixels");
                 TimelineFrameCache.Enabled = true; TimelineFrameCache.Clear();
                 for (int frame = 0; frame < AnimationTachieFixture.Frames; frame++)
-                { Update(frame); Draw(); TimelineFrameCache.CompletePendingStore(source); }
+                { Update(frame); if (frame == 0) DumpNative(source, "warm-store-0"); Draw(); TimelineFrameCache.CompletePendingStore(source); }
                 Measure("second-play", true, repeat);
                 for (int frame = 0; frame < reference.Length; frame++)
                 {
                     Update(frame);
                     var actual = TimelineFrameCache.Capture(dc, source.Output, AnimationTachieFixture.Width,
                         AnimationTachieFixture.Height, new(-AnimationTachieFixture.Width / 2f, -AnimationTachieFixture.Height / 2f))!;
+                    if (!actual.SequenceEqual(reference[frame]))
+                    {
+                        DumpNative(source, "cached-mismatch-" + frame);
+                        int[] different = Enumerable.Range(0, actual.Length).Where(index => actual[index] != reference[frame][index]).ToArray();
+                        Console.WriteLine("SPEEDUP2B_DIFF " + JsonSerializer.Serialize(new { frame, bytes = different.Length,
+                            samples = different.Take(20).Select(index => new { index, x = index / 4 % AnimationTachieFixture.Width,
+                                y = index / 4 / AnimationTachieFixture.Width, channel = index % 4, expected = reference[frame][index], actual = actual[index] }).ToArray() }));
+                    }
                     Check(actual.SequenceEqual(reference[frame]), "Animation pixel mismatch at frame " + frame);
                 }
                 Console.WriteLine("SPEEDUP2B_PIXELS repeat=" + repeat + "; frames=900; exact=true; smoothing=4; numbered_eyes=3; numbered_mouths=4; default_blink=true");
@@ -222,6 +233,21 @@ internal static class AnimationTachieMeasurements
             FrameRenderReadiness.Uninstall(harmony); harmony.UnpatchAll(harmony.Id);
         }
         Check(TimelineFrameCache.GpuBytes == 0 && TimelineFrameCache.ReadbackPoolBytes == 0, "Animation benchmark leaked GPU resources");
+    }
+    private static void DumpNative(object source, string phase)
+    {
+        var resources = (System.Collections.IDictionary)source.GetType().GetField("timelineResources", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(source)!;
+        foreach (System.Collections.DictionaryEntry entry in resources)
+        {
+            if (entry.Key is not TachieItem item) continue;
+            object core = entry.Value!.GetType().GetProperty("Source")!.GetValue(entry.Value)!;
+            object native = core.GetType().GetField("source", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(core)!;
+            object? Field(string name) => native.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(native);
+            Console.WriteLine("SPEEDUP2B_SOURCE " + JsonSerializer.Serialize(new { phase, character = item.Character.Name,
+                eye = Field("eyeFile"), mouth = Field("mouthFile"), blinkStart = Field("sozaiMabatakiStart"), blinkInterval = Field("sozaiMabatakiSpan"),
+                paths = new[] { "eyeLayer", "mouthLayer", "bodyLayer" }.Select(name =>
+                    new { name, file = Field(name)?.GetType().GetProperty("FilePath")?.GetValue(Field(name)) }).ToArray() }));
+        }
     }
     private static bool SkipLoader() => false;
     private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }

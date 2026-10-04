@@ -3,6 +3,9 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using YukkuriMovieMaker.Commons;
+using YukkuriMovieMaker.Plugin;
+using YukkuriMovieMaker.Settings;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
 
@@ -78,13 +81,14 @@ internal static class AnimationTachieDependencies
     {
         files = []; count = 0;
         if (!Path.IsPathFullyQualified(path) || !Path.GetExtension(path).Equals(".png", StringComparison.OrdinalIgnoreCase)
-            || !File.Exists(path)) return false;
+            || SettingsBase<FileSettings>.Default.FileExtensions.GetFileType(path).HasFlag(FileType.動画)) return false;
         path = Path.GetFullPath(path);
         if (changedListings.ContainsKey(path)) return false;
+        if (!File.Exists(path)) { if (firstListings.ContainsKey(path)) changedListings.TryAdd(path, 0); return false; }
         string directory = Path.GetDirectoryName(path)!, stem = Path.GetFileNameWithoutExtension(path);
         var list = Directory.EnumerateFiles(directory, stem + "*").Where(file =>
         {
-            string name = Path.GetFileNameWithoutExtension(file), suffix = name.StartsWith(stem + ".", StringComparison.OrdinalIgnoreCase) ? name[(stem.Length + 1)..] : "";
+            string name = Path.GetFileNameWithoutExtension(file), suffix = name.StartsWith(stem + ".", StringComparison.OrdinalIgnoreCase) ? name[(stem.Length + 1)..].ToLowerInvariant() : "";
             return name.Equals(stem, StringComparison.OrdinalIgnoreCase) || suffix is "a" or "i" or "u" or "e" or "o"
                 || suffix.Length != 0 && suffix.All(char.IsAsciiDigit);
         }).Take(1025).Select(Path.GetFullPath).Order(StringComparer.OrdinalIgnoreCase).ToArray();
