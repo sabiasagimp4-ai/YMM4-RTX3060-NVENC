@@ -43,7 +43,7 @@ internal static class HostProbe
     {
         const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
         o.AppendLine($"  ProcessorCount={Environment.ProcessorCount}");
-        var settings = YukkuriMovieMaker.Settings.SettingsBase<YukkuriMovieMaker.Settings.YMMSettings>.Default;
+        var settings = YukkuriMovieMaker.Commons.SettingsBase<YukkuriMovieMaker.Settings.YMMSettings>.Default;
         foreach (var property in settings.GetType().GetProperties(all).Where(p => Regex.IsMatch(p.Name, "Voice|Cache|Upsampl|Resampl|LipSync|Kuchipaku|Tachie")))
         {
             object? value;
