@@ -637,9 +637,24 @@ internal static class LipSyncExperiments
                 var composite = compositeType?.GetMethods(Any).FirstOrDefault(m => m.Name == "CreateBitmap" && m.IsStatic);
                 if (composite is not null)
                     probe.Patch(composite, prefix: new HarmonyMethod(typeof(LipSyncExperiments), nameof(CompositePrefix)), postfix: new HarmonyMethod(typeof(LipSyncExperiments), nameof(CompositePostfix)));
-                string? Identifier(string name, string visible) => active.FirstOrDefault(id => id.Contains(visible, StringComparison.Ordinal))?.Replace(visible, name, StringComparison.Ordinal);
-                var mouthIds = mouths.Select(m => Identifier(m, mouths[0])).ToArray();
-                var eyeIds = eyes.Select(e => Identifier(e, eyes[0])).ToArray();
+                // The identifiers as YMM4's PSD reader gives them (PsdFolder items: Id, Path).
+                var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+                var fileType = assemblies.Select(a => a.GetType("PsdParser.PsdFile")).First(t => t is not null)!;
+                var folderType = assemblies.Select(a => a.GetType("YukkuriMovieMaker.Plugin.FileSource.Psd.PsdFolder")).First(t => t is not null)!;
+                var ids = new Dictionary<string, string>();
+                using (var file = (IDisposable)Activator.CreateInstance(fileType, [psd])!)
+                {
+                    object root = folderType.GetMethod("Parse", Any)!.Invoke(null, [file])!;
+                    foreach (object item in (System.Collections.IEnumerable)folderType.GetProperty("Items")!.GetValue(root)!)
+                    {
+                        string id = (string)item.GetType().GetProperty("Id")!.GetValue(item)!, path = (string)item.GetType().GetProperty("Path")!.GetValue(item)!;
+                        if (ids.Count < 3) Console.WriteLine($"  PSD item: Id {id}, Path {path}");
+                        ids[path] = id;
+                    }
+                }
+                string? Identifier(string name) => ids.FirstOrDefault(pair => pair.Key == name || pair.Key.EndsWith("/" + name, StringComparison.Ordinal)).Value;
+                var mouthIds = mouths.Select(Identifier).ToArray();
+                var eyeIds = eyes.Select(Identifier).ToArray();
                 if (mouthIds.Any(id => id is null) || eyeIds.Any(id => id is null)) { Console.WriteLine("PSD tachie: layer identifiers not found"); return; }
                 var settingsType = psdAssembly.GetType("YukkuriMovieMaker.Plugin.Tachie.Psd.PsdFileSettings", true)!;
                 object settings = settingsType.GetMethod("LoadFromPsdFilePath", Any)!.Invoke(null, [psd])!;
