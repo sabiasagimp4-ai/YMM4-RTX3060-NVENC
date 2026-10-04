@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="520" height="100" viewBox="0 0 520 100" role="img" aria-label="TESTED ON THE REAL HOST — 実物の YMM4 Lite 4.56.1.0 で検査">
+  <title>TESTED ON THE REAL HOST — 実物の YMM4 Lite 4.56.1.0 で検査</title>
+  <rect x="1.5" y="1.5" width="517" height="97" rx="16" fill="none" stroke="#8250df" stroke-width="2.5"/>
+  <g transform="translate(58 50)" fill="none" stroke="#8250df" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M0.00 -27.00 L5.69 -21.25 L13.50 -23.38 L15.56 -15.56 L23.38 -13.50 L21.25 -5.69 L27.00 0.00 L21.25 5.69 L23.38 13.50 L15.56 15.56 L13.50 23.38 L5.69 21.25 L0.00 27.00 L-5.69 21.25 L-13.50 23.38 L-15.56 15.56 L-23.38 13.50 L-21.25 5.69 L-27.00 0.00 L-21.25 -5.69 L-23.38 -13.50 L-15.56 -15.56 L-13.50 -23.38 L-5.69 -21.25 Z"/>
+      <path d="M-9 0 l6 7 l12 -14"/>
+    </g>
+  <text x="104" y="40" font-family="'Segoe UI','Hiragino Sans','Yu Gothic UI','Noto Sans JP',Meiryo,Verdana,sans-serif" font-size="15" letter-spacing="2.2" font-weight="600" fill="#8250df">TESTED ON THE REAL HOST</text>
+  <text x="104" y="72" font-family="'Segoe UI','Hiragino Sans','Yu Gothic UI','Noto Sans JP',Meiryo,Verdana,sans-serif" font-size="25" font-weight="700" fill="#8250df">実物の YMM4 Lite 4.56.1.0 で検査</text>
+</svg>

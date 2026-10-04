@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="124" height="28" viewBox="0 0 124 28" role="img" aria-label="license: MIT">
+  <title>license: MIT</title>
+  <rect width="72" height="28" fill="#16191d"/>
+  <rect x="72" width="52" height="28" fill="#c9ecfb"/>
+  <g font-family="'Segoe UI','Hiragino Sans','Yu Gothic UI','Noto Sans JP',Meiryo,Verdana,sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central">
+    <text x="36.0" y="14.5" fill="#f0f3f6" textLength="50" lengthAdjust="spacingAndGlyphs">license</text>
+    <text x="98.0" y="14.5" fill="#0d1117" textLength="30" lengthAdjust="spacingAndGlyphs">MIT</text>
+  </g>
+</svg>
