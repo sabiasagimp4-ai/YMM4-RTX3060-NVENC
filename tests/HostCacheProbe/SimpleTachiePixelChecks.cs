@@ -13,6 +13,9 @@ internal static class SimpleTachiePixelChecks
 {
     internal static void Run(Assembly host)
     {
+        bool preview = TimelineFrameCache.PreviewEnabled, export = TimelineFrameCache.ExportEnabled;
+        var viewport = TimelineFrameCache.TestViewport;
+        var store = TimelineFrameCache.StoreIfCreated;
         foreach (var (hidden, video) in new[] { (false, false), (true, false), (false, true) })
         {
             Exception? failure = null;
@@ -26,6 +29,9 @@ internal static class SimpleTachiePixelChecks
             worker.SetApartmentState(ApartmentState.STA); worker.Start();
             Check(finished.Wait(TimeSpan.FromSeconds(30)), $"Simple tachie case hidden={hidden},video={video} exceeded 30 seconds");
             if (failure is not null) throw new InvalidOperationException($"Simple tachie case hidden={hidden},video={video}", failure);
+            Check(TimelineFrameCache.PreviewEnabled == preview && TimelineFrameCache.ExportEnabled == export
+                && ReferenceEquals(TimelineFrameCache.TestViewport, viewport) && ReferenceEquals(TimelineFrameCache.StoreIfCreated, store),
+                "Simple tachie checks changed the surrounding test's cache configuration");
         }
         Console.WriteLine("Simple tachie pixels: speech boundaries, highest face, no-speech hiding, looping GIF, idle clones and selective overwrite bypass passed.");
     }
@@ -61,6 +67,8 @@ internal static class SimpleTachiePixelChecks
         using var store = new FrameCacheStore(Path.Combine(fixture.Root, "store"), 64L << 20, 0);
         using var tracker = new KeyDependencyTracker(fixture.Scene);
         var oldStore = TimelineFrameCache.StoreIfCreated;
+        bool oldPreview = TimelineFrameCache.PreviewEnabled, oldExport = TimelineFrameCache.ExportEnabled;
+        var oldViewport = TimelineFrameCache.TestViewport;
         int[] frames = [0, 3, 4, 6, 10, 29, 30, 44, 45, 59, 60, 74, 75, 89, 90, 119, 120, 899, 900];
         void Update(int frame) => player.Update(fixture.Timeline.VideoInfo.GetTimeFrom(frame), TimelineSourceUsage.Paused);
         byte[] Pixels() => TimelineFrameCache.CapturePreview(dc, player.Output, view)!;
@@ -167,9 +175,10 @@ internal static class SimpleTachiePixelChecks
         }
         finally
         {
-            TimelineFrameCache.TestViewport = null; TimelineFrameCache.Enabled = false;
+            TimelineFrameCache.TestViewport = oldViewport; TimelineFrameCache.Enabled = false;
             player.Dispose(); context.CacheProvider.Clear();
             if (oldStore is not null) TimelineFrameCache.UseStore(oldStore);
+            TimelineFrameCache.SetEnabled(oldPreview, oldExport);
         }
         Check(TimelineFrameCache.GpuBytes == 0 && TimelineFrameCache.ReadbackPoolBytes == 0, "Simple pixel checks leaked GPU resources");
     }
