@@ -51,7 +51,7 @@ Harmony 2.4.2は一部の例外フィルター付きmethodを作り直せない�
 
 `KnownCode.VerifiedCommunity` は4.56.1.0のCommunityの固定MVID `ac765de8-d44f-44f1-a094-961becf4d22e` と読込場所を確認する。型の正確な一覧と対象外理由は [KnownCode.cs](../NVEncVideoWriterPlugin/KnownCode.cs)。
 
-他アイテム／シーン・音声・未報告ファイル・時計・乱数・native／通信・可変static・前フレーム画像を読む処理を調べた。MotionBlur／AfterImageの履歴依存、AudioVolume、OpenFx、未報告ファイルや未監査処理は自動対象にしない。CameraShake等の同一性をseedとする処理はSessionキーとなり、idle複製は避ける。
+他アイテム／シーン・音声・未報告ファイル・時計・乱数・native／通信・可変static・前フレーム画像を読む処理を調べた。MotionBlur／AfterImage／CircularBlurの履歴依存（CircularBlurはコードを読んだ後の試し描きで判明、[EXTERNAL_PLUGINS_2026-10-04.md](EXTERNAL_PLUGINS_2026-10-04.md)）、AudioVolume、OpenFx、未報告ファイルや未監査処理は自動対象にしない。CameraShake等の同一性をseedとする処理はSessionキーとなり、idle複製は避ける。
 
 ShuffleText／ShuffleTextInOutは、フレーム番号（と入力の番号）だけを種にしたMersenneTwisterで文字を選ぶ。NumberTextは値を `double.ToString`（現在のカルチャ）で書式化する。3つとも `Font` の名前をYMM4と同じくフォント設定から引き（なければArial）、DirectWriteで描く。キーには `Font` から解決したフェイスとファミリーのファイル、インストール済みフォントの識別、NumberTextではカルチャの数値書式を入れる。4.56.1.0のYMM4はUIのカルチャ（`CurrentUICulture`）だけを設定し、`CurrentCulture` はOSの設定のまま。
 

@@ -785,13 +785,15 @@ internal static class Program
         scenes.AddScene(timeline);
         timeline.Items = timeline.Items.Add(With(0, Effect("Bloom.BloomEffect"))).Add(With(60, Effect("MotionBlur.MotionBlurEffect")))
             .Add(With(120, Effect("CameraShake.CameraShakeEffect")))
-            .Add(new ShapeItem { Frame = 180, Length = 30, Layer = 6, ShapeType2 = lensType, ShapeParameter = lens.CreateShapeParameter(null) });
+            .Add(new ShapeItem { Frame = 180, Length = 30, Layer = 6, ShapeType2 = lensType, ShapeParameter = lens.CreateShapeParameter(null) })
+            .Add(With(360, Effect("CircularBlur.CircularBlurEffect")));
         using var tracker = new KeyDependencyTracker(new Scene(timeline, scenes, []));
         Check(WaitForFrameKey(tracker, 10) is { Length: > 0 } && !tracker.RendersNormally(10), "A Community effect that was read was not keyed");
         Check(!tracker.TryCapture(70, out _, out _), "Community MotionBlur (draws from the frames drawn before) was keyed");
+        Check(!tracker.TryCapture(370, out _, out _), "Community CircularBlur (its edges depend on the frame drawn before) was keyed");
         Check(WaitForFrameKey(tracker, 130) is { Length: > 0 } && tracker.RendersNormally(130), "Community CameraShake was not keyed by its identity");
         Check(WaitForFrameKey(tracker, 190) is { Length: > 0 }, "A Community shape that was read was not keyed");
-        Console.WriteLine("Community (4.56.1.0): read effects and shapes keyed, MotionBlur rendered normally, CameraShake keyed by its identity");
+        Console.WriteLine("Community (4.56.1.0): read effects and shapes keyed, MotionBlur and CircularBlur rendered normally, CameraShake keyed by its identity");
 
         // ShuffleText and ShuffleTextInOut (random characters seeded by the frame) and NumberText (a number formatted
         // with the culture) are keyed with the files of the font their Font property names; NumberText's frames only

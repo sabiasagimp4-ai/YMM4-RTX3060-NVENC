@@ -19,10 +19,11 @@ internal sealed class KnownCode
     // Namespaces (after "YukkuriMovieMaker.Plugin.Community.") that draw only their own item from its parameters and
     // time: no other items, scenes or audio, no files they do not report, no clock, no state kept from the frames
     // drawn before. CameraShake, RectangleGlitchNoise, StripeGlitchNoise and WaveClipping seed with the effect's
-    // identity and are keyed by it (FrameCacheKey.IdentitySeeds). Left out: AfterImage and MotionBlur (draw from
-    // the frames drawn before), AudioVolume (audio), ArrangeGroupItems, RadialArrangeGroupItems, TilingGroupItems,
-    // Container and the Scene brush (other items or scenes), OpenFx (external binaries), Lut and GradientMap (files
-    // not reported), and DirectionalColorKey, FillSameground, FillSametype, ParticleOutput, Particlize,
+    // identity and are keyed by it (FrameCacheKey.IdentitySeeds). Left out: AfterImage, MotionBlur and CircularBlur
+    // (draw from the frames drawn before; CircularBlur's edges, found by trial renders in
+    // docs/EXTERNAL_PLUGINS_2026-10-04.md), AudioVolume (audio), ArrangeGroupItems, RadialArrangeGroupItems,
+    // TilingGroupItems, Container and the Scene brush (other items or scenes), OpenFx (external binaries), Lut and
+    // GradientMap (files not reported), and DirectionalColorKey, FillSameground, FillSametype, ParticleOutput, Particlize,
     // PuppetDeformation, VectorFieldWarp and Pen (not read in full). ShuffleText and ShuffleTextInOut draw random
     // characters from a MersenneTwister seeded with the frame (and input index) only, and NumberText formats its value;
     // their fonts are resolved for the key from their Font property, and NumberText's culture with it
@@ -30,7 +31,7 @@ internal sealed class KnownCode
     internal static readonly string[] VerifiedCommunity =
     [
         "Effect.Video.AlphaMask", "Effect.Video.AmbientOcclusion", "Effect.Video.AnisotropicKuwahara", "Effect.Video.Binarization",
-        "Effect.Video.Bloom", "Effect.Video.BlurMap", "Effect.Video.CameraShake", "Effect.Video.Caustics", "Effect.Video.CircularBlur",
+        "Effect.Video.Bloom", "Effect.Video.BlurMap", "Effect.Video.CameraShake", "Effect.Video.Caustics",
         "Effect.Video.ColorBlindness", "Effect.Video.ColorCorrection", "Effect.Video.ColorShift", "Effect.Video.CrossFilter",
         "Effect.Video.CrossHatchShading", "Effect.Video.Dithering", "Effect.Video.EdgeDetection", "Effect.Video.EdgeGlow",
         "Effect.Video.EdgeTrimming", "Effect.Video.FacetedGlass", "Effect.Video.FishEyeLens", "Effect.Video.Flip", "Effect.Video.Fog",

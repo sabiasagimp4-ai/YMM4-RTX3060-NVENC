@@ -131,8 +131,6 @@ internal static class FramePixelChecks
                 Check(TimelineFrameCache.GpuBytes == 0, "Preview delivery checks leaked global GPU reservation");
                 IdleRandomChecks.Run(host, context);
                 Check(TimelineFrameCache.GpuBytes == 0, "Idle random checks leaked global GPU reservation");
-                try { PluginAuditProbe.Run(host, context); } // temporary feasibility probe
-                catch (Exception error) { Console.WriteLine("AUDIT|probe failed: " + error); }
             }
             if (features.DecoderVerified(mediaFoundation)) CheckBoundaryTimes(host, context, videoPath);
             if (features.DecoderVerified(mediaFoundation)) CheckVideoDecodeFailureIsNotStored(host, context, videoPath);
