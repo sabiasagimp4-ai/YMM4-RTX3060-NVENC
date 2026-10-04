@@ -8,7 +8,8 @@ try
     if (args.Length == 0 || args.Contains("disk")) { DiskIdentity(raw: true); DiskIdentity(raw: false); }
     if (args.Length == 0 || args.Contains("dependencies")) DependencyBinding();
     if (args.Length == 0 || args.Contains("publication")) PublicationBarrier();
-    if (args.Length == 0 || args.Contains("cycles")) { ComputeCycles(); ComputeAsyncCycles(); ComputeValidDiamond(); }
+    if (args.Length == 0 || args.Contains("cycles")) { ComputeCycles(); ComputeAsyncCycles(); ComputeUnawaitedRequest(); ComputeValidDiamond(); }
+    if (args.Contains("unawaited")) ComputeUnawaitedRequest();
     if (args.Length == 0 || args.Contains("order")) DrawOrderSafety();
     Console.WriteLine("Adversarial cache checks passed.");
 }
@@ -32,11 +33,12 @@ void DiskIdentity(bool raw)
     File.Copy(Record(first), Record(second), overwrite: true);
     using (var cache = new FrameCacheStore(path, 32768, 65536))
     {
-        Wait(() => cache.DiskBytes > 0, "restart index");
+        // The index is loaded once the unaffected record is read from disk (DiskBytes counts records before the index
+        // holds them, and a request before the index is ready does not wait).
+        Wait(() => cache.TryGet(first, TimeSpan.FromSeconds(2), out var valid, out _) && valid.Span.SequenceEqual(a),
+            "unaffected record remains reusable");
         Check(!cache.TryGet(second, TimeSpan.FromSeconds(2), out _, out _),
             $"{(raw ? "raw" : "compressed")} record substitution returned the wrong frame");
-        Check(cache.TryGet(first, TimeSpan.FromSeconds(2), out var valid, out _) && valid.Span.SequenceEqual(a),
-            "unaffected record remains reusable");
     }
     Console.WriteLine($"Disk identity: {(raw ? "raw" : "compressed")} record substitution rejected.");
 }
@@ -81,9 +83,12 @@ void PublicationBarrier()
 }
 static void ComputeCycles()
 {
+    // Two roots on independent threads wait for each other. The second wait would close the cycle: it is answered
+    // at once without waiting (Computing), so both roots finish, without an error or the timeout.
     using var cache = new DynamicComputeCache(1024, 8);
     using var start = new Barrier(2);
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+    var statuses = new System.Collections.Concurrent.ConcurrentQueue<ComputeCacheStatus>();
     DynamicComputeCache.Computation<int, string>? a = null, b = null;
     int calls = 0;
     a = cache.Register<int, string>("cycle-a", x => x.ToString(), x =>
@@ -91,7 +96,7 @@ static void ComputeCycles()
         if (Interlocked.Increment(ref calls) <= 2)
         {
             Check(start.SignalAndWait(TimeSpan.FromSeconds(5)), "both roots start");
-            b!.ComputeIfNeededAndCheckout(x, true, out var receipt, timeout.Token); receipt?.Dispose();
+            statuses.Enqueue(b!.ComputeIfNeededAndCheckout(x, true, out var receipt, timeout.Token)); receipt?.Dispose();
         }
         return "a";
     }, _ => 1, _ => { }, backgroundThreadSafe: true);
@@ -100,54 +105,78 @@ static void ComputeCycles()
         if (Interlocked.Increment(ref calls) <= 2)
         {
             Check(start.SignalAndWait(TimeSpan.FromSeconds(5)), "both roots start");
-            a!.ComputeIfNeededAndCheckout(x, true, out var receipt, timeout.Token); receipt?.Dispose();
+            statuses.Enqueue(a!.ComputeIfNeededAndCheckout(x, true, out var receipt, timeout.Token)); receipt?.Dispose();
         }
         return "b";
     }, _ => 1, _ => { }, backgroundThreadSafe: true);
     using (a) using (b)
     {
         var roots = new[] { a.ComputeAsync(0), b.ComputeAsync(0) };
-        try { Task.WhenAll(roots).WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult(); } catch (Exception) { }
-        Check(roots.All(t => t.IsCompleted), "cyclic wait stranded cache owners");
-        Check(roots.Any(t => t.Exception?.Flatten().InnerExceptions.Any(e => e is InvalidOperationException) == true),
-            "cross-thread cache cycle was only released by timeout cancellation");
-        Check(roots.All(t => t.Exception?.Flatten().InnerExceptions.All(e => e is not OperationCanceledException) == true),
-            "cycle detection must not wait for cancellation");
-        Check(a.ComputeIfNeededAndCheckout(0, true, out var retry) == ComputeCacheStatus.Ready, "cycle failure must permit retry");
+        Task.WhenAll(roots).WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+        Check(roots.All(t => t.IsCompletedSuccessfully && t.Result is not null), "cyclic waits stranded or failed a root");
+        foreach (var root in roots) root.Result!.Dispose();
+        Check(!timeout.IsCancellationRequested, "the cycle was only released by the timeout");
+        Check(statuses.Count == 2 && statuses.Contains(ComputeCacheStatus.Computing) && statuses.Contains(ComputeCacheStatus.Ready),
+            "one wait of the cycle must be refused (Computing) and the other served: " + string.Join(", ", statuses));
+        Check(a.ComputeIfNeededAndCheckout(0, true, out var retry) == ComputeCacheStatus.Ready, "values stay usable after a refused wait");
         retry!.Dispose();
     }
-    Console.WriteLine("Compute dependencies: independent-root wait cycle fails promptly and permits retry.");
+    Console.WriteLine("Compute dependencies: a cross-thread wait cycle is answered without waiting; both roots finish.");
 }
 static void ComputeAsyncCycles()
 {
+    // A asks for B and B for A, both through ComputeAsync: B's request would close the cycle and gets no receipt at once.
     using var cache = new DynamicComputeCache(0, 8);
     DynamicComputeCache.Computation<int, string>? a = null, b = null;
-    bool recurse = true;
+    bool? bGotA = null;
     int deletes = 0;
     a = cache.Register<int, string>("async-a", x => x.ToString(), x =>
     {
-        if (recurse) { using var child = b!.ComputeAsync(x).GetAwaiter().GetResult(); }
-        return "a";
+        using var child = b!.ComputeAsync(x).GetAwaiter().GetResult();
+        return "a+" + child?.Value;
     }, _ => 1, _ => Interlocked.Increment(ref deletes), backgroundThreadSafe: true);
     b = cache.Register<int, string>("async-b", x => x.ToString(), x =>
     {
         using var child = a!.ComputeAsync(x).GetAwaiter().GetResult();
+        bGotA = child is not null;
         return "b";
     }, _ => 1, _ => Interlocked.Increment(ref deletes), backgroundThreadSafe: true);
     using (a) using (b)
     {
-        try
-        {
-            using var unexpected = a.ComputeAsync(0).WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
-            throw new Exception("async descendant cycle accepted");
-        }
-        catch (InvalidOperationException) { }
-        recurse = false;
-        using var retry = a.ComputeAsync(0).WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
-        Check(retry?.Value == "a", "async descendant cycle must release job capacity for retry");
+        using var root = a.ComputeAsync(0).WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+        Check(root?.Value == "a+b" && bGotA == false, "an async descendant cycle must be answered without a receipt, not by an error or a hang");
     }
-    Check(deletes == 1, "cycle failure must not delete uncreated values or leak the retry borrow");
-    Console.WriteLine("Compute dependencies: async descendant cycle rejects promptly and releases capacity/ownership.");
+    Check(deletes == 2, "each value must be deleted exactly once after use, not " + deletes);
+    Console.WriteLine("Compute dependencies: an async descendant cycle is answered without a receipt; values are released once.");
+}
+static void ComputeUnawaitedRequest()
+{
+    // A starts B and does not wait for it, then keeps running; B asks for A meanwhile. No wait cycle exists, but the
+    // edge A -> B is recorded at the request: B's wait for A is refused (Computing) rather than failed with an error.
+    using var cache = new DynamicComputeCache(1024, 8);
+    ComputeCacheStatus? seen = null;
+    Task<ComputeReceipt<string>?>? unawaited = null;
+    DynamicComputeCache.Computation<int, string>? a = null, b = null;
+    a = cache.Register<int, string>("unawaited-a", x => x.ToString(), x =>
+    {
+        unawaited = b!.ComputeAsync(x);
+        Thread.Sleep(500); // still running while B asks for it
+        return "a";
+    }, _ => 1, _ => { }, backgroundThreadSafe: true);
+    b = cache.Register<int, string>("unawaited-b", x => x.ToString(), x =>
+    {
+        seen = a!.ComputeIfNeededAndCheckout(x, true, out var receipt);
+        receipt?.Dispose();
+        return "b";
+    }, _ => 1, _ => { }, backgroundThreadSafe: true);
+    using (a) using (b)
+    {
+        using var root = a.ComputeAsync(0).WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+        using var child = unawaited!.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+        Check(root?.Value == "a" && child?.Value == "b", "a request a computation started and never awaited failed one of them");
+        Check(seen == ComputeCacheStatus.Computing, "B's request for the running A was expected to be answered without waiting, not " + seen);
+    }
+    Console.WriteLine("Compute dependencies: a request started without waiting does not turn into an error.");
 }
 static void ComputeValidDiamond()
 {

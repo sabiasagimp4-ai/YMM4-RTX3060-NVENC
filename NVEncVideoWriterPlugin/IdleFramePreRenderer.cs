@@ -342,9 +342,11 @@ internal static partial class IdleFramePreRenderer
             // the player will request (a one-tick difference can select another video sample).
             var time = cloneScene.Timeline.VideoInfo.GetTimeFrom(frame);
             if (TimelineFrameCache.IsPreviewStored(source, time, cloneCapture, viewport)) return IdleFrameResult.Stored;
+            // Before the render: a purge while it renders rejects the frame.
+            var ticket = TimelineFrameCache.BeginPrime();
             render(time);
             if (!canContinue()) return IdleFrameResult.Stopped;
-            return TryPrimeIfCurrent(token, liveScene, cloneScene, source, time, viewport, liveCapture, cloneCapture)
+            return TryPrimeIfCurrent(token, liveScene, cloneScene, source, time, viewport, liveCapture, cloneCapture, ticket)
                 ? IdleFrameResult.Rendered : IdleFrameResult.Unavailable;
         }
     }
@@ -374,7 +376,7 @@ internal static partial class IdleFramePreRenderer
 
     internal static bool TryPrimeIfCurrent(CancellationToken token, Scene liveScene, Scene cloneScene,
         object source, TimeSpan time, TimelineFrameCache.PreviewViewport viewport,
-        KeyCapture liveCapture, KeyCapture cloneCapture)
+        KeyCapture liveCapture, KeyCapture cloneCapture, TimelineFrameCache.PrimeTicket? ticket = null)
     {
         if (token.IsCancellationRequested || liveCapture.Key != cloneCapture.Key
             || liveCapture.Model != cloneCapture.Model || !liveCapture.Validate(files: false) || !cloneCapture.Validate(files: false)
@@ -383,7 +385,7 @@ internal static partial class IdleFramePreRenderer
             return false;
         // The clone's capture keys the frame (its key is the live one's): no third tracker describes and verifies the
         // clone per batch. Its files are resolved again once, right before the store commit.
-        return TimelineFrameCache.TryPrimePreviewIfCurrent(source, time, TimelineSourceUsage.Playing, viewport, liveCapture.Key, token, cloneCapture);
+        return TimelineFrameCache.TryPrimePreviewIfCurrent(source, time, TimelineSourceUsage.Playing, viewport, liveCapture.Key, token, cloneCapture, ticket);
     }
 
     private static bool CanContinue(Session current, CancellationToken token, int anchorFrame) =>

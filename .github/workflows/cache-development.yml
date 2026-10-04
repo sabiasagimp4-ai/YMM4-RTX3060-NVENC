@@ -95,7 +95,7 @@ jobs:
         run: |
           $path = Join-Path $env:GITHUB_WORKSPACE 'NVEncVideoWriterPlugin/TimelineFrameCache.cs'
           $original = [IO.File]::ReadAllText($path)
-          $broken = $original.Replace('if (StillCurrent(pending) && currentGeneration ==', 'if (currentGeneration ==')
+          $broken = $original.Replace('ReferenceEquals(state.LastOutput, previousOutput) && StillCurrent(pending))', 'ReferenceEquals(state.LastOutput, previousOutput))')
           if ($broken -eq $original) { throw 'Live validation mutation did not apply' }
           try {
             [IO.File]::WriteAllText($path, $broken)

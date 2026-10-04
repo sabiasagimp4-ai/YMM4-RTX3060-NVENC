@@ -86,11 +86,16 @@ internal sealed class KeyDependencyTracker : IDisposable
     public long CaptureRevision() => Revision;
     public bool ValidateRevision(long capturedRevision) => !Volatile.Read(ref disposed) && Revision == capturedRevision;
 
-    internal readonly record struct EnvironmentWitness(long Code, long Fonts, Type[][] Readers, string Settings)
+    // What a description was made under besides the project: trusted code, installed fonts, the readers (types and
+    // MVIDs) and the drawing settings. One predicate for the tracker's own check, the adoption of a description and
+    // every capture's validation.
+    internal readonly record struct EnvironmentWitness(long Code, long Fonts, Type[][] Readers, string? Settings)
     {
         internal bool IsCurrent() => Code == KnownCode.Generation && Fonts == FontEnvironment.Generation
-            && FrameCacheKey.SourceReadersMatch(Readers) && Settings == SafeDrawingSettings();
+            && FrameCacheKey.SourceReadersMatch(Readers) && Settings is not null && Settings == SafeDrawingSettings();
     }
+
+    private EnvironmentWitness CachedEnvironment => new(cachedCode, cachedFonts, cachedSourceReaders, cachedSettings);
 
     public bool TryGetKey(out string key, out string reason)
     {
@@ -137,9 +142,10 @@ internal sealed class KeyDependencyTracker : IDisposable
             if (disposed) return false;
             // Only when still current: repeating it would keep refreshing the settle window forever.
             FontEnvironment.RefreshIfDue();
+            // A setting changed without a notification is caught here too: describe again rather than issue captures
+            // that every validation would reject.
             if (cachedRevision >= 0 && cachedRevision == Revision && (!scene.ParentScenes.AsSpan().SequenceEqual(cachedParents)
-                || !FrameCacheKey.SourceReadersMatch(cachedSourceReaders) || cachedCode != KnownCode.Generation
-                || cachedFonts != FontEnvironment.Generation)) Invalidate();
+                || !CachedEnvironment.IsCurrent())) Invalidate();
             long before = Revision;
             if (cachedRevision != before)
             {
@@ -201,7 +207,7 @@ internal sealed class KeyDependencyTracker : IDisposable
             if (files.Length == 0)
             {
                 capture = new KeyCapture(this, DynamicKey(), cachedModel, before, cachedParents,
-                    new(cachedCode, cachedFonts, cachedSourceReaders, cachedSettings!), null, dynamicSnapshots, dependencies?.Shown);
+                    CachedEnvironment, null, dynamicSnapshots, dependencies?.Shown);
                 return true;
             }
             if (fingerprintTask is { IsCompleted: true }) AdoptFingerprints(before);
@@ -223,7 +229,7 @@ internal sealed class KeyDependencyTracker : IDisposable
                         return false;
                     }
                     capture = new KeyCapture(this, DynamicKey(), cachedModel, before, cachedParents,
-                        new(cachedCode, cachedFonts, cachedSourceReaders, cachedSettings!), lease, dynamicSnapshots, dependencies?.Shown);
+                        CachedEnvironment, lease, dynamicSnapshots, dependencies?.Shown);
                     reason = string.Empty;
                     return true;
                 }
@@ -285,9 +291,8 @@ internal sealed class KeyDependencyTracker : IDisposable
     private bool Apply(Description description, long current)
     {
         lastDescribeTicks = description.Ticks;
-        if (current != Revision || !FrameCacheKey.SourceReadersMatch(description.SourceReaders)
-            || description.Code != KnownCode.Generation || description.Fonts != FontEnvironment.Generation
-            || description.Settings != SafeDrawingSettings())
+        if (current != Revision
+            || !new EnvironmentWitness(description.Code, description.Fonts, description.SourceReaders, description.Settings).IsCurrent())
         {
             if (current == Revision) Invalidate();
             return false;
@@ -725,10 +730,18 @@ internal sealed class KeyCapture : IDisposable
     // writes, deletes and renames of the files themselves while it is held, so only the last check before a result
     // becomes visible (a store commit, an output swap made after the capture's Update) needs it. Every other check
     // (edits, settings, scene parents, dynamic inputs) stays on every call.
-    public bool Validate(bool files = true) => Volatile.Read(ref disposed) == 0 && tracker.ValidateRevision(Revision)
-        && environment.IsCurrent() && tracker.HasParents(parents) && DynamicCurrent() && (!files || (lease?.VerifyPaths() ?? true))
-        // A provider/path check can re-enter the editor. Recheck the witnesses after callbacks,
-        // not only before them, so a callback cannot validate the snapshot it just invalidated.
-        && tracker.ValidateRevision(Revision) && environment.IsCurrent() && tracker.HasParents(parents) && Volatile.Read(ref disposed) == 0;
+    public bool Validate(bool files = true)
+    {
+        if (Volatile.Read(ref disposed) != 0 || !tracker.ValidateRevision(Revision) || !environment.IsCurrent() || !tracker.HasParents(parents))
+            return false;
+        // Without callbacks (no provider, no path check) nothing can change between the checks above and the return.
+        bool checkPaths = files && lease is not null;
+        if (dynamicSnapshots.Length == 0 && !checkPaths) return Volatile.Read(ref disposed) == 0;
+        if (!DynamicCurrent() || checkPaths && !lease!.VerifyPaths()) return false;
+        // A provider's IsCurrent can re-enter the editor: the project and environment are checked again after the
+        // callbacks. (Each provider is asked once: one that changes another provider's state during its own check, after
+        // that provider was asked, is not caught.)
+        return tracker.ValidateRevision(Revision) && environment.IsCurrent() && tracker.HasParents(parents) && Volatile.Read(ref disposed) == 0;
+    }
     public void Dispose() { if (Interlocked.Exchange(ref disposed, 1) == 0) lease?.Dispose(); }
 }

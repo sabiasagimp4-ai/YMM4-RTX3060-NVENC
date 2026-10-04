@@ -146,7 +146,8 @@ public sealed class DynamicComputeCache : IDisposable
                 else if (!entry.Ready && !waitForOtherThread) return ComputeCacheStatus.Computing;
                 else if (!entry.Ready && entry.OwnerThread == Environment.CurrentManagedThreadId)
                     throw new InvalidOperationException("Recursive computation of the same cache key");
-                dependencyOwner = cache.BeginDependency(entry);
+                // Waiting would close a cycle: answer as without waiting.
+                if (!cache.TryBeginDependency(entry, out dependencyOwner)) return ComputeCacheStatus.Computing;
                 entry.References++; // consumer reservation survives completion, eviction, purge and unregistration
                 cache.Touch(entry);
             }
@@ -240,7 +241,8 @@ public sealed class DynamicComputeCache : IDisposable
                 }
                 else if (!entry.Ready && entry.OwnerThread == Environment.CurrentManagedThreadId)
                     throw new InvalidOperationException("Recursive computation of the same cache key");
-                dependencyOwner = cache.BeginDependency(entry);
+                // Waiting would close a cycle: no receipt, as for a value that cannot be computed now.
+                if (!cache.TryBeginDependency(entry, out dependencyOwner)) return Task.FromResult<ComputeReceipt<TValue>?>(null);
                 entry.References++;
                 cache.Touch(entry);
             }
@@ -264,26 +266,34 @@ public sealed class DynamicComputeCache : IDisposable
         private ComputeReceipt<TValue> Receipt(Entry entry) => new((TValue)entry.Value!, entry.Ticks, entry.Bytes, () => cache.Release(entry));
         public void Dispose() => cache.Unregister(id, this);
     }
-    // Under gate. Reject an edge before reserving a consumer reference: cycle failure
-    // must not strand either a waiter reservation or a job slot. Cached/no-wait hits
-    // have no dependency edge. Multiple consumers of an edge are counted separately.
-    private Entry? BeginDependency(Entry target)
+    // Under gate, before reserving a consumer reference (a refused wait must not strand a reservation or a job slot).
+    // Cached/no-wait hits have no dependency edge; multiple consumers of an edge are counted separately.
+    // An edge is recorded when the computation asks, which is not always when it waits: a request it never awaits (or
+    // one made from work it started and left running) also counts. So a refused wait is not an error: the caller gets
+    // what it gets for a value that is not ready (Computing, or no receipt), and nothing blocks.
+    private bool TryBeginDependency(Entry target, out Entry? owner)
     {
+        owner = null;
         var caller = executing.Value;
-        if (caller is null || caller.Ready || caller.Completion.Task.IsCompleted || target.Ready) return null;
+        if (caller is null || caller.Ready || caller.Completion.Task.IsCompleted || target.Ready) return true;
         var pending = new Stack<Entry>();
         var visited = new HashSet<Entry>();
         pending.Push(target);
         while (pending.TryPop(out var next))
         {
-            if (ReferenceEquals(next, caller)) throw new InvalidOperationException("Cyclic compute cache dependency");
+            if (ReferenceEquals(next, caller))
+            {
+                using var trace = CacheTrace.Measure("compute-cache-cycle");
+                return false;
+            }
             if (!visited.Add(next) || next.Completion.Task.IsCompleted) continue;
             if (next.Dependencies is { } dependencies)
                 foreach (var dependency in dependencies.Keys) pending.Push(dependency);
         }
         var edges = caller.Dependencies ??= [];
         edges[target] = edges.GetValueOrDefault(target) + 1;
-        return caller;
+        owner = caller;
+        return true;
     }
     private void EndDependency(Entry? caller, Entry target)
     {

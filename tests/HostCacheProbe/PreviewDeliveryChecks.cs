@@ -166,7 +166,21 @@ internal static class PreviewDeliveryChecks
                 TimelineSourceUsage.Playing, viewport, null, CancellationToken.None) && primeCaptures == 1,
                 "purge during capture reached the RAM commit");
             Check(store.RamBytes == 0 && store.DiskBytes == 0, "a pre-purge frame was saved into the new generation");
-            Console.WriteLine("Idle prime commit: cancellation and purge during GPU capture reject the completed pixels");
+
+            // The idle pre-renderer renders before it primes: a purge between its render and its prime is caught by the
+            // ticket it took before rendering; a ticket taken after the purge is accepted.
+            afterPrimeCapture = null;
+            var beforeRender = TimelineFrameCache.BeginPrime();
+            TimelineFrameCache.Clear();
+            Check(!TimelineFrameCache.TryPrimePreviewIfCurrent(source, timeline.VideoInfo.GetTimeFrom(28),
+                TimelineSourceUsage.Playing, viewport, null, CancellationToken.None, null, beforeRender),
+                "a purge between the render and the prime reached the RAM commit");
+            Check(store.RamBytes == 0 && store.DiskBytes == 0, "a frame rendered before a purge was saved after it");
+            Check(TimelineFrameCache.TryPrimePreviewIfCurrent(source, timeline.VideoInfo.GetTimeFrom(28),
+                TimelineSourceUsage.Playing, viewport, null, CancellationToken.None, null, TimelineFrameCache.BeginPrime()),
+                "a ticket taken after the purge was refused: " + TimelineFrameCache.Status);
+            TimelineFrameCache.Clear();
+            Console.WriteLine("Idle prime commit: cancellation and purge during GPU capture, and a purge after the render, reject the completed pixels");
         }
         finally { afterPrimeCapture = null; harmony.UnpatchAll(harmony.Id); }
     }

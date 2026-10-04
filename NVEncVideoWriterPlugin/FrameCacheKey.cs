@@ -43,7 +43,7 @@ internal static class FrameCacheKey
             reason = "描画キャッシュの状態検査を省略しました: " + ex.GetType().Name;
             return false;
         }
-        if (!frames!.Whole.Cacheable) return Bypass("立ち絵、外部プラグインのコード、確認できない素材のいずれかを使うアイテムがあります。", out reason);
+        if (!frames!.Whole.Cacheable) return Bypass("描画順を確定できない同一レイヤーの重なり、立ち絵、外部プラグインのコード、確認できない素材のいずれかを含みます。", out reason);
         hasExternalDependencies = paths.Length != 0;
         if (hasExternalDependencies)
             return Bypass("外部素材は背景での内容確認が必要です。", out reason);

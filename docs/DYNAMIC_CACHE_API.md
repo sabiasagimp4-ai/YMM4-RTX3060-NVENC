@@ -31,7 +31,7 @@ if (receipt is not null)
 - deleterは最後に解放したスレッドで呼ばれ得る。必要なら資源のowner contextへmarshalする。背景安全の宣言はcomputeだけでなく関連callbackも対象。
 - class解除・Clear後に古い計算が完成しても、cacheへ復活しない。進行中計算も256件で制限し、purgeを繰り返して上限を抜けない。
 
-同期の同一キー自己再帰と、同一cache内で追跡できる計算間の待機循環を拒否する。callbackの実行状態をExecutionContext経由で伝え、待機辺の追加前に循環を検出する。別スレッドで開始した独立owner同士の循環も対象。取消・完了・失敗でconsumerの待機辺を解除し、失敗後は再試行できる。複数consumerが同じ依存を持つ場合は辺を参照数で管理する。別cache間の循環、ExecutionContextの伝播を抑制した処理、外部lockの循環は検出対象外。ホストの可変D2D graphや同じTimelineSourceを並列で操作するためのAPIではない。
+同期の同一キー自己再帰は例外で拒否する。同一cache内で追跡できる計算間の待機循環は、待たずに値なしで答える（同期は `Computing`、非同期は `null`）。callbackの実行状態をExecutionContext経由で伝え、待機辺の追加前に循環を検出する。別スレッドで開始した独立owner同士の循環も対象。辺は要求した時点で記録するので、計算が要求したまま待たない場合（待たないComputeAsyncや、計算中に起動して走らせたままの処理からの要求）も辺に数える。その場合も例外や停止にはせず、値なしで答える。取消・完了・失敗でconsumerの待機辺を解除する。複数consumerが同じ依存を持つ場合は辺を参照数で管理する。別cache間の循環、ExecutionContextの伝播を抑制した処理、外部lockの循環は検出対象外。ホストの可変D2D graphや同じTimelineSourceを並列で操作するためのAPIではない。
 
 ## 処理自身による依存報告
 
@@ -57,7 +57,7 @@ if (receipt is not null)
 
 専用workerでBrotli quality 0の無損失圧縮を試し、1 KiB未満と12.5%以上縮まないレコードはrawへ戻す。圧縮は保存空間の判断で、実素材での速度優位を保証しない。rawは `YMMFRM02`、圧縮は `YMMFRZ02`。checksumは32 byteへ復号した要求キーと展開後の画素を結合したSHA-256で、別のキー名に置き換えた有効レコードも拒否する。展開サイズ上限・stream終端・全入力消費も検証する。キーとの結合がない旧01レコードは破棄し、再描画する。保存ディレクトリ名 `frames-v1` と48 byteヘッダーの配置は変えない。disk予算は物理長、先読み／RAM予算は展開後の長さで数える。codec作業配列はworkerの一時領域で最大1フレーム分が追加される。
 
-フレームproducerは仕事開始前に保存先storeとpublication世代を取得する。Clearと保存採用は同じstore lockで世代を照合するため、purge前に始めた仕事がpurge後へ復活しない。内容キーと世代は別物で、世代を毎回キーへ追加してUndo後の再利用を失わせることはしない。
+フレームproducerは仕事開始前に保存先storeとpublication世代を取得する（停止中の先読みは描画の前）。取得はlockを取らずに読み、Clearと保存採用は同じstore lockで世代を照合するため、purge前に始めた仕事がpurge後へ復活しない。内容キーと世代は別物で、世代を毎回キーへ追加してUndo後の再利用を失わせることはしない。
 
 disk読込・展開の観測費用から再生先読みを0.5〜2秒へ伸ばし、最大120 frameかつ半RAMの窓で制限する。deadlineや音声同期を調停するpreview schedulerは未実装。
 

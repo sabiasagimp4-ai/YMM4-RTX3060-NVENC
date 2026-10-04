@@ -95,7 +95,8 @@ internal sealed class FrameCacheStore : IDisposable
     // A producer captures this before starting work. Content identity answers what the
     // pixels mean; this permit separately answers whether that work may still publish.
     internal readonly record struct Publication(FrameCacheStore? Owner, long Generation);
-    internal Publication BeginPublication() { lock (_gate) return new(this, _generation); }
+    // Read without the lock (every cached render takes one): Put compares it again under the lock, with Clear.
+    internal Publication BeginPublication() => new(this, Interlocked.Read(ref _generation));
 
     // Eviction drops our references only: a borrowed hit or queued write still owns immutable pixels.
     // Disk records survive a smaller RAM budget and can be promoted again when memory recovers.
@@ -276,7 +277,7 @@ internal sealed class FrameCacheStore : IDisposable
                 Interlocked.Increment(ref _version);
                 _ramLru.Clear();
                 _ramBytes = 0;
-                long generation = ++_generation; // RAM-only producers obey the same purge barrier.
+                long generation = Interlocked.Increment(ref _generation); // RAM-only producers obey the same purge barrier.
                 Monitor.PulseAll(_gate);
                 if (_disposed || _diskWorker is null) return;
                 if (_workerFailed) throw new IOException("The frame cache disk worker stopped before its purge could be persisted.");

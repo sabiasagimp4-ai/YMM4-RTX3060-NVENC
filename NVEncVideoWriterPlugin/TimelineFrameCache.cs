@@ -484,10 +484,12 @@ internal static partial class TimelineFrameCache
             {
                 TrimGpuFrames(0); // a budget lowered by GpuMemoryController takes effect on this thread
                 if (gpuRetentionEnabled && viewport is not null && cacheKey is not null) state.GpuAdmission.Observe(cacheKey);
-                if (StillCurrent(pending) && currentGeneration == Interlocked.Read(ref generation) && state.Generation == currentGeneration
+                // The capture's full validation runs last: it is the expensive part, and during playback the key
+                // rarely matches the previous frame's.
+                if (currentGeneration == Interlocked.Read(ref generation) && state.Generation == currentGeneration
                     && state.LastKey == liveKey && (state.LastViewportKey is null || state.LastViewportKey == cacheKey)
                     && state.LastOutput is { NativePointer: not 0 }
-                    && ReferenceEquals(state.LastOutput, previousOutput))
+                    && ReferenceEquals(state.LastOutput, previousOutput) && StillCurrent(pending))
                 {
                     var update = wantRects && traits.RectsReusable && !state.Rects.IsMissing(time)
                         && state.RectsKey == liveKey && state.RectsRevision == revision ? RectsUpdate.Keep : stored;
@@ -805,21 +807,29 @@ internal static partial class TimelineFrameCache
         PreviewViewport viewport, string? expectedModelKey = null) =>
         TryPrimeCore(timelineSource, time, usage, viewport, expectedModelKey);
 
+    // A producer that renders before it stores (the idle pre-renderer) takes this before rendering: a purge or a store
+    // swap after it rejects the frame, however late the producer reaches the commit.
+    internal readonly record struct PrimeTicket(long Generation, FrameCacheStore.Publication Publication);
+    internal static PrimeTicket BeginPrime() => new(Interlocked.Read(ref generation), store.Value.BeginPublication());
+
     // capture: a capture of this frame from a tracker of the source's own scene that the caller holds (the idle
     // pre-renderer's clone capture); without it the source's tracker captures the frame here.
+    // ticket: taken before the frame was rendered (BeginPrime); without it, the purge state when this is called.
     internal static bool TryPrimePreviewIfCurrent(object timelineSource, TimeSpan time, object usage,
-        PreviewViewport viewport, string? expectedModelKey, CancellationToken cancellation, KeyCapture? capture = null) =>
-        TryPrimeCore(timelineSource, time, usage, viewport, expectedModelKey, cancellation, capture);
+        PreviewViewport viewport, string? expectedModelKey, CancellationToken cancellation, KeyCapture? capture = null,
+        PrimeTicket? ticket = null) =>
+        TryPrimeCore(timelineSource, time, usage, viewport, expectedModelKey, cancellation, capture, ticket);
 
     // The idle pre-renderer's own renderer: Updates of it skip the live preview's cache (lookups, keys, stores).
     internal static void ExcludeFromPreviewCache(object sourceOrOwner) =>
         privateSources.AddOrUpdate(GetTimelineSource(sourceOrOwner), new ReadbackPool());
 
     private static bool TryPrimeCore(object timelineSource, TimeSpan time, object usage,
-        PreviewViewport? viewport, string? expectedModelKey, CancellationToken cancellation = default, KeyCapture? provided = null)
+        PreviewViewport? viewport, string? expectedModelKey, CancellationToken cancellation = default, KeyCapture? provided = null,
+        PrimeTicket? ticket = null)
     {
         if (!Enabled || cancellation.IsCancellationRequested) return false;
-        long captureGeneration = Interlocked.Read(ref generation);
+        long captureGeneration = ticket?.Generation ?? Interlocked.Read(ref generation);
         try
         {
             timelineSource = GetTimelineSource(timelineSource);
@@ -852,7 +862,7 @@ internal static partial class TimelineFrameCache
                 string usageKey = exporting ? usageName : PreviewUsage.KeyFor(usageName, traits.ShowOnlyPreview);
                 var key = MakeKey(capture.Key, time, scene.FPS, usageKey, context, viewport);
                 var destination = store.Value;
-                var publication = destination.BeginPublication();
+                var publication = ticket?.Publication ?? destination.BeginPublication();
                 var output = (ID2D1CommandList)outputField.GetValue(timelineSource)!;
                 privateSources.TryGetValue(timelineSource, out var pool); // the idle renderer's textures, reused
                 var record = viewport is { } view ? CapturePreview(context, output, view, pool) : CaptureScene(context, output, scene);
