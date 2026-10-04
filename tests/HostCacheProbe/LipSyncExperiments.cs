@@ -8,6 +8,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Runtime.Loader;
 using System.Security.Cryptography;
+using System.Text;
 using System.Windows.Threading;
 using HarmonyLib;
 using NVEncVideoWriterPlugin;
