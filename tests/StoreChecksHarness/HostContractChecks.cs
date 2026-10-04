@@ -55,6 +55,18 @@ internal static class HostContractChecks
         verdict = HostContracts.Evaluate(changedWrapper, [new("1.0", Frozen(baseline))]);
         Check(!verdict.Has(HostContracts.SimpleTachie) && verdict.Has(HostContracts.Core), "Simple tachie must require verified source wrappers");
 
+        var changedLipSync = Parts();
+        changedLipSync[HostContracts.LipSync]["X|lip-sync-readiness"] = "changed";
+        verdict = HostContracts.Evaluate(changedLipSync, [new("1.0", Frozen(baseline))]);
+        Check(!verdict.Has(HostContracts.LipSync) && !verdict.Has(HostContracts.AnimationTachie)
+            && verdict.Has(HostContracts.SimpleTachie) && verdict.Has(HostContracts.Core),
+            "Changed envelope code must disable advanced tachie while preserving simple and ordinary caching");
+        var changedAnimation = Parts();
+        changedAnimation[HostContracts.AnimationTachie]["X|animation-tachie"] = "changed";
+        verdict = HostContracts.Evaluate(changedAnimation, [new("1.0", Frozen(baseline))]);
+        Check(!verdict.Has(HostContracts.AnimationTachie) && verdict.Has(HostContracts.LipSync),
+            "Changed animation assembly must disable animation admission");
+
         var changedPreview = Parts();
         changedPreview[HostContracts.Preview]["X|Player"] = "changed";
         verdict = HostContracts.Evaluate(changedPreview, [new("1.0", Frozen(baseline))]);

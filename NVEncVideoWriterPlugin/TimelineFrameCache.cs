@@ -254,6 +254,8 @@ internal static partial class TimelineFrameCache
             }
             if (!FrameRenderReadiness.TryInstall(host, harmony, out reason))
                 throw new NotSupportedException(reason);
+            if (!NativeTachieReadiness.TryInstall(host, harmony, out reason))
+                throw new NotSupportedException(reason);
             reason = string.Empty;
             return true;
         }
@@ -355,9 +357,10 @@ internal static partial class TimelineFrameCache
     private sealed class Pending(SourceState state, Scene scene, IGraphicsDevicesAndContext devices,
         ID2D1CommandList? previousOutput, KeyCapture capture, string liveKey, string? cacheKey,
         long generation, TimeSpan time, string usageKey, PreviewViewport? viewport, bool wantRects, bool rectsReusable, bool playing,
-        string environment, int fps) : IDisposable
+        string environment, int fps, object owner) : IDisposable
     {
         // The render-thread state and frame rate LiveKey/CacheKey were composed with (StillCurrent compares them).
+        internal readonly object Owner = owner;
         internal readonly string Environment = environment;
         internal readonly int Fps = fps;
         internal readonly bool Playing = playing;
@@ -450,6 +453,8 @@ internal static partial class TimelineFrameCache
             string environment = KeyEnvironment(context);
             state.Environment = environment;
             if (!state.Tracker.TryCapture(FrameOf(time, scene), out capture, out var reason, settle: true, background: preview)) return Bypass(reason);
+            if (!AnimationTachieDependencies.SafeSource(__instance, scene, FrameOf(time, scene)))
+                return Bypass("立ち絵の画像一覧・付属設定・描画ソースを確認できないため、通常描画を使用します。");
             var traits = modelTraits.GetValue(capture!.Model, static model => new ModelTraits(model));
             string usageKey = exporting ? usageName : PreviewUsage.KeyFor(usageName, traits.ShowOnlyPreview);
             PreviewViewport? viewport = preview && TryGetPreviewViewportForSource(__instance, out var currentViewport)
@@ -461,7 +466,7 @@ internal static partial class TimelineFrameCache
             long revision = capture.Revision;
             var previousOutput = (ID2D1CommandList?)outputField.GetValue(__instance);
             pending = new Pending(state, scene, devices, previousOutput, capture, liveKey, cacheKey,
-                currentGeneration, time, usageKey, viewport, wantRects, traits.RectsReusable, usageName == "Playing", environment, fps);
+                currentGeneration, time, usageKey, viewport, wantRects, traits.RectsReusable, usageName == "Playing", environment, fps, __instance);
             capture = null;
             BeforeCacheLookupForTests?.Invoke();
             if (preview) PreviewPerformance.End(PreviewStage.KeyGeneration, keyStarted);
@@ -680,7 +685,7 @@ internal static partial class TimelineFrameCache
         if (!EnabledFor(value.UsageKey == "Exporting") || value.Generation != Interlocked.Read(ref generation)) return false;
         bool valid;
         using (CacheTrace.Measure(files ? "capture-dependency-validation" : "capture-state-validation")) valid = value.Capture.Validate(files);
-        if (!valid) return false;
+        if (!valid || !AnimationTachieDependencies.SafeSource(value.Owner, value.Scene, FrameOf(value.Time, value.Scene))) return false;
         // The keys are functions of the capture, time, usage and viewport (fixed in Pending), the frame rate and the
         // context's render state: comparing those two is the same check as composing both keys again.
         using var keys = CacheTrace.Measure("render-environment-key-validation");

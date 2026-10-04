@@ -41,6 +41,7 @@ internal static class HostIntegrationChecks
         Check(HostIntegration.TryMatchReadBuild(host, out var features, out var detail), detail);
         var first = clock.Elapsed;
         Check(features is { Basis: "4.56.1.0", Preview: true, SelectionRects: true, WrappedSources: true, RulerBars: true }
+            && features.SimpleTachie && features.LipSync && features.AnimationTachie
             && features.VerifiedDecoders is { Count: 3 }, "Contract features of the read build: " + features);
         clock.Restart();
         Check(HostIntegration.TryMatchReadBuild(host, out var again, out detail) && again.Basis == features.Basis, detail);

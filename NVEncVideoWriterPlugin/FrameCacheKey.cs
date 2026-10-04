@@ -159,16 +159,23 @@ internal static class FrameCacheKey
                     bool simple = false;
                     if (item is TachieItem simpleItem)
                         simple = SimpleTachieDependencies.TryRanges(simpleItem, timeline, out fileRanges);
+                    bool animation = false;
+                    string[] animationFiles = [];
+                    if (root && item is TachieItem animationItem)
+                        animation = AnimationTachieDependencies.TryFiles(animationItem, timeline, out animationFiles);
+                    bool supportedTachie = simple || animation;
+                    bool animationCharacter = AnimationTachieDependencies.Character(GetCharacter(item));
                     bool simpleCharacter = SimpleTachieDependencies.Character(GetCharacter(item));
                     // Code this plugin did not read renders a plugin's item type, a plugin's shape, and (below) a
                     // plugin's effect, brush or transition: only the frames showing such an item are rendered normally
                     // (CompositeItemPicker draws an item only at its own frames; transitions and scene items are
                     // followed by FrameDependencyIndex).
-                    bool uncacheable = tachie && !simple || !code.Knows(item.GetType())
+                    bool uncacheable = tachie && !supportedTachie || !code.Knows(item.GetType())
                         || item is ShapeItem shape && !code.Knows(shape.ShapeType2)
                         || item is TransitionItem transition && transition.TransitionType is { } transitionType && !code.Knows(transitionType)
                         || GetCharacter(item) is { } character && foreignCharacters.Contains(character);
-                    bool session = false, culture = false;
+                    bool session = animation, culture = false;
+                    if (animation) itemResources.Add(AnimationTachieDependencies.SessionResource + "/" + RuntimeHelpers.GetHashCode(item));
                     string[]? frameFiles = null;
                     try
                     {
@@ -191,12 +198,13 @@ internal static class FrameCacheKey
                                 else uncacheable = true;
                             }
                         }
-                        else if (simple && item is TachieItem supportedTachie)
+                        else if (supportedTachie && item is TachieItem supportedItem)
                         {
-                            foreach (var effect in supportedTachie.VideoEffects.OfType<IFileItem>())
+                            foreach (var effect in supportedItem.VideoEffects.OfType<IFileItem>())
                                 foreach (var file in effect.GetFiles()) AddPath(file, itemPaths);
-                            paths.UnionWith(fileRanges!.SelectMany(range => range.Files));
-                            if (!root) itemPaths.UnionWith(fileRanges!.SelectMany(range => range.Files));
+                            if (animation) foreach (string file in animationFiles) AddPath(file, itemPaths);
+                            if (simple) paths.UnionWith(fileRanges!.SelectMany(range => range.Files));
+                            if (!root && simple) itemPaths.UnionWith(fileRanges!.SelectMany(range => range.Files));
                         }
                         foreach (var resource in simpleCharacter && item is VoiceItem or TachieFaceItem
                             ? SimpleTachieDependencies.ResourcesWithoutFace(item) : item.GetResources())
@@ -204,8 +212,8 @@ internal static class FrameCacheKey
                             uncacheable |= Note(ClassifyResource(resource.Key, code), ref audioForeign);
                             // The audited simple parameters report the editor's directory as a Tachie resource.
                             // It is not a file the source reads; actual selected faces are listed above.
-                            bool directory = simpleCharacter && resource.ResourceType == TimelineResourceType.Tachie;
-                            AddResource(resource, directory || tachie && !simple ? Unused() : itemPaths, itemResources, itemFonts);
+                            bool directory = (simpleCharacter || animationCharacter) && resource.ResourceType == TimelineResourceType.Tachie;
+                            AddResource(resource, directory || tachie && !supportedTachie ? Unused() : itemPaths, itemResources, itemFonts);
                         }
                         // Randomness YMM4 seeds with object identities (see IdentitySeeds), and text drawn by code
                         // outside YMM4's own assemblies (DrawnText).
@@ -217,7 +225,7 @@ internal static class FrameCacheKey
                             itemResources.Add("identity://" + string.Join(",", seeds));
                             session = true;
                         }
-                        foreach (string font in drawn.Fonts) AddFont(font, tachie && !simple ? Unused() : itemPaths, itemResources, itemFonts);
+                        foreach (string font in drawn.Fonts) AddFont(font, tachie && !supportedTachie ? Unused() : itemPaths, itemResources, itemFonts);
                         if (drawn.Culture)
                         {
                             itemResources.Add(CultureResource());
@@ -342,7 +350,7 @@ internal static class FrameCacheKey
     }
 
     // A "$type" outside the host and plugin API is a plugin's code, except where no cached frame reads it: tachie
-    // parameters only reach TachieSource (tachie frames are never cached), and voice parameters only make the voice's
+    // parameters reach only their separately audited tachie (unknown tachie frames are bypassed), and voice parameters make the voice's
     // audio, a fingerprinted file (no video renderer reads them: TimelineSource, JimakuSource, 4.56.1.0). Audio
     // effects only reach frames that read audio.
     private static FrameModelSplit.TypeUse ClassifyType(string type, IReadOnlyList<string> path, KnownCode code)
@@ -358,7 +366,7 @@ internal static class FrameCacheKey
     }
 
     // Resources naming a plugin's code: ve:// (video effect), ae:// (audio effect), plugin:// (shape, transition,
-    // brush, voice, tachie). Voice and tachie plugins draw nothing a cached frame shows (see ClassifyType).
+    // brush, voice, tachie). Tachie admission is checked separately against exact bundled code and parameters.
     private static FrameModelSplit.TypeUse ClassifyResource(string resource, KnownCode code)
     {
         int scheme = resource.IndexOf("://", StringComparison.Ordinal);

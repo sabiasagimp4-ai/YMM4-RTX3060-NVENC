@@ -9,6 +9,8 @@ internal sealed record HostFeatures(string Basis, bool Preview, bool SelectionRe
     IReadOnlySet<string>? VerifiedDecoders)
 {
     internal bool SimpleTachie { get; init; }
+    internal bool LipSync { get; init; }
+    internal bool AnimationTachie { get; init; }
     // YMM4 4.56.1.0, the build whose renderer, preview player, controllers and video sources were read.
     internal static readonly Guid ReadBuild = Guid.Parse("23e5b5b5-adcf-43b7-b976-b6b63f8dadea");
     // Its video factory/wrapper/resource and call-site witnesses match the read 4.56.1.0 contract.
@@ -31,7 +33,7 @@ internal sealed record HostFeatures(string Basis, bool Preview, bool SelectionRe
     {
         if (ReferenceEquals(decidedHost, host) && decided is { } features) return features;
         return host.ManifestModule.ModuleVersionId == ReadBuild
-            ? new("4.56.1.0", true, true, true, true, null) { SimpleTachie = true }
+            ? new("4.56.1.0", true, true, true, true, null) { SimpleTachie = true, LipSync = true, AnimationTachie = true }
             // 4.55.1.1 also wraps every video source, but its selection rects and ruler bars are not enabled.
             : new(host.GetName().Version?.ToString() ?? "?", true, false,
                 host.ManifestModule.ModuleVersionId == OlderWrappedBuild, false, null);

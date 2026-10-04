@@ -76,3 +76,13 @@ dotnet run --project tools/HostFingerprint -- emit NVEncVideoWriterPlugin/HostBa
 ```
 
 emitでは渡さなかった既存版を保持するが、HostContracts.Rulesを変えた場合は全記録済み版を渡し直す。上記NEW_VERSIONは実際の版番号へ置き換える。検査の実行方法は [HostCacheProbe README](../tests/HostCacheProbe/README.md)。
+
+## AnimationTachieと口パクの完成判定（2b）
+
+`lip-sync-readiness` はCoreの `TachieSource` 全体、音量計算・公開session・取消slot・待機timeout latch、音声source、CharacterとVoiceItemを照合する。新しいHarmony対象は `TachieSource.Update`（呼び出し元の立ち絵を識別）と `ReadVolumeAfterRequiredWait`（消費した値の完成確認）。公開済みsampleとのbit一致、現在のsession／task、取消、終了したsessionの全sample公開を確認する。ホストは失敗を吸収するためTaskの正常終了だけでは許可しない。未完成は既存のreadiness scopeから親のsceneまで失敗を伝える。
+
+`animation-tachie` はその規則に依存し、AnimationTachie DLLの全型とTachieItem／FaceItem／IFaceItemを照合する。追加規則の基準値は、記録済みの全版（現在4.56.1.0のみ）について `tools/HostFingerprint emit` で再生成した。実行時にもAnimationTachieのMVIDと同梱場所を確認する。未知の版／外部の型は通常描画。
+
+PNGのみ・付属INIなしを対象とし、全候補部品と番号付き／母音部品を依存にする。一覧の変化は同期確認して再起動まで対象外にする。INI削除後もホストのLayerConfigが残るため、キャッシュの参照と保存の両方で実ソースの13layerの設定と目／口の既存parts countを確認する。既定まばたきはパスの起動ごとのhashを使うので、この段階ではprocess nonceとitem同一性を含むSessionキーを採用する。計算式の複製と起動間の共有は未対応。
+
+停止中の先読みは、AnimationTachieを含むroot sceneで追加の音量計算を開始せず見送る。動画部品、付属INI、差分合成、group、同一layerの表情競合、入れ子sceneは今回の対象外。再生／一時停止／出力でホストが完成させたフレームを再利用する範囲で検査する。

@@ -19,6 +19,8 @@ internal static partial class HostContracts
     internal const string WrappedSources = "wrapped-sources";
     internal const string RulerBars = "ruler-bars";
     internal const string SimpleTachie = "simple-tachie";
+    internal const string LipSync = "lip-sync-readiness";
+    internal const string AnimationTachie = "animation-tachie";
     internal const string DecoderPrefix = "decoder:";
     internal const string Missing = "missing";
 
@@ -130,6 +132,23 @@ internal static partial class HostContracts
                 "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.TachieFaceItem",
                 "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.IFaceItem",
             ], ["YukkuriMovieMaker.Plugin.Tachie.SimpleTachie"], []),
+        new(LipSync, [Core, WrappedSources],
+            [
+                "YukkuriMovieMaker|YukkuriMovieMaker.Player.Video.Items.TachieSource+",
+                "YukkuriMovieMaker|YukkuriMovieMaker.Player.Audio.LipSyncEnvelope+",
+                "YukkuriMovieMaker|YukkuriMovieMaker.Player.Audio.LipSyncEnvelopeSession+",
+                "YukkuriMovieMaker|YukkuriMovieMaker.Player.Audio.EnvelopeCancellationSlot+",
+                "YukkuriMovieMaker|YukkuriMovieMaker.Player.Video.Items.EnvelopeWaitTimeoutLatch+",
+                "YukkuriMovieMaker|YukkuriMovieMaker.Player.Audio.EffectedItemSource+",
+                "YukkuriMovieMaker|YukkuriMovieMaker.Project.Character",
+                "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.VoiceItem+",
+            ], [], [new(@"::ReadVolumeAfterRequiredWait$", model)]),
+        new(AnimationTachie, [LipSync],
+            [
+                "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.TachieItem",
+                "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.TachieFaceItem",
+                "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.IFaceItem",
+            ], ["YukkuriMovieMaker.Plugin.Tachie.AnimationTachie"], []),
         // Whether a decoder holds the requested frame (FrameRenderReadiness) depends on its whole assembly.
         .. decoderAssemblies.Select(assembly => new Rule(DecoderPrefix + assembly, [Core], [], [assembly], [])),
     ];
