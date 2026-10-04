@@ -85,7 +85,7 @@ WARPの値であり、RTX 3060の速度ではない。24素材のlookupは独立
 残る確認：外部立ち絵と未検証の複合・時間依存の経路は対象外。GIF以外の動画、実機のデコーダー・ドライバー、実GUIの再生fpsはこの数値から判断しない。利用者のPCでは、シンプル立ち絵の発話前後と表情アイテムの切替区間を2回再生し、帯がRAM/GPUの色になり、詳細ログの「再利用」「RAM」「GPU」が増えることを確認する。選択素材を上書きした後は通常描画へ戻る理由を確認し、ホスト側の古い素材は再起動して更新する。
 
 
-## 項目6：GPUに置くフレームを増やす（PR #9、済）
+## 項目6：GPUに置くフレームを増やす（PR #9、実装済・最終CI待ち）
 
 新規描画の画面用コピーを、CPU読み戻し・素材の同期lease・世代・画素形式の検証が終わった後にGPU保持へ移す。表示中と保持中の所有権を別に数え、最後の所有者が離れるまでプールに戻さない。既存の頻度による採用と予算制限は保つ。再生中は描画スレッド上で、直前のUpdate＋Drawがフレーム予算の半分以内で、空きbyte／entry予算がある場合だけ、RAMの4候補から最大1枚を先回り転送する。転送のために保持済みの画像を追い出さず、実際の採用時には改めてキー・素材を確認する。
 
@@ -114,3 +114,10 @@ DXGI/D2Dのdevice lostを観測したら、すべてのGPU保持を捨て、問�
 計画との差：先回り転送はフレーム予算の測定に基づく保守的な1枚上限とし、停止中は行わない。device lostのCIは模擬HRESULTであり、実際にドライバーを失わせていない。実機のOS予算、デコーダー／エフェクトと他アプリの競合、GUI再生fps、実障害後の復帰は未確認。
 
 利用者のPCではAutoで同じ区間を往復し、詳細ログのGPU hit／保持byte／予算、`gpu-read-ahead`（先回り転送）を確認する。他アプリのGPU負荷を増やした際に保持が減り、表示が通常描画と一致するか確かめる。明示的上限を保存していた環境では、その上限が維持される。実際のdevice lostはWARPの模擬試験と区別する。最終文書commitのCIリンクはPR #9に記録する。
+
+
+### 最終CIを開始できない理由
+
+文書commit d0b824b の [run 37204411324](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37204411324) はportable／hostともstepsが0件で、テストを開始できなかった。GitHubのannotationは「The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings」。Windowsは前段ジョブが失敗したため未実行。実装commit 7d787b9 の全通常ジョブ成功とは区別し、最後のcommitで成功という完了条件を満たしたとは数えない。同じ失敗commitを再実行していない。
+
+GitHubの支払い／利用上限を解消後、この項目の最終headでcache-developmentを実行し、成功を確認してから項目8の計測だけのcommitへ進む。項目8は別のローカル作業領域で準備中だが、Windowsの画素一致・2本／4本の取消・同じjobの前後計測は未実行で、製品変更として公開していない。項目5・2b・2cは未着手。この外部の停止理由によって依頼全体は未完了。
