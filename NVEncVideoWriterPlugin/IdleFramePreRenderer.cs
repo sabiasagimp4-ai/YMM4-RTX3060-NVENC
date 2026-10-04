@@ -494,6 +494,9 @@ internal static partial class IdleFramePreRenderer
                 case TachieItem tachie when characters.TryGetValue(tachie.CharacterName, out var tachieCharacter):
                     tachie.Character = tachieCharacter;
                     break;
+                case TachieFaceItem face when characters.TryGetValue(face.CharacterName, out var faceCharacter):
+                    face.Character = faceCharacter;
+                    break;
             }
         }
         return new Scene(root, cloneScenes, snapshot.ParentScenes);

@@ -100,6 +100,13 @@ internal static class SimpleTachiePixelChecks
             using (capture) batch = new(tracker, capture!.Model);
             using (batch)
             {
+                var cloneFace = batch.CloneScene.Timeline.Items.OfType<TachieFaceItem>().Single();
+                var cloneTachie = batch.CloneScene.Timeline.Items.OfType<TachieItem>()
+                    .Single(item => item.CharacterName == face.CharacterName);
+                Check(ReferenceEquals(cloneFace.Character, cloneTachie.Character),
+                    "The cloned face was not rebound to the cloned tachie's character");
+                Check(FrameCacheKey.TryDescribe(batch.CloneScene, out _, out var cloneFiles, out var cloneReason), cloneReason);
+                Check(cloneFiles.Contains(upper, StringComparer.OrdinalIgnoreCase), "The clone lost its selected upper face");
                 TimelineFrameCache.Clear();
                 foreach (int frame in frames)
                 {
