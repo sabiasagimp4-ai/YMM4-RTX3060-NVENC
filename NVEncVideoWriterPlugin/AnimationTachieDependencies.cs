@@ -24,6 +24,9 @@ internal static class AnimationTachieDependencies
     private static readonly ConditionalWeakTable<TachieItem, Witness> witnesses = new();
     private static readonly ConcurrentDictionary<string, byte> changedListings = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, string> firstListings = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly object listingGate = new();
+    private static long listingCharacters;
+    private const long MaximumListingCharacters = 8L << 20; // 16 MiB of UTF-16 listing content, besides bounded table metadata.
 
     internal static bool Verified(Type? plugin) => plugin?.FullName == PluginName
         && plugin.Assembly.GetName().Name == AssemblyName && plugin.Assembly.ManifestModule.ModuleVersionId == ReadBuild
@@ -99,8 +102,17 @@ internal static class AnimationTachieDependencies
         if (list.Length > 1024 || list.Any(file => !Path.GetExtension(file).Equals(".png", StringComparison.OrdinalIgnoreCase)))
         { if (firstListings.ContainsKey(path)) changedListings.TryAdd(path, 0); return false; }
         string listing = string.Join("\n", list);
-        if (firstListings.Count >= 4096 && !firstListings.ContainsKey(path)) return false;
-        if (firstListings.GetOrAdd(path, listing) != listing) { changedListings.TryAdd(path, 0); return false; }
+        if (!firstListings.TryGetValue(path, out string? first))
+            lock (listingGate)
+            {
+                if (!firstListings.TryGetValue(path, out first))
+                {
+                    if (firstListings.Count >= 4096 || listing.Length > MaximumListingCharacters - listingCharacters) return false;
+                    firstListings[path] = first = listing;
+                    listingCharacters += listing.Length;
+                }
+            }
+        if (first != listing) { changedListings.TryAdd(path, 0); return false; }
         int numbered = 0;
         var set = list.ToHashSet(StringComparer.OrdinalIgnoreCase);
         while (numbered < 1024 && set.Contains(Path.Combine(directory, stem + "." + numbered + ".png"))) numbered++;
@@ -132,7 +144,7 @@ internal static class AnimationTachieDependencies
                 {
                     if (inventories.ContainsKey(directory)) continue;
                     string[] inventory = Directory.EnumerateFiles(directory).Take(16385).Select(Path.GetFullPath).ToArray();
-                    if (inventory.Length > 16384) return false;
+                    if (inventory.Length > 16384 || inventory.Distinct(StringComparer.OrdinalIgnoreCase).Count() != inventory.Length) return false;
                     inventories.Add(directory, inventory);
                 }
             }

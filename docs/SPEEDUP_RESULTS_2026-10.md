@@ -180,3 +180,31 @@ Auto／1／2／4本（保存設定の3本も保持）。Autoは半コア・最�
 計画との差は、通知に加えて値も確認したことと、リソース検出・JSON分割・依存索引の全体再計算を維持したこと。全体再計算を減らせなかった部分と値の確認が残り、JSON片の再利用だけでは目標には届かなかった。通知だけに切り替えて未知の変化を見逃す実装にはしない。プロパティ確認と子の購読は初回の処理・メモリも増やすため、この結果では製品に導入する利益を確認できない。最終形は製品のFrameDescriptionJson／KeyDependencyTrackerを試作前へ戻し、実験はtests/HostCacheProbeだけに移した。テスト用serializerがconverterの差以外は製品と完全一致することをportable検査で要求し、将来のpayloadやcloneガードの変更を取り落とさない。
 
 利用者のPCで試作を再現する場合は、同じcheckoutでHostCacheProbeの `--edit-description-check`、`--edit-description-measure`、`--edit-description-measure-incremental` を使う。`SPEEDUP5_CHECK` の1,000回一致と、`SPEEDUP5` の `edit_to_capture_ms`、`full_description_ms`、`reused_fragments`、`serialized_fragments` を比較する。最後のフラグはテスト専用で、製品で差分記述を有効にする設定ではない。依存しない2b・2cを続ける。
+
+## 項目2b：動く立ち絵（PR #12、済・対応範囲を限定）
+
+AnimationTachieとCoreの固定MVID・配置・新しいhost契約を確認し、PNGの部品のみ対象にする。音量はホスト自身が返した公開済みsampleとbitで一致させ、失敗・取消・途中終了・時間切れのfallbackを保存しない。親sceneへの未完成伝播はportableでも検査する。全候補部品、番号付き・母音部品を依存とし、追加・削除は同期一覧確認で再起動まで対象外にする。INI削除後に残る13layerの設定と目／口parts countは実sourceで確認する。
+
+計画との差：まばたきの式を複製せず、process nonce＋item同一性のSessionキーで起動中に限定する。差分合成・動画・INI・group・表情同一layer競合・入れ子は対象外。口パクの2枠を再生側に残すため、停止中の先読みはAnimationTachieを含むroot sceneを見送る。選択した素材だけの細かい無効化にもせず、候補部品すべてをその立ち絵の依存にする。
+
+計測専用commit1fbf4c6の [CI37241187622](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37241187622) は通常全job成功。初回product a456ec1の [CI37242517539](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37242517539) は、既存検査と新規6ケースが成功したが、900フレーム比較のframe 0で失敗した。900 hitでも画素一致に失敗しているため成功として扱わず、同じcommitも再実行しなかった。
+
+診断用2e692867の [CI37243201402](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37243201402) は、通常referenceの完成判定とframe 0の部品／まばたき時刻の一致を確認したが、900フレームのケースが30秒に達して失敗した。新設した900フレーム検査は、透明clearの出力用Captureと黒clearのプレビューcacheを比較していた。この比較条件の誤りをPRに書いてから、両方をCapturePreviewに修正した。900フレーム全件・全byte一致、通常referenceのreadiness必須、30秒上限は維持し、差分を無視しない。同じフォルダーの同期列挙を集約して、部品・INI・countの前後の確認は保った。temporaryのsource診断は取り除いた。最初の不一致の唯一の原因まで断定したものではない。
+
+### 同じCI jobの前後各2回
+
+[CI37244010366](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37244010366)、Windows job111558261695、前1fbf4c6、後96995b0。通常全job成功、任意RTXはskip。15fps・321×181・立ち絵2体・音声20件の60秒900フレームを、各回別STA・deviceで30秒以内に測る。Update＋黒背景viewportへのDrawが時間の対象で、reference画素の取得、初回保存、再訪900画素の比較は時間の外。GPU保持はoff、RAM256MiB・disk0。WARPで、RTX 3060や実GUIのaudio／Presentを含むfpsの値ではない。
+
+| 対象 | 前（2回） | 後（2回） | 基準・判定 |
+| --- | --- | --- | --- |
+| 通常描画off | 0.997223／1.211353 ms/frame | 0.987451／1.151783 ms/frame | 各processの速度計 |
+| 2回目の再生 | 1.052230／0.748328 ms/frame | 0.827060／0.820715 ms/frame | 生の時間だけで前後を断定しない |
+| 2回目／自身のoff | 1.055160／0.617762 | 0.837570／0.712560 | 正規化すると約21%改善／15%悪化。安定した速度改善は未確認 |
+| 2回目のhit | 0／900、0／900 | 900／900、900／900 | 再利用率100%、合格 |
+| 画素 | cache対象外の通常描画同士で900×2一致 | offとプレビューcacheが900×2完全一致 | 合格、背景・成分・端を省かない |
+
+後は自身のoffより約16%／29%短いが、前の2回目が自身のoffより速かった試行もある。2観測から安定した高速化とは言えない。対応範囲の再利用率と完成判定を得たため限定対応を残すが、初回保存のコスト、動画／INI／idle先読みの追加、実機の速度は今後の課題。候補部品すべての同期leaseとPNG保存のGPU readbackを維持しており、初回保存を速くした変更ではない。
+
+最終補強では一覧の記憶を4,096件・UTF-16内容16MiBで制限し、古い一覧を捨てて誤って再許可しない。上限到達を内部カウンタで模擬し、既存一覧の維持・新しい一覧の拒否・容量がある場合の採用を追加検査する。これは実機で16MiBを消費させた計測ではない。各caseの資源解放、globals復元も検査する。最終headのCIリンクはPR #12へ記録し、全通常jobが成功するまで2cへ進まない。
+
+利用者のPCではPNGのみ・INIなしのAnimationTachie2体とボイス20件の場面を2回再生し、2回目の帯と詳細画面の「再利用」（同じ画像／GPU／RAM）、詳細ログの `timeline-update` の `Outcome`（`live`／`gpu`／`ram`）、`auxiliary-readiness`（`Component=lip-sync-published-value`、`Outcome=ready`／`not-ready`）を確認する。時間切れや `not-ready` の描画が保存されないこと、番号／母音部品の追加や上書き後は通常描画に戻ることを確かめる。設定を変えずに停止中の先読みを待っても、このAnimationTachie sceneは追加の口パク計算を始めない。CLIで同じfixtureを使う場合はHostCacheProbeの `--animation-tachie-check`／`--animation-tachie-measure` を使い、`SPEEDUP2B` の `cache_hits`・`ms_per_frame` と `SPEEDUP2B_PIXELS exact=true` を見る。

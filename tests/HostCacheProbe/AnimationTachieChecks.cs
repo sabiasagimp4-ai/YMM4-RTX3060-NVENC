@@ -17,7 +17,7 @@ internal static class AnimationTachieChecks
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     internal static void Run(Assembly host)
     {
-        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback" })
+        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback", "metadata-budget" })
         {
             Exception? failure = null;
             using var finished = new ManualResetEventSlim();
@@ -55,6 +55,26 @@ internal static class AnimationTachieChecks
         }
         TimelineFrameCache.Enabled = false; test.Update(0);
         if (name == "timeout") { CheckTimeout(test, host); return; }
+        if (name == "metadata-budget")
+        {
+            test.Warm(0);
+            var characters = typeof(AnimationTachieDependencies).GetField("listingCharacters", BindingFlags.Static | BindingFlags.NonPublic)!;
+            long original = (long)characters.GetValue(null)!;
+            try
+            {
+                characters.SetValue(null, 8L << 20); // Simulate exhausted metadata, without allocating sixteen MiB of paths.
+                Check(AnimationTachieDependencies.TryFiles(test.Fixture.Tachies[0], test.Fixture.Timeline, out _),
+                    "The metadata cap discarded an existing first listing");
+                string extra = Path.Combine(test.Fixture.Root, "new-body.png"); File.Copy(test.Fixture.Images[0], extra);
+                AnimationTachieFixture.Set(test.Fixture.Tachies[0].TachieItemParameter, "Body", extra);
+                Check(!AnimationTachieDependencies.TryFiles(test.Fixture.Tachies[0], test.Fixture.Timeline, out _),
+                    "An unrecorded listing was admitted after the metadata cap");
+            }
+            finally { characters.SetValue(null, original); }
+            Check(AnimationTachieDependencies.TryFiles(test.Fixture.Tachies[0], test.Fixture.Timeline, out _),
+                "Available metadata did not admit the new listing");
+            return;
+        }
         if (name is "changed-list" or "overwrite")
         {
             test.Warm(30);
