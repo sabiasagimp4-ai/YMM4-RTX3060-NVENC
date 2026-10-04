@@ -1,10 +1,4 @@
-<p align="center">
-  <img src="docs/assets/readme/hero.svg" alt="描いたフレームを RAM・ディスク・GPU に取っておくフィルムの図" width="100%">
-</p>
-
 <h1 align="center">YMM4 NVENC・描画キャッシュ</h1>
-
-<p align="center"><b><i>一度描いたフレームは、もう描かない。</i></b></p>
 
 <p align="center">
 ゆっくりMovieMaker4 の動画出力を NVIDIA NVENC で。<br>
@@ -13,12 +7,8 @@
 
 <p align="center">
   <a href="https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/releases"><img src="docs/assets/readme/badge-release.svg" alt="release"></a>
-  <a href="https://manjubox.net/ymm4/"><img src="docs/assets/readme/badge-ymm4.svg" alt="YMM4 Lite 4.56.1.0"></a>
-  <a href="#対応-gpu"><img src="docs/assets/readme/badge-nvenc.svg" alt="NVENC: H.264 · HEVC · AV1"></a>
   <img src="docs/assets/readme/badge-dotnet.svg" alt=".NET 10">
   <a href="LICENSE"><img src="docs/assets/readme/badge-license.svg" alt="license: MIT"></a>
-  <br>
-  <a href="https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/releases"><img src="docs/assets/readme/badge-download.svg" alt="download .ymme"></a>
 </p>
 
 > [!CAUTION]
@@ -32,12 +22,6 @@
   <a href="docs/CACHE_BEHAVIOR.md"><img src="docs/assets/readme/card-pixel-parity.svg" alt="PIXEL PARITY — YMM4 自身の描画と画素一致" width="440"></a><br>
   <a href="docs/RTX3060_HARDWARE_CHECK.md"><img src="docs/assets/readme/card-rtx3060.svg" alt="NVIDIA GEFORCE RTX 3060 — 実機で NVENC 出力を確認" width="440"></a>
 </p>
-
-<h3 align="center">描いたフレームに戻ると 1.3 秒 → 6 ms · 画素の差 0 · 編集した所だけ描き直し</h3>
-
-<p align="center"><sub>
-実物の YMM4 Lite 4.56.1.0 を GitHub Actions の Windows で操作して測定（1080p・30 fps、動画 120・文字 300 アイテム）。通常描画 p50 1,332 ms、GPU からの再表示 p50 6.0 ms（4 回）。描画はソフトウェア（WARP）で、RTX 3060 の値ではありません。全体の速度倍率でもありません。<a href="docs/STRESS_GUI_RESULTS_2026-10-02.md">測定の詳細</a>
-</sub></p>
 
 ## できること
 
