@@ -260,10 +260,12 @@ internal static class PluginAuditProbe
             var worker = new Thread(() => line = Trial(host, type, moving, linear, plain)) { IsBackground = true };
             worker.SetApartmentState(ApartmentState.STA);
             worker.Start();
-            if (!worker.Join(TimeSpan.FromSeconds(60))) line = "trial=timeout (60 s)";
+            if (!worker.Join(TimeSpan.FromSeconds(30))) line = "trial=timeout (30 s)";
             Console.WriteLine($"TRIAL|{area}|{type.Name}|manual={manual}|{line}");
         }
     }
+
+    private static int detailed;
 
     private static string Trial(Assembly host, Type type, bool moving, AnimationType linear, Dictionary<int, byte[]> plain)
     {
@@ -304,6 +306,9 @@ internal static class PluginAuditProbe
         }
         catch (Exception error)
         {
+            if (Interlocked.Increment(ref detailed) <= 3)
+                Console.WriteLine("TRIAL-ERROR|" + type.Name + "|" + error.ToString().Replace("\r", "").Replace("\n", " / ")[..Math.Min(3000, error.ToString().Length)]
+                    + "|data=" + string.Join(",", error.Data.Keys.Cast<object>().Select(key => $"{key}={error.Data[key]}")));
             return $"trial=error:{error.GetBaseException().GetType().Name}: {error.GetBaseException().Message}";
         }
     }
