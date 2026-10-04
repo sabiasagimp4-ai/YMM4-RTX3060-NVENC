@@ -10,12 +10,11 @@ using YukkuriMovieMaker.Project.Items;
 
 namespace NVEncVideoWriterPlugin;
 
+// Experimental test-only implementation. Product descriptions do not use this cache.
 // Notifications select the item to invalidate; witnesses also check values and child replacements without
 // notifications. This deliberately keeps resource discovery, model splitting and dependency indexing fresh.
 internal sealed class ItemDescriptionFragments : IDisposable
 {
-    // Enable in a separate commit only after the 1000-edit host oracle passes CI.
-    internal static bool Enabled { get; set; }
     private readonly object gate = new();
     private readonly Dictionary<IItem, Entry> entries = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<object, HashSet<IItem>> owners = new(ReferenceEqualityComparer.Instance);

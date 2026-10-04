@@ -161,3 +161,22 @@ Auto／1／2／4本（保存設定の3本も保持）。Autoは半コア・最�
 計画との差と未確認：Autoは測定が取れるまで1本を維持し、複数作業者が使ったGPU増分も予約へ含める。実機での厳密なdevice別VRAM、重いデコーダー・PSDを多数持つ場面、ホストの共有状態すべて、4本の効果、実GUIの応答は未確認。CIの連続描画は計1152フレームであり、長時間の実作業の保証ではない。
 
 利用者のPCでは、同じ重い場面で停止中の描画器を1本→2本と変え、保存帯が埋まる時間を測る。詳細ログのidle-frame（Component＝worker番号、Outcome＝Rendered等、Detail＝workers／measured-worker-reserve）とGPU使用量／予算を見る。再生・ドラッグ・編集を始めると先読みが取り消され、古い画面が保存されないことも確認する。
+
+## 項目5：編集後の差分記述（試作検証済・製品では中止、PR #11）
+
+図形・文字のJSON片をアイテムごとに保持し、アニメーション・ベジェ・パラメーター・エフェクトの子から所有者への対応を作った。共有する子は全所有者を無効化する。変更通知だけでは通知のない変更を拾えないため、直列化する各プロパティの値と子の参照も確認した。double／float／Vector2はビット列、decimalはscaleを含む値を確認する。外部型、可変コレクション、byte[]、確認できないconverter／callbackは毎回直列化し、元のpayloadのパスを維持した。
+
+[計測だけの7ef3980のCI 37211716846](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37211716846) が通常3ジョブに成功してから試作した。最初の [CI 37213871759](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37213871759) は、ベジェのVector2を未知のstructとして除外し、JSON片を0件しか再利用できず新しいoracleで失敗した。同じcommitは再実行せず、座標のビット確認と座標変更の検査を追加した。
+
+[e32124cのCI 37214642999](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37214642999)、Windows job 111472615974で、4件の独立STA・各30秒上限で合計1,000回のランダムな編集を実行した。追加・削除・移動・キーフレーム・エフェクトの追加／順序・キャラクター・動画設定・Undo／Redo・ベジェ・細かい値・通知なしbyte[]変更・外部型の通知なし変更について、毎回JSON文字と依存パスが全体の再計算と完全一致した。通常3ジョブ成功、任意のRTX検査は未実行。製品ではまだ無効の試作を、同じjobで前2回／後2回測った。
+
+| 対象（1,000アイテム中1件編集） | 前：全体、2回（ms） | 後：試作、2回（ms） | 目標 | 判定 |
+| --- | --- | --- | --- | --- |
+| 図形 | 570.6102 / 359.9301 | 420.2119 / 340.8551 | 10 ms台 | 未達 |
+| 文字 | 150.1007 / 155.2291 | 145.4640 / 111.1527 | 10 ms台 | 未達 |
+
+試作の両対象・両回とも `reused_fragments=999`、`serialized_fragments=1`、`exact_match=true`。その直後に同じ対象をfresh full descriptionで測り、編集時間をその時間で割った正規化値は、図形の前2.138618／0.675827、後1.685314／0.897944、文字の前0.780246／1.305560、後0.664968／0.902839だった。図形の2回目は正規化した値が悪化した。2回という少数の値から常に速くなるとは言わない。この時間は記述・依存の検査・索引・captureのCPU時間であり、250 msの落ち着き待ち、描画、WARPの画素コピー、RTX 3060の処理を含まない。
+
+計画との差は、通知に加えて値も確認したことと、リソース検出・JSON分割・依存索引の全体再計算を維持したこと。全体再計算を減らせなかった部分と値の確認が残り、JSON片の再利用だけでは目標には届かなかった。通知だけに切り替えて未知の変化を見逃す実装にはしない。プロパティ確認と子の購読は初回の処理・メモリも増やすため、この結果では製品に導入する利益を確認できない。最終形は製品のFrameDescriptionJson／KeyDependencyTrackerを試作前へ戻し、実験はtests/HostCacheProbeだけに移した。テスト用serializerがconverterの差以外は製品と完全一致することをportable検査で要求し、将来のpayloadやcloneガードの変更を取り落とさない。
+
+利用者のPCで試作を再現する場合は、同じcheckoutでHostCacheProbeの `--edit-description-check`、`--edit-description-measure`、`--edit-description-measure-incremental` を使う。`SPEEDUP5_CHECK` の1,000回一致と、`SPEEDUP5` の `edit_to_capture_ms`、`full_description_ms`、`reused_fragments`、`serialized_fragments` を比較する。最後のフラグはテスト専用で、製品で差分記述を有効にする設定ではない。依存しない2b・2cを続ける。

@@ -41,10 +41,13 @@ internal static class EditDescriptionMeasurements
                     : new ShapeItem { Frame = 0, Length = 60, Layer = index }));
             timeline.RefreshTimelineLengthAndMaxLayer();
             var scenes = new Scenes(false); scenes.AddScene(timeline); var scene = new Scene(timeline, scenes, []);
-            using var tracker = incremental ? new KeyDependencyTracker(scene, true) : new KeyDependencyTracker(scene);
+            using var tracker = new KeyDependencyTracker(scene);
+            ItemDescriptionFragments? fragments = null;
+            using var trial = incremental ? fragments = new ItemDescriptionFragments(sender => fragments!.Invalidate(sender)) : null;
             string reason = string.Empty;
             Check(SpinWait.SpinUntil(() =>
             {
+                using var fragmentScope = trial?.Enter(scene);
                 if (!tracker.TryCapture(0, out var warm, out reason)) return false;
                 using (warm) return warm!.Validate();
             }, TimeSpan.FromSeconds(10)), "Description did not become ready: " + reason);
@@ -55,7 +58,8 @@ internal static class EditDescriptionMeasurements
                 var clock = Stopwatch.StartNew();
                 target.X.SetFirstValue(12.345 + repeat);
                 Check(tracker.Revision != revision, "The edited animation did not invalidate the description");
-                Check(tracker.TryCapture(0, out var capture, out reason), reason);
+                KeyCapture? capture;
+                using (trial?.Enter(scene)) Check(tracker.TryCapture(0, out capture, out reason), reason);
                 double editMilliseconds = clock.Elapsed.TotalMilliseconds;
                 using (capture)
                 {
@@ -68,7 +72,7 @@ internal static class EditDescriptionMeasurements
                         edit_to_capture_ms = editMilliseconds, full_description_ms = fullMilliseconds,
                         normalized_time = editMilliseconds / fullMilliseconds, model_characters = full.Length,
                         exact_match = true, debounce_included = false, graphics_render_included = false,
-                        incremental, reused_fragments = tracker.FragmentReused, serialized_fragments = tracker.FragmentSerialized }));
+                        incremental, reused_fragments = trial?.Reused ?? 0, serialized_fragments = trial?.Serialized ?? 0 }));
                 }
             }
         }

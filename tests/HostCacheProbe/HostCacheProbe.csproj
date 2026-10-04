@@ -7,7 +7,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../NVEncVideoWriterPlugin/ItemDescriptionFragments.cs" Link="ItemDescriptionFragments.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameRenderModelComparison.cs" Link="FrameRenderModelComparison.cs" />
     <Compile Include="../CacheChecks/VoiceDescriptionMeasurements.cs" Link="VoiceDescriptionMeasurements.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameAdmissionHistory.cs" Link="FrameAdmissionHistory.cs" />
@@ -40,7 +39,6 @@
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameCacheStore.cs" Link="FrameCacheStore.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameCacheKey.cs" Link="FrameCacheKey.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\SimpleTachieDependencies.cs" Link="SimpleTachieDependencies.cs" />
-    <Compile Include="..\..\NVEncVideoWriterPlugin\FrameDescriptionJson.cs" Link="FrameDescriptionJson.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameVoiceCloneState.cs" Link="FrameVoiceCloneState.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FontEnvironment.cs" Link="FontEnvironment.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\ImageSequence.cs" Link="ImageSequence.cs" />

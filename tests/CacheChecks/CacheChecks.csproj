@@ -13,8 +13,6 @@
     <Compile Include="../../NVEncVideoWriterPlugin/SimpleTachieDependencies.cs" Link="SimpleTachieDependencies.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/HostFeatures.cs" Link="HostFeatures.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameDescriptionJson.cs" Link="FrameDescriptionJson.cs" />
-    <Compile Include="../../NVEncVideoWriterPlugin/CacheTrace.cs" Link="CacheTrace.cs" />
-    <Compile Include="../../NVEncVideoWriterPlugin/ItemDescriptionFragments.cs" Link="ItemDescriptionFragments.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameVoiceCloneState.cs" Link="FrameVoiceCloneState.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FontEnvironment.cs" Link="FontEnvironment.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/ImageSequence.cs" Link="ImageSequence.cs" />

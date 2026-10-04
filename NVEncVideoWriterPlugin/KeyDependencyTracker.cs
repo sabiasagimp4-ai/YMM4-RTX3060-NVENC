@@ -63,17 +63,8 @@ internal sealed class KeyDependencyTracker : IDisposable
     private long nextUnverifiableRetry, nextUnverifiableLook;
     internal static TimeSpan UnverifiableRetry { get; set; } = TimeSpan.FromSeconds(30); // tests shorten it
     private bool disposed;
-    private readonly ItemDescriptionFragments itemFragments;
-    private readonly bool incremental;
-    private int descriptionCount;
-    internal bool CompareEveryDescription { get; set; }
-    internal int FragmentReused => itemFragments.Reused;
-    internal int FragmentSerialized => itemFragments.Serialized;
-    internal int FragmentRetained => itemFragments.Retained;
 
-    public KeyDependencyTracker(Scene scene) : this(scene, ItemDescriptionFragments.Enabled) { }
-    internal KeyDependencyTracker(Scene scene, bool incremental)
-    { this.scene = scene; this.incremental = incremental; itemFragments = new(Invalidate); }
+    public KeyDependencyTracker(Scene scene) => this.scene = scene;
 
     // For a copy of a scene whose files another tracker has verified (the idle pre-renderer's clone, which lives for
     // the batches of one model and would otherwise not finish hashing first): captures still lease every file and
@@ -303,24 +294,7 @@ internal sealed class KeyDependencyTracker : IDisposable
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { return null; }
         long code = KnownCode.Generation;
         long fonts = FontEnvironment.Generation;
-        using var trace = CacheTrace.Measure("edit-description");
-        bool eligible; string model, reason; string[] paths; FrameDependencyIndex? frames;
-        using (incremental ? itemFragments.Enter(scene) : null)
-            eligible = FrameCacheKey.TryDescribe(scene, sourceReaders, out model, out paths, out frames, out reason);
-        bool compared = incremental && (CompareEveryDescription || ++descriptionCount % 20 == 0);
-        bool equal = true;
-        if (compared)
-        {
-            bool fullEligible = FrameCacheKey.TryDescribe(scene, sourceReaders, out string full, out string[] fullPaths, out var fullFrames, out string fullReason);
-            equal = full == model && fullEligible == eligible && fullPaths.SequenceEqual(paths);
-            if (!equal)
-            {
-                itemFragments.Disable();
-                eligible = fullEligible; model = full; paths = fullPaths; frames = fullFrames; reason = fullReason;
-            }
-        }
-        if (trace is not null)
-        { trace.Outcome = equal ? "ok" : "full-fallback"; trace.Detail = $"incremental={incremental};reused={itemFragments.Reused};serialized={itemFragments.Serialized};compared={compared}"; }
+        bool eligible = FrameCacheKey.TryDescribe(scene, sourceReaders, out string model, out string[] paths, out var frames, out string reason);
         return new(eligible, model, paths, frames, reason, sourceReaders, System.Diagnostics.Stopwatch.GetTimestamp() - started, code, settings, fonts);
     }
 
@@ -631,9 +605,8 @@ internal sealed class KeyDependencyTracker : IDisposable
         }
     }
 
-    private void Invalidate(object? sender = null)
+    private void Invalidate()
     {
-        itemFragments.Invalidate(sender);
         Interlocked.Increment(ref revision);
         Interlocked.Increment(ref keyStamp);
         Volatile.Write(ref lastInvalidated, Environment.TickCount64);
@@ -709,19 +682,19 @@ internal sealed class KeyDependencyTracker : IDisposable
         if (IsTimelineUiProperty(sender, args.PropertyName)) return;
         // Should a drawing setting depend on another property after all, its value changed: describe again.
         if (IsUiSetting(sender, args.PropertyName) && SafeDrawingSettings() == cachedSettings) return;
-        Invalidate(sender);
+        Invalidate();
     }
     private void PropertyChanging(object? sender, PropertyChangingEventArgs args)
     {
-        if (!IsTimelineUiProperty(sender, args.PropertyName) && !IsUiSetting(sender, args.PropertyName)) Invalidate(sender);
+        if (!IsTimelineUiProperty(sender, args.PropertyName) && !IsUiSetting(sender, args.PropertyName)) Invalidate();
     }
     private static string? SafeDrawingSettings()
     {
         try { return FrameCacheKey.DrawingSettings(); }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { return null; }
     }
-    private void CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs args) => Invalidate(sender);
-    private void UndoCommandCreated(object? sender, UndoRedoEventArgs args) => Invalidate(sender);
+    private void CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs args) => Invalidate();
+    private void UndoCommandCreated(object? sender, UndoRedoEventArgs args) => Invalidate();
     private void HistoryChanged(object? sender, EventArgs args) => Invalidate();
     private void ClearSubscriptions() { foreach (var remove in unsubscribe) remove(); unsubscribe.Clear(); }
 
@@ -734,7 +707,6 @@ internal sealed class KeyDependencyTracker : IDisposable
             Invalidate();
             fingerprintCancellation = null;
             ClearSubscriptions();
-            itemFragments.Dispose();
         }
     }
 

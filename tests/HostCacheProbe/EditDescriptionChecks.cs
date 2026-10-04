@@ -28,7 +28,7 @@ internal static class EditDescriptionChecks
             Check(finished.Wait(TimeSpan.FromSeconds(30)), "Incremental edit oracle exceeded 30 seconds");
             if (failure is not null) throw new InvalidOperationException("Incremental edit oracle seed " + seed, failure);
         }
-        Console.WriteLine("SPEEDUP5_CHECK edits=1000; exact_json=true; exact_paths=true; additions/deletions/moves/keyframes/effects/characters/settings/undo/redo=true; product_enabled=" + ItemDescriptionFragments.Enabled);
+        Console.WriteLine("SPEEDUP5_CHECK edits=1000; exact_json=true; exact_paths=true; additions/deletions/moves/keyframes/effects/characters/settings/undo/redo=true; product_enabled=" + false);
     }
 
     private sealed class ForeignBlur : GaussianBlurEffect { public int Unannounced { get; set; } }
@@ -121,7 +121,7 @@ internal static class EditDescriptionChecks
                 Compare(edit);
             }
             // The tracker receives a mutable AnimationValue's child notification even when its parent is unchanged.
-            using var tracker = new KeyDependencyTracker(scene, true);
+            using var tracker = new KeyDependencyTracker(scene);
             tracker.TryCapture(out var capture, out _); capture?.Dispose();
             long revision = tracker.Revision;
             shape.X.Values[0].Value += .01;
