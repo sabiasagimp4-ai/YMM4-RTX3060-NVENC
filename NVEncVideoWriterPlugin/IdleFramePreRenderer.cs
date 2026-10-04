@@ -220,7 +220,7 @@ internal static partial class IdleFramePreRenderer
     private static void RenderBatch(Session current, Job job, TimelineFrameCache.PreviewViewport viewport,
         int anchorFrame, long startOrdinal, long endOrdinal)
     {
-        int rendered = 0, skipped = 0, normal = 0, unavailable = 0;
+        int rendered = 0, skipped = 0, normal = 0, unavailable = 0, mismatched = 0;
         bool finished = false;
         try
         {
@@ -277,6 +277,14 @@ internal static partial class IdleFramePreRenderer
                             skipped++;
                             Advance(current, job, ordinal + 1);
                             continue;
+                        // A frame whose clone does not key like the live scene (identity-seeded randomness, a plugin
+                        // that does not survive the copy) is passed over: stopping there kept every later frame from
+                        // ever being pre-rendered. A key that is not ready yet (files still being verified) stops the
+                        // batch, to come back to it.
+                        case IdleFrameResult.NotKeyed when reason == CloneMismatch:
+                            mismatched++;
+                            Advance(current, job, ordinal + 1);
+                            continue;
                         case IdleFrameResult.NotKeyed:
                             SetStatus(reason);
                             return;
@@ -296,7 +304,8 @@ internal static partial class IdleFramePreRenderer
             finished = true;
             string stored = (skipped == 0 ? string.Empty : $"（保存済みの {skipped} フレームは描画せず）")
                 + (normal == 0 ? string.Empty : $"（通常描画の {normal} フレームは対象外）")
-                + (unavailable == 0 ? string.Empty : $"（保存できない {unavailable} フレームは見送り）");
+                + (unavailable == 0 ? string.Empty : $"（保存できない {unavailable} フレームは見送り）")
+                + (mismatched == 0 ? string.Empty : $"（複製すると状態が変わる {mismatched} フレームは対象外）");
             SetStatus(rendered == 0
                 ? "先読み範囲の確認が完了しました。" + stored
                 : $"プレビュー範囲の {rendered} フレームを先読みしました。" + stored);
@@ -349,6 +358,8 @@ internal static partial class IdleFramePreRenderer
         }
     }
 
+    private const string CloneMismatch = "ライブ状態と複製状態が一致しないため、先読みをスキップしました。";
+
     private static bool TryCapturePair(KeyDependencyTracker liveTracker, KeyDependencyTracker cloneTracker, int frame,
         out KeyCapture? liveCapture, out KeyCapture? cloneCapture, out string reason)
     {
@@ -366,7 +377,7 @@ internal static partial class IdleFramePreRenderer
             liveCapture.Dispose();
             cloneCapture.Dispose();
             liveCapture = cloneCapture = null;
-            reason = "ライブ状態と複製状態が一致しないため、先読みをスキップしました。";
+            reason = CloneMismatch;
             return false;
         }
         return true;
