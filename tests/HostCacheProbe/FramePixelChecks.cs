@@ -127,7 +127,12 @@ internal static class FramePixelChecks
             CheckExportStore(host, context);
             Check(TimelineFrameCache.GpuBytes == 0, "Export store checks leaked global GPU reservation");
             DrawOrderMeasurements.Run(host, context);
-            if (features.DecoderVerified("YukkuriMovieMaker.Plugin.FileSource.WIC")) CheckImageSequence(host, context, harmony);
+            if (features.DecoderVerified("YukkuriMovieMaker.Plugin.FileSource.WIC"))
+            {
+                CheckImageSequence(host, context, harmony);
+                FileNotificationSafetyChecks.Run(host, context);
+                Check(TimelineFrameCache.GpuBytes == 0, "File notification checks leaked global GPU reservation");
+            }
             else Console.WriteLine("Image sequence check skipped: the WIC reader is not trusted on this build");
             if (features is { Preview: true, SelectionRects: true })
             {
@@ -392,7 +397,7 @@ internal static class FramePixelChecks
     }
 
     // A minimal RGBA PNG (one IDAT, no filtering).
-    private static byte[] Png(int width, int height, Func<int, int, (byte R, byte G, byte B, byte A)> pixel)
+    internal static byte[] Png(int width, int height, Func<int, int, (byte R, byte G, byte B, byte A)> pixel)
     {
         var raw = new System.IO.MemoryStream();
         for (int y = 0; y < height; y++)
