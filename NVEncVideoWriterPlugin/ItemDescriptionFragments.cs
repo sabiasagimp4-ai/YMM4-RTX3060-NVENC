@@ -163,6 +163,7 @@ internal sealed class ItemDescriptionFragments : IDisposable
         decimal number => string.Join(",", decimal.GetBits(number)),
         DateTime date => date.ToBinary(),
         DateTimeOffset date => (date.Ticks, date.Offset.Ticks),
+        System.Numerics.Vector2 point => (BitConverter.SingleToInt32Bits(point.X), BitConverter.SingleToInt32Bits(point.Y)),
         string or bool or char or byte or sbyte or short or ushort or int or uint or long or ulong or Enum or Type => value,
         _ => ScalarJson(value, serializer),
     };
@@ -188,7 +189,7 @@ internal sealed class ItemDescriptionFragments : IDisposable
                 Type? scalarType = value?.GetType();
                 if (scalarType is not null && value is not string and not Type && !scalarType.IsPrimitive && !scalarType.IsEnum
                     && value is not decimal and not DateTime and not DateTimeOffset and not Guid and not TimeSpan
-                    && value is not System.Windows.Media.Color) return false;
+                    && value is not System.Windows.Media.Color and not System.Numerics.Vector2) return false;
                 checks.Add(new(read, Scalar(value, serializer), false, scalarType)); return true;
             }
             Type type = value.GetType();

@@ -156,6 +156,10 @@ jobs:
         run: |
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --idle-parallel-check
           if ($LASTEXITCODE -ne 0) { throw 'Idle parallel worker checks failed' }
+      - name: Incremental descriptions match 1000 actual host edits before enabling production
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --edit-description-check
+          if ($LASTEXITCODE -ne 0) { throw 'Incremental description oracle failed' }
       - name: GPU retention, invalidation and trace measurement (WARP)
         run: |
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR --preview-performance
@@ -208,10 +212,6 @@ jobs:
           }
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --idle-parallel-measure
           if ($LASTEXITCODE -ne 0) { throw 'After idle rendering measurements failed' }
-      - name: Incremental descriptions match 1000 actual host edits before enabling production
-        run: |
-          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --edit-description-check
-          if ($LASTEXITCODE -ne 0) { throw 'Incremental description oracle failed' }
       - name: Single-item edit descriptions before and after (two samples each)
         run: |
           $before = Join-Path $env:RUNNER_TEMP 'edit-description-before'

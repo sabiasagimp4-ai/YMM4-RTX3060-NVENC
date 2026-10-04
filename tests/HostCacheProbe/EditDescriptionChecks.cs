@@ -115,6 +115,7 @@ internal static class EditDescriptionChecks
                         break;
                     case 11:
                         shape.X.SetFirstValue(edit % 2 == 0 ? 0.0004 : 0.00049);
+                        shape.X.Bezier.Points[0].Point = new System.Numerics.Vector2((float)random.NextDouble(), (float)random.NextDouble());
                         break;
                 }
                 Compare(edit);
