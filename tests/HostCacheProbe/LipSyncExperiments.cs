@@ -446,8 +446,8 @@ internal static class LipSyncExperiments
             foreach (var (_, (file, seconds, _)) in envelopes.Where(e => e.Key is "5 s 24 kHz" or "60 s 24 kHz")) { args.Add(file); args.Add(seconds.ToString(CultureInfo.InvariantCulture)); }
             string child = RunChild(hostDir, args);
             Console.WriteLine("Child process:" + Environment.NewLine + string.Join(Environment.NewLine, child.Split('\n').Where(l => l.StartsWith("CHILD|", StringComparison.Ordinal) || l.Contains("Exception", StringComparison.Ordinal)).Select(l => "  " + l.TrimEnd())));
-            var (s, i) = Blink(parts);
-            Console.WriteLine($"  this process: directory-hash={parts.GetHashCode()}|blink-start={s}|blink-interval={i}; envelopes {string.Join(", ", envelopes.Select(e => e.Key + "=" + e.Value.Hash))}");
+            var (ownStart, ownInterval) = Blink(parts);
+            Console.WriteLine($"  this process: directory-hash={parts.GetHashCode()}|blink-start={ownStart}|blink-interval={ownInterval}; envelopes {string.Join(", ", envelopes.Select(e => e.Key + "=" + e.Value.Hash))}");
         }
         finally { probe.UnpatchAll(probe.Id); }
     }
@@ -548,13 +548,20 @@ internal static class LipSyncExperiments
     {
         var temporary = AppDomain.CurrentDomain.GetAssemblies().Where(a => a.GetName().Name!.StartsWith("YukkuriMovieMaker", StringComparison.Ordinal))
             .Select(a => a.GetType("YukkuriMovieMaker.Commons.TemporaryFile")).FirstOrDefault(t => t is not null);
-        if (temporary is not null)
+        try
         {
-            using var first = (IDisposable)Activator.CreateInstance(temporary)!;
-            using var second = (IDisposable)Activator.CreateInstance(temporary)!;
-            var name = temporary.GetProperty("FullName")!;
-            Console.WriteLine($"TemporaryFile ({temporary.Assembly.GetName().Name}): {name.GetValue(first)} / {name.GetValue(second)}");
+            if (temporary is not null)
+            {
+                object Create() => temporary.GetConstructor(Type.EmptyTypes)?.Invoke(null)
+                    ?? temporary.GetConstructors().First().Invoke(temporary.GetConstructors().First().GetParameters().Select(p => p.HasDefaultValue ? p.DefaultValue : null).ToArray());
+                using var first = (IDisposable)Create();
+                using var second = (IDisposable)Create();
+                var name = temporary.GetProperty("FullName")!;
+                Console.WriteLine($"TemporaryFile ({temporary.Assembly.GetName().Name}): {name.GetValue(first)} / {name.GetValue(second)}");
+            }
+            else Console.WriteLine("TemporaryFile type not found");
         }
+        catch (Exception error) { Console.WriteLine("TemporaryFile: " + error.GetBaseException().Message); }
         var character = new Character { Name = "cached-voice" };
         var voice = CachedVoice(character, WavBytes(24000, 3.0, 21));
         var copy = (VoiceItem)voice.GetClone();
@@ -598,7 +605,8 @@ internal static class LipSyncExperiments
 
     private static void VoiceCacheModel()
     {
-        Console.WriteLine($"IsProjectVoiceCacheEnabled (default settings): {SettingsBase<YMMSettings>.Default.IsProjectVoiceCacheEnabled}");
+        var settings = SettingsBase<YMMSettings>.Default;
+        Console.WriteLine($"IsProjectVoiceCacheEnabled (default settings): {settings.GetType().GetProperty("IsProjectVoiceCacheEnabled", Any)?.GetValue(settings) ?? "(no such setting)"}");
         foreach (int hz in new[] { 16000, 24000, 48000 })
         {
             byte[] raw = WavBytes(hz, 3.0, 31);
