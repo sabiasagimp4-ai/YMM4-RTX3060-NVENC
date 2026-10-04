@@ -1,0 +1,74 @@
+name: release
+
+# Builds the plugin against the verified YMM4 host on a Windows runner (build.ps1: native and managed builds, a host
+# load check, the .ymme package and its SHA-256) and publishes a prerelease with docs/release-notes/<tag>.md as its notes.
+# The runner has no NVIDIA GPU, so the NVENC smoke tests (build.ps1 -Smoke) do not run here.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create (its notes: docs/release-notes/<tag>.md)'
+        required: true
+      title:
+        description: 'Release title'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: host
+          key: cache-dev-ymm4-4.56.1.0-top
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bash tools/ci/fetch-ymm4.sh 4.56.1.0 host --top
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host
+          path: host
+          retention-days: 1
+
+  build:
+    needs: host
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: host
+          path: host
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build and package
+        run: |
+          ./build.ps1 -Ymm4DirPath "$env:GITHUB_WORKSPACE\host"
+          if (-not (Test-Path dist/YMM4-RTX3060-NVENC.ymme)) { throw 'No package was built' }
+          Get-Content dist/YMM4-RTX3060-NVENC.ymme.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package
+          path: |
+            dist/YMM4-RTX3060-NVENC.ymme
+            dist/YMM4-RTX3060-NVENC.ymme.sha256
+      - name: Publish the prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          TITLE: ${{ inputs.title }}
+        run: |
+          $notes = "docs/release-notes/$env:TAG.md"
+          if (-not (Test-Path -LiteralPath $notes)) { throw "Missing release notes: $notes" }
+          gh release create $env:TAG dist/YMM4-RTX3060-NVENC.ymme dist/YMM4-RTX3060-NVENC.ymme.sha256 --target $env:GITHUB_SHA --prerelease --title $env:TITLE --notes-file $notes
+          if ($LASTEXITCODE -ne 0) { throw 'Publishing the release failed' }
