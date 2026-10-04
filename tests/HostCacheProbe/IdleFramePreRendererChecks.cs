@@ -205,7 +205,7 @@ internal static class IdleFramePreRendererChecks
                 using var cancellation = new CancellationTokenSource();
                 cancellation.Cancel();
                 var result = method.Invoke(null,
-                    [cancellation.Token, liveScene, cloneScene, null, TimeSpan.Zero, viewport, liveCapture, cloneCapture]);
+                    [cancellation.Token, liveScene, cloneScene, null, TimeSpan.Zero, viewport, liveCapture, cloneCapture, null]);
                 Check(result is false && Volatile.Read(ref primeCalls) == 0,
                     "Cancelled idle job reached the preview-cache commit");
             }

@@ -19,8 +19,8 @@ internal static class CompressionChecks
             Check(store.DiskBytes < plain.Length + noise.Length, "compressed physical budget");
         }
         string Record(string key) => Directory.EnumerateFiles(root, key + ".ymmframe", SearchOption.AllDirectories).Single();
-        Check(File.ReadAllBytes(Record(key1)).AsSpan(0, 8).SequenceEqual("YMMFRZ01"u8), "compressible frame uses lossless record");
-        Check(File.ReadAllBytes(Record(key2)).AsSpan(0, 8).SequenceEqual("YMMFRM01"u8), "noise uses raw fallback");
+        Check(File.ReadAllBytes(Record(key1)).AsSpan(0, 8).SequenceEqual("YMMFRZ02"u8), "compressible frame uses lossless record");
+        Check(File.ReadAllBytes(Record(key2)).AsSpan(0, 8).SequenceEqual("YMMFRM02"u8), "noise uses raw fallback");
         using (var store = new FrameCacheStore(root, 32768, 65536))
         {
             Wait(() => store.DiskBytes > 0, "index ready");

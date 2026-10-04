@@ -42,6 +42,7 @@
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameModelSplit.cs" Link="FrameModelSplit.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\KeyDependencyTracker.cs" Link="KeyDependencyTracker.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameDependencyIndex.cs" Link="FrameDependencyIndex.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\FrameDependencyIdentity.cs" Link="FrameDependencyIdentity.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FileDependencyLease.cs" Link="FileDependencyLease.cs" />
     <!-- The performance harness drives idle batches with this assembly's TimelineFrameCache (IdleCacheOrder is the plugin's public type). -->
     <Compile Include="..\..\NVEncVideoWriterPlugin\IdleFramePlan.cs" Link="IdleFramePlan.cs" />

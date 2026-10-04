@@ -43,7 +43,7 @@ internal static class FrameCacheKey
             reason = "描画キャッシュの状態検査を省略しました: " + ex.GetType().Name;
             return false;
         }
-        if (!frames!.Whole.Cacheable) return Bypass("立ち絵、外部プラグインのコード、確認できない素材のいずれかを使うアイテムがあります。", out reason);
+        if (!frames!.Whole.Cacheable) return Bypass("描画順を確定できない同一レイヤーの重なり、立ち絵、外部プラグインのコード、確認できない素材のいずれかを含みます。", out reason);
         hasExternalDependencies = paths.Length != 0;
         if (hasExternalDependencies)
             return Bypass("外部素材は背景での内容確認が必要です。", out reason);
@@ -296,6 +296,12 @@ internal static class FrameCacheKey
             // The MIDI reader YMM4 ships (Community) synthesizes with its own settings and SoundFont files, which the
             // key does not hold: frames that read audio render normally.
             audioForeign |= paths.Any(IsMidi);
+            // Nested frames cannot be certified if a referenced timeline can draw ties
+            // in resource insertion order. Wide dependencies conservatively include it.
+            nestedUncacheable |= timelines.Where(timeline => !ReferenceEquals(timeline, scene.Timeline)).Any(timeline =>
+                FrameDependencyIndex.HasPotentialOrderAmbiguity(timeline.Items.OfType<IVideoItem>().Select(item =>
+                    new FrameDependencyIndex.Entry(item.Frame, item.Length, false, false, string.Empty, [],
+                        Layer: item.Layer, AlwaysOnTop: item.IsAlwaysOnTop))));
             // Wide frames (scene items, audio spectrum) read other timelines and the audio: a plugin's audio effect
             // anywhere reaches them.
             frames = DescribeFrames(split, rootItems, rootDependencies, characterPaths, nestedPaths, nestedResources,
@@ -571,7 +577,8 @@ internal static class FrameCacheKey
             bool wide = item is SceneItem || text.Contains("AudioSpectrum", StringComparison.Ordinal);
             entries[i] = new(item.Frame, item.Length, item is TransitionItem, wide, FrameDependencyIndex.Hash(identity),
                 rootDependencies[i].Paths.ToArray(), rootDependencies[i].Uncacheable, rootDependencies[i].Session, rootDependencies[i].Culture,
-                rootDependencies[i].FrameFiles);
+                rootDependencies[i].FrameFiles, item is IVideoItem ? item.Layer : null,
+                item is IVideoItem video && video.IsAlwaysOnTop);
         }
         return new FrameDependencyIndex(FrameDependencyIndex.Hash(global), characterPaths,
             FrameDependencyIndex.Hash(nested + "\n" + string.Join("\n", nestedResources)), nestedPaths, entries, nestedUncacheable, nestedSession,

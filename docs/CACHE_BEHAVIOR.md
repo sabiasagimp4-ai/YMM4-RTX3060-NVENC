@@ -1,6 +1,6 @@
 # 描画キャッシュの仕様
 
-2026-10-02の実装を含む仕様。入口は [README](../README.md)、開発課題は [AE_CACHE_DEVELOPMENT.md](AE_CACHE_DEVELOPMENT.md)。
+2026-10-04の監査ブランチの実装を含む仕様。入口は [README](../README.md)、開発課題は [AE_CACHE_DEVELOPMENT.md](AE_CACHE_DEVELOPMENT.md)、設計判断と残る問題は [アーキテクチャ監査](CACHE_ARCHITECTURE_AUDIT_2026-10-04.md)。
 
 ## 保存と供給
 
@@ -47,6 +47,10 @@ RAM縮小でも有効なディスクレコードは残す。借用配列、書�
 緑はRAM、青はディスクの保存状態。ツールはタイムライン全体、対応ホストのルーラーは表示範囲に帯を出す。帯は現在のviewportのキーに対応する表示であり、実際の表示FPSや全フレーム検査の証明ではない。帯は250 msごとに確認するが、保存内容・フレームのキー・表示範囲が変わらない間は照会を省く（最長2秒ごとには照会し直す）。
 
 ## キーと無効化
+
+同じIsAlwaysOnTop・Layerの動画アイテムが重なるフレームは、要求前に描画順を確定できないため通常描画する。YMM4のresource dictionaryの挿入順はprefetch／並行resource作成／seek履歴の影響を受け得る。モデル配列順をキーに足すだけでは証明にならない。トランジションの参照先と入れ子・全体依存にもこの判定を伝える。Z値が実際には異なる場合も保守的に対象外となり、今後の描画順証明で改善できる余地がある。
+
+同じsourceの直前出力を返す経路も、RAM／GPU復元と同様に入力captureを再検証する。code信頼・font世代・reader・描画設定・scene親のwitnessを確認し、provider callback後にもrevisionと環境を再確認する。capture前後の検証は、ホストの可変モデルを原子的にsnapshotできることの証明ではない。
 
 キーは正確な時刻ticks（100 ns）、fps、usage、描画環境、viewport、モデル、素材の指紋から作る。永続schemaは `pixels-v7`。GPU・ドライバー・プラグインのビルドが変われば以前の画素は再利用しない。
 

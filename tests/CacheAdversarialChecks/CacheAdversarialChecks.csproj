@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../NVEncVideoWriterPlugin/FrameCacheStore.cs" Link="FrameCacheStore.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/CacheTrace.cs" Link="CacheTrace.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/PreviewPerformance.cs" Link="PreviewPerformance.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/CacheDependencyContract.cs" Link="CacheDependencyContract.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/DynamicComputeCache.cs" Link="DynamicComputeCache.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/FrameDependencyIndex.cs" Link="FrameDependencyIndex.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/FrameDependencyIdentity.cs" Link="FrameDependencyIdentity.cs" />
+  </ItemGroup>
+</Project>

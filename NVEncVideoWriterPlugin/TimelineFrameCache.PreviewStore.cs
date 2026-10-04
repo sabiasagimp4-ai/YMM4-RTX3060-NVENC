@@ -237,7 +237,7 @@ internal static partial class TimelineFrameCache
             lock (cacheGate) if (StillCurrent(deferred.Pending))
             {
                 if (preview && !deferred.Pending.State.Economics.ShouldAdmit(deferred.Pending.CacheKey!, record!.LongLength, gpuRetentionEnabled)) return true;
-                if (!store.Value.PutOwned(deferred.Pending.CacheKey!, record!)) return true;
+                if (deferred.Pending.Publication.Owner?.PutOwned(deferred.Pending.CacheKey!, record!, deferred.Pending.Publication) != true) return true;
                 if (preview) Interlocked.Increment(ref previewStored);
                 status = preview ? "描画したプレビューのフレームを保存しました。" : "描画したフレームを保存しました。";
             }
