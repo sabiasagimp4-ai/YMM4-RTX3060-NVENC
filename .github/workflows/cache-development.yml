@@ -154,6 +154,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Preview performance checks failed' }
       - name: Simple tachie second-play measurements (two samples, WARP)
         run: |
+          $before = Join-Path $env:RUNNER_TEMP 'simple-tachie-before'
+          git fetch origin 67b208027d85c5e169fd18313368a09fff347fb0
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch simple tachie baseline' }
+          git worktree add --detach $before 67b208027d85c5e169fd18313368a09fff347fb0
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create simple tachie baseline' }
+          try {
+            $project = Join-Path $before 'tests/HostCacheProbe/HostCacheProbe.csproj'
+            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --simple-tachie-measure
+            if ($LASTEXITCODE -ne 0) { throw 'Before simple tachie measurement failed' }
+          } finally {
+            git worktree remove --force $before
+          }
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --simple-tachie-measure
           if ($LASTEXITCODE -ne 0) { throw 'Simple tachie measurements failed' }
       - uses: actions/upload-artifact@v4

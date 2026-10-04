@@ -14,6 +14,8 @@ fingerprintは型・基底・interface・field・属性・正規化IL・生成�
 
 ## デコード完成判定
 
+シンプル立ち絵の `simple-tachie` はcoreとwrapped-sourcesに依存し、同梱SimpleTachie全体、TachieSource、Character、TachieItem、TachieFaceItem、IFaceItemを追加で照合する。ホストのpickerをそのまま呼んで可視表情を選ぶ。4.56.1.0のSimpleTachieは音量の-1だけを非表示に使い、characterのDirectoryは編集UIでしか読まない。型・同梱配置・MVID `be62ee72-e935-4cca-9bba-eb9de4a27cde` も確認する。既定・ボイス・上の表情の画像は実際に選ばれる区間に入れ、使われないfaceのファイルはそのボイス／faceアイテム自身の描画依存から外す。共通の字幕・音声エフェクトが同じファイルを使う場合はそちらの依存を維持する。番号付き画像とグループの時間対応は未確認のため対象外にする。新しいHarmonyフックは追加していないが、記録済み4.56.1.0の全基準をHostFingerprintで再生成している。
+
 `TimelineSource.Update` をAsyncLocal scopeで囲み、要求時刻と実際の動画ソースの状態を検査する。例外なしのreturnだけで完成とは判定しない。
 
 | ソース | 4.56.1.0で読んだ条件 |

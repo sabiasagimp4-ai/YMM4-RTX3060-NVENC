@@ -18,6 +18,7 @@ internal static partial class HostContracts
     internal const string SelectionRects = "selection-rects";
     internal const string WrappedSources = "wrapped-sources";
     internal const string RulerBars = "ruler-bars";
+    internal const string SimpleTachie = "simple-tachie";
     internal const string DecoderPrefix = "decoder:";
     internal const string Missing = "missing";
 
@@ -121,6 +122,14 @@ internal static partial class HostContracts
                 "YukkuriMovieMaker|YukkuriMovieMaker.ViewModels.TimelineScaleViewModel",
             ],
             [], []),
+        new(SimpleTachie, [Core, WrappedSources],
+            [
+                "YukkuriMovieMaker|YukkuriMovieMaker.Player.Video.Items.TachieSource+",
+                "YukkuriMovieMaker|YukkuriMovieMaker.Project.Character",
+                "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.TachieItem",
+                "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.TachieFaceItem",
+                "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.IFaceItem",
+            ], ["YukkuriMovieMaker.Plugin.Tachie.SimpleTachie"], []),
         // Whether a decoder holds the requested frame (FrameRenderReadiness) depends on its whole assembly.
         .. decoderAssemblies.Select(assembly => new Rule(DecoderPrefix + assembly, [Core], [], [assembly], [])),
     ];

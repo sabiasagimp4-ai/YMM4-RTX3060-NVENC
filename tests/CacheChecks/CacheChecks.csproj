@@ -9,6 +9,8 @@
   <ItemGroup>
     <PackageReference Include="Lib.Harmony" Version="2.4.2" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameCacheKey.cs" Link="FrameCacheKey.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/SimpleTachieDependencies.cs" Link="SimpleTachieDependencies.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/HostFeatures.cs" Link="HostFeatures.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameDescriptionJson.cs" Link="FrameDescriptionJson.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameVoiceCloneState.cs" Link="FrameVoiceCloneState.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FontEnvironment.cs" Link="FontEnvironment.cs" />

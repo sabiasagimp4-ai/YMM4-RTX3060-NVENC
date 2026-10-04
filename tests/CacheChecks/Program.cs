@@ -29,7 +29,8 @@ internal static class Program
         var bootstrap = new Harmony("ymm.cachechecks.builtin-loader");
         bootstrap.Patch(loaderType.TypeInitializer!, prefix: new HarmonyMethod(typeof(Program), nameof(SkipLoader)));
         AccessTools.StaticFieldRefAccess<IEnumerable<Assembly>>(AccessTools.Field(loaderType, "<Assemblies>k__BackingField"))() =
-            new[] { typeof(Scene).Assembly, typeof(YukkuriMovieMaker.Plugin.CacheProvider).Assembly };
+            new[] { typeof(Scene).Assembly, typeof(YukkuriMovieMaker.Plugin.CacheProvider).Assembly,
+                Assembly.LoadFrom(Path.Combine(Path.GetDirectoryName(typeof(Scene).Assembly.Location)!, SimpleTachieDependencies.AssemblyName + ".dll")) };
         // 4.56.1.0's PluginLoader also reads these; the skipped static constructor would have created them empty.
         foreach (var name in new[] { "<IncompatiblePluginAssemblies>k__BackingField", "loadFailures" })
             if (AccessTools.Field(loaderType, name) is { } field) // init-only: FieldInfo.SetValue would throw
@@ -48,6 +49,7 @@ internal static class Program
         Check(!FrameCacheKey.IsBuiltInSourceReader(typeof(Program)), "Custom reader assembly was trusted");
         CheckBundledReaders();
         CheckBundledTachie();
+        SimpleTachieKeyChecks.Run();
         CheckFramePreparesOwnFiles();
         CheckFingerprintCancellation();
         CheckUnverifiableFiles();

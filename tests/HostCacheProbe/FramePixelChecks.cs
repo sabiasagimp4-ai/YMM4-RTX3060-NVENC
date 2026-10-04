@@ -131,6 +131,7 @@ internal static class FramePixelChecks
             {
                 CheckImageSequence(host, context, harmony);
                 FileNotificationSafetyChecks.Run(host, context);
+                if (features.SimpleTachie) SimpleTachiePixelChecks.Run(host);
                 Check(TimelineFrameCache.GpuBytes == 0, "File notification checks leaked global GPU reservation");
             }
             else Console.WriteLine("Image sequence check skipped: the WIC reader is not trusted on this build");

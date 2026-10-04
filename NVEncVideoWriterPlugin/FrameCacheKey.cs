@@ -112,12 +112,14 @@ internal static class FrameCacheKey
             var foreignCharacters = new HashSet<Character>();
             foreach (var character in characters)
             {
+                if (SimpleTachieDependencies.Character(character))
+                    characterResources.Add("simple-tachie-code://" + character.TachieType.Assembly.ManifestModule.ModuleVersionId.ToString("D"));
                 var ownPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
                 var ownFonts = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
                 try
                 {
-                    // A character's tachie settings only reach TachieSource, whose frames are never cached: their
-                    // files are not dependencies of any frame (the settings themselves stay in the key).
+                    // Tachie defaults are selected by the item and its active face. Their files belong to that
+                    // selected range, while their settings remain part of the description.
                     var (shared, tachieOnly) = SplitCharacter<IFileItem>(character);
                     var files = shared.SelectMany(part => part.GetFiles()).ToList();
                     var tachieFiles = tachieOnly.SelectMany(part => part.GetFiles());
@@ -153,11 +155,16 @@ internal static class FrameCacheKey
                     // (TimelineSource picks them per frame, 4.56.1.0), so other frames stay cacheable; in another
                     // timeline it disables the scene item frames that draw it. Its files are then never needed.
                     bool tachie = item is TachieItem;
+                    FrameDependencyIndex.FileRange[]? fileRanges = null;
+                    bool simple = false;
+                    if (item is TachieItem simpleItem)
+                        simple = SimpleTachieDependencies.TryRanges(simpleItem, timeline, out fileRanges);
+                    bool simpleCharacter = SimpleTachieDependencies.Character(GetCharacter(item));
                     // Code this plugin did not read renders a plugin's item type, a plugin's shape, and (below) a
                     // plugin's effect, brush or transition: only the frames showing such an item are rendered normally
                     // (CompositeItemPicker draws an item only at its own frames; transitions and scene items are
                     // followed by FrameDependencyIndex).
-                    bool uncacheable = tachie || !code.Knows(item.GetType())
+                    bool uncacheable = tachie && !simple || !code.Knows(item.GetType())
                         || item is ShapeItem shape && !code.Knows(shape.ShapeType2)
                         || item is TransitionItem transition && transition.TransitionType is { } transitionType && !code.Knows(transitionType)
                         || GetCharacter(item) is { } character && foreignCharacters.Contains(character);
@@ -167,7 +174,8 @@ internal static class FrameCacheKey
                     {
                         if (!tachie)
                         {
-                            foreach (var file in item.GetFiles()) AddPath(file, itemPaths);
+                            foreach (var file in simpleCharacter && item is VoiceItem or TachieFaceItem
+                                ? SimpleTachieDependencies.FilesWithoutFace(item) : item.GetFiles()) AddPath(file, itemPaths);
                             if (item is VoiceItem voice && !string.IsNullOrWhiteSpace(voice.FilePath)) AddPath(voice.FilePath, itemPaths);
                             // A numbered image played as a video (ImageSequence): every file it shows is fingerprinted;
                             // a root frame depends on the one image it shows, a scene item's frames on all of them.
@@ -183,10 +191,21 @@ internal static class FrameCacheKey
                                 else uncacheable = true;
                             }
                         }
-                        foreach (var resource in item.GetResources())
+                        else if (simple && item is TachieItem supportedTachie)
+                        {
+                            foreach (var effect in supportedTachie.VideoEffects.OfType<IFileItem>())
+                                foreach (var file in effect.GetFiles()) AddPath(file, itemPaths);
+                            paths.UnionWith(fileRanges!.SelectMany(range => range.Files));
+                            if (!root) itemPaths.UnionWith(fileRanges!.SelectMany(range => range.Files));
+                        }
+                        foreach (var resource in simpleCharacter && item is VoiceItem or TachieFaceItem
+                            ? SimpleTachieDependencies.ResourcesWithoutFace(item) : item.GetResources())
                         {
                             uncacheable |= Note(ClassifyResource(resource.Key, code), ref audioForeign);
-                            AddResource(resource, tachie ? Unused() : itemPaths, itemResources, itemFonts);
+                            // The audited simple parameters report the editor's directory as a Tachie resource.
+                            // It is not a file the source reads; actual selected faces are listed above.
+                            bool directory = simpleCharacter && resource.ResourceType == TimelineResourceType.Tachie;
+                            AddResource(resource, directory || tachie && !simple ? Unused() : itemPaths, itemResources, itemFonts);
                         }
                         // Randomness YMM4 seeds with object identities (see IdentitySeeds), and text drawn by code
                         // outside YMM4's own assemblies (DrawnText).
@@ -198,7 +217,7 @@ internal static class FrameCacheKey
                             itemResources.Add("identity://" + string.Join(",", seeds));
                             session = true;
                         }
-                        foreach (string font in drawn.Fonts) AddFont(font, tachie ? Unused() : itemPaths, itemResources, itemFonts);
+                        foreach (string font in drawn.Fonts) AddFont(font, tachie && !simple ? Unused() : itemPaths, itemResources, itemFonts);
                         if (drawn.Culture)
                         {
                             itemResources.Add(CultureResource());
@@ -219,10 +238,11 @@ internal static class FrameCacheKey
                         // A font file that is not local, a remote file, or a plugin item failing to list its files.
                         uncacheable = true;
                     }
-                    if (customReaders && itemPaths.Any(path => !itemFonts.Contains(path))) uncacheable = true;
+                    if (customReaders && (itemPaths.Any(path => !itemFonts.Contains(path)) || simple && fileRanges!.Any(range => range.Files.Length != 0))) uncacheable = true;
                     paths.UnionWith(itemPaths);
                     resources.UnionWith(itemResources);
-                    if (root) rootDependencies.Add(new(itemPaths, itemResources) { Uncacheable = uncacheable, Session = session, Culture = culture, FrameFiles = frameFiles });
+                    if (root) rootDependencies.Add(new(itemPaths, itemResources) { Uncacheable = uncacheable, Session = session, Culture = culture,
+                        FrameFiles = frameFiles, FileRanges = simple ? fileRanges : null });
                     else
                     {
                         nestedPaths.UnionWith(itemPaths);
@@ -512,6 +532,7 @@ internal static class FrameCacheKey
         internal bool Session { get; set; }
         internal bool Culture { get; set; }
         internal string[]? FrameFiles { get; init; }
+        internal FrameDependencyIndex.FileRange[]? FileRanges { get; init; }
     }
 
     // How a random move serializes (StringEnumConverter): the safety net for one the walk did not reach.
@@ -583,7 +604,7 @@ internal static class FrameCacheKey
             entries[i] = new(item.Frame, item.Length, item is TransitionItem, wide, FrameDependencyIndex.Hash(identity),
                 rootDependencies[i].Paths.ToArray(), rootDependencies[i].Uncacheable, rootDependencies[i].Session, rootDependencies[i].Culture,
                 rootDependencies[i].FrameFiles, item is IVideoItem ? item.Layer : null,
-                item is IVideoItem video && video.IsAlwaysOnTop);
+                item is IVideoItem video && video.IsAlwaysOnTop, rootDependencies[i].FileRanges);
         }
         return new FrameDependencyIndex(FrameDependencyIndex.Hash(global), characterPaths,
             FrameDependencyIndex.Hash(nested + "\n" + string.Join("\n", nestedResources)), nestedPaths, entries, nestedUncacheable, nestedSession,
@@ -594,6 +615,7 @@ internal static class FrameCacheKey
     {
         VoiceItem voice => voice.Character,
         TachieItem tachie => tachie.Character,
+        TachieFaceItem face => face.Character,
         _ => null,
     };
 

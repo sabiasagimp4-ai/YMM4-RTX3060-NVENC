@@ -132,6 +132,20 @@ internal static partial class HostContracts
                 ["YukkuriMovieMaker|YukkuriMovieMaker.ViewModels.TimelineScaleViewModel"] = "E719559732D44138E3182F61432D4865",
                 ["YukkuriMovieMaker|YukkuriMovieMaker.Views.TimelineScaleView"] = "B13864FD893AB5B5BAC8D8493050FF3D",
             },
+            ["simple-tachie"] = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["YukkuriMovieMaker.Plugin.Tachie.SimpleTachie|YukkuriMovieMaker.Plugin.Tachie.SimpleTachie.CharacterParameter"] = "EADA2768C366A56503C0251B31DEA6A1",
+                ["YukkuriMovieMaker.Plugin.Tachie.SimpleTachie|YukkuriMovieMaker.Plugin.Tachie.SimpleTachie.FaceParameter"] = "0B3AFEF010AFDA311B1015ABE1E2052B",
+                ["YukkuriMovieMaker.Plugin.Tachie.SimpleTachie|YukkuriMovieMaker.Plugin.Tachie.SimpleTachie.FileSelectorForTachieFaceAttribute"] = "1FFB589C7471D45F3561ED836D347489",
+                ["YukkuriMovieMaker.Plugin.Tachie.SimpleTachie|YukkuriMovieMaker.Plugin.Tachie.SimpleTachie.ItemParameter"] = "5E20DBDB3401F8FB66F39638A7C2FC18",
+                ["YukkuriMovieMaker.Plugin.Tachie.SimpleTachie|YukkuriMovieMaker.Plugin.Tachie.SimpleTachie.SimpleTachiePlugin"] = "CC6F316DE90ECAA9AADF82900A8A5AC9",
+                ["YukkuriMovieMaker.Plugin.Tachie.SimpleTachie|YukkuriMovieMaker.Plugin.Tachie.SimpleTachie.SimpleTachieSource"] = "8380317D25EA740ADFA41F1EA6359ABF",
+                ["YukkuriMovieMaker|YukkuriMovieMaker.Player.Video.Items.TachieSource"] = "79F4BDA62A702F4DD0B86E100BC3E18E",
+                ["YukkuriMovieMaker|YukkuriMovieMaker.Project.Character"] = "547D0C740EA23DF6C6FD59615AD79894",
+                ["YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.IFaceItem"] = "B435B623516B92CA5DDD754559543DFC",
+                ["YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.TachieFaceItem"] = "32E03CFC589ED76E2478532FF28C4636",
+                ["YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.TachieItem"] = "036AB76EBFADC09DA7E74DDD9E4518C3",
+            },
             ["decoder:YukkuriMovieMaker.Plugin.FileSource.FFmpeg"] = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["YukkuriMovieMaker.Plugin.FileSource.FFmpeg|<>z__ReadOnlySingleElementList`#+Enumerator"] = "06F5B0254C2AEF00FFFA28ABD68D2934",

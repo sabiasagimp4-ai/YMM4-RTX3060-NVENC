@@ -37,6 +37,7 @@
     <Compile Include="..\..\NVEncVideoWriterPlugin\CacheBarLayout.cs" Link="CacheBarLayout.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameCacheStore.cs" Link="FrameCacheStore.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameCacheKey.cs" Link="FrameCacheKey.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\SimpleTachieDependencies.cs" Link="SimpleTachieDependencies.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameDescriptionJson.cs" Link="FrameDescriptionJson.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameVoiceCloneState.cs" Link="FrameVoiceCloneState.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FontEnvironment.cs" Link="FontEnvironment.cs" />
