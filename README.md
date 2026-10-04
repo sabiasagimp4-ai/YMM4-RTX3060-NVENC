@@ -17,11 +17,6 @@
 > [!IMPORTANT]
 > 描画キャッシュは、新しく入れたときは **OFF** です。ツール「描画キャッシュ」で ON にしてください。NVENC 出力には NVIDIA の GPU が必要です。
 
-<p align="center">
-  <a href="tests/HostCacheProbe/README.md"><img src="docs/assets/readme/card-real-host.svg" alt="TESTED ON THE REAL HOST — 実物の YMM4 Lite 4.56.1.0 で検査" width="440"></a><br>
-  <a href="docs/CACHE_BEHAVIOR.md"><img src="docs/assets/readme/card-pixel-parity.svg" alt="PIXEL PARITY — YMM4 自身の描画と画素一致" width="440"></a><br>
-  <a href="docs/RTX3060_HARDWARE_CHECK.md"><img src="docs/assets/readme/card-rtx3060.svg" alt="NVIDIA GEFORCE RTX 3060 — 実機で NVENC 出力を確認" width="440"></a>
-</p>
 
 ## できること
 
