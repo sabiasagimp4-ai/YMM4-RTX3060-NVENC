@@ -649,14 +649,14 @@ internal static class LipSyncExperiments
                     foreach (object item in (System.Collections.IEnumerable)folderType.GetProperty("Items")!.GetValue(root)!)
                     {
                         string id = (string)item.GetType().GetProperty("Id")!.GetValue(item)!, path = (string)item.GetType().GetProperty("Path")!.GetValue(item)!;
-                        if (ids.Count < 3) Console.WriteLine($"  PSD item: Id {id}, Path {path}");
+                        if (ids.Count < 3) Console.WriteLine($"  PSD item: Id {id}, Path {path} ({string.Join(" ", path.Select(c => ((int)c).ToString("X")))})");
                         ids[path] = id;
                     }
                 }
-                string? Identifier(string name) => ids.FirstOrDefault(pair => pair.Key.Split('/')[^1].TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9') == name).Value;
+                string? Identifier(string name) => ids.FirstOrDefault(pair => pair.Key.Contains(name, StringComparison.Ordinal)).Value;
                 var mouthIds = mouths.Select(Identifier).ToArray();
                 var eyeIds = eyes.Select(Identifier).ToArray();
-                if (mouthIds.Any(id => id is null) || eyeIds.Any(id => id is null)) { Console.WriteLine("PSD tachie: layer identifiers not found"); return; }
+                if (mouthIds.Any(id => id is null) || eyeIds.Any(id => id is null)) { Console.WriteLine("PSD tachie: layer identifiers not found among " + string.Join(", ", ids.Keys)); return; }
                 var settingsType = psdAssembly.GetType("YukkuriMovieMaker.Plugin.Tachie.Psd.PsdFileSettings", true)!;
                 object settings = settingsType.GetMethod("LoadFromPsdFilePath", Any)!.Invoke(null, [psd])!;
                 object mouth = Activator.CreateInstance(psdAssembly.GetType("YukkuriMovieMaker.Plugin.Tachie.Psd.PsdMouthAnimation", true)!, [ImmutableList.CreateRange(mouthIds!)])!;
