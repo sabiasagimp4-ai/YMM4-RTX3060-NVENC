@@ -17,12 +17,12 @@ internal static class Program
             string file = Path.Combine(hostDir, name.Name + ".dll");
             return File.Exists(file) ? AssemblyLoadContext.Default.LoadFromAssemblyPath(file) : null;
         };
-        return Run();
+        return Run(args.Contains("--voice-measure"));
     }
 
     // Defer binding host model types until the in-place dependency resolver is installed.
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private static int Run()
+    private static int Run(bool voiceMeasureOnly)
     {
         // Test-only built-in discovery; host files remain in place and no application is started.
         var loaderType = typeof(YukkuriMovieMaker.Plugin.PluginAssemblyLoader);
@@ -34,6 +34,8 @@ internal static class Program
         foreach (var name in new[] { "<IncompatiblePluginAssemblies>k__BackingField", "loadFailures" })
             if (AccessTools.Field(loaderType, name) is { } field) // init-only: FieldInfo.SetValue would throw
                 AccessTools.StaticFieldRefAccess<object>(field)() ??= Activator.CreateInstance(typeof(List<>).MakeGenericType(field.FieldType.GetGenericArguments()))!;
+        VoiceDescriptionMeasurements.Run();
+        if (voiceMeasureOnly) return 0; // Additional paired benchmark process; the full CI suite still runs separately.
         var timeline = new Timeline();
         var scenes = new Scenes(false);
         scenes.AddScene(timeline);
