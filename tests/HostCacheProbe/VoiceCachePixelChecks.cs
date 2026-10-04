@@ -60,6 +60,16 @@ internal static class VoiceCachePixelChecks
                 baseline[frame] = TimelineFrameCache.CapturePreview(dc, player.Output, view)!;
             }
             Check(baseline[0].Where((value, i) => value != baseline[360][i]).Any(), "The voice pixel fixture drew no caption");
+            // The player owns another tracker. Its first encounter with the WAV deliberately renders normally
+            // while fingerprinting runs; keying the idle tracker above cannot make that asynchronous pass finish.
+            TimelineFrameCache.Enabled = true;
+            Check(SpinWait.SpinUntil(() =>
+            {
+                player.Update(TimeSpan.Zero, TimelineSourceUsage.Paused);
+                long previousHits = TimelineFrameCache.Hits;
+                player.Update(TimeSpan.Zero, TimelineSourceUsage.Paused);
+                return TimelineFrameCache.Hits > previousHits;
+            }, TimeSpan.FromSeconds(20)), "The player never finished verifying the voice WAV: " + TimelineFrameCache.Status);
             Check(SpinWait.SpinUntil(() =>
             {
                 if (!tracker.TryCapture(0, out var capture, out _)) return false;
@@ -89,7 +99,8 @@ internal static class VoiceCachePixelChecks
                     Check(TimelineFrameCache.CapturePreview(dc, player.Output, view)!.SequenceEqual(baseline[frame]),
                         $"Cached voice pixels differ at frame {frame}");
                 }
-                Check(TimelineFrameCache.Hits - hits == frames.Length, "The player did not reuse every idle voice frame");
+                Check(TimelineFrameCache.Hits - hits == frames.Length,
+                    $"The player did not reuse every idle voice frame ({TimelineFrameCache.Hits - hits}/{frames.Length}): {TimelineFrameCache.Status}");
             }
             Console.WriteLine($"Voice cache: verified clone payloads, matching frame keys, {frames.Length} idle frames and exact cached-caption pixels passed.");
         }
