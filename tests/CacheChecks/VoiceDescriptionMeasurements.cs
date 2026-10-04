@@ -29,6 +29,7 @@ internal static class VoiceDescriptionMeasurements
             timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, count).Select(index => new VoiceItem
             {
                 Frame = index * 90, Length = 90, Layer = 1, Serif = "voice " + index, Font = "Arial",
+                JimakuVisibility = JimakuVisibility.Custom,
                 VoiceCache = (byte[])cache.Clone(),
             }));
             var scene = new Scene(timeline, scenes, []);
@@ -37,8 +38,10 @@ internal static class VoiceDescriptionMeasurements
             for (int repeat = 1; repeat <= 2; ++repeat)
             {
                 var clock = Stopwatch.StartNew();
-                bool eligible = FrameCacheKey.TryDescribe(scene, readers, out string model, out _, out _, out string reason);
+                bool eligible = FrameCacheKey.TryDescribe(scene, readers, out string model, out _, out var frames, out string reason);
                 clock.Stop();
+                if (eligible && !frames!.For(0).Cacheable)
+                    throw new InvalidOperationException("The voice benchmark fixture itself bypassed despite a bounded description");
                 double? recovery = null;
                 if (eligible && count == 50)
                 {
