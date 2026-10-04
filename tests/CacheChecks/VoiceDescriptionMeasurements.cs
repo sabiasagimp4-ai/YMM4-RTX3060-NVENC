@@ -27,7 +27,7 @@ internal static class VoiceDescriptionMeasurements
         {
             var timeline = new Timeline();
             var scenes = new Scenes(false); scenes.AddScene(timeline);
-            var character = new Character { Name = "voice-description", Font = "Arial" };
+            var character = Character("voice-description");
             timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, count).Select(index => new VoiceItem(character)
             {
                 Frame = index * 90, Length = 90, Layer = 1, Serif = "voice " + index, Font = "Arial",
@@ -63,6 +63,13 @@ internal static class VoiceDescriptionMeasurements
             }
         }
     }
+
+    internal static Character Character(string name) => new()
+    {
+        Name = name, Font = "Arial",
+        Voice = new YukkuriMovieMaker.Plugin.Voice.VoiceDescription(YukkuriMovieMaker.Plugin.PluginLoader.VoicePlugins
+            .SelectMany(plugin => plugin.Voices).First(speaker => speaker.API == "None")),
+    };
 
     private static void Wait(KeyDependencyTracker tracker, bool settle = false)
     {
