@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.IO.Compression;
 using System.Numerics;
 using System.Reflection;
@@ -18,6 +19,7 @@ using YukkuriMovieMaker.Plugin.Voice;
 using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
 using YukkuriMovieMaker.Settings;
+using FrameTime = YukkuriMovieMaker.Commons.FrameTime;
 
 // Temporary experiments (not a check, to be reverted): what a tachie's lip sync makes a frame depend on, measured on
 // the real host (YMM4 4.56.1.0, WARP). Prints results; a failing experiment prints its exception and the rest go on.
