@@ -130,6 +130,8 @@ internal static partial class TimelineFrameCache
     }
     // Disk reads queued ahead of the playhead.
     internal static long ReadAheads => Interlocked.Read(ref readAheads);
+    private static long gpuReadAheads;
+    internal static long GpuReadAheads => Interlocked.Read(ref gpuReadAheads);
     // Rendered preview frames shown from the pixels drawn for storing them (the player's Draw blits them instead of
     // evaluating the composition a second time), and those shown copies replaced by the host's output again because
     // the player drew another view.
@@ -297,6 +299,8 @@ internal static partial class TimelineFrameCache
         // Textures of this source's readbacks, reused from frame to frame.
         internal readonly ReadbackPool Pool = new();
         internal bool IsDisposed;
+        internal bool DeviceLost;
+        internal long RecentUpdateTicks;
         internal int ReadAheadFrame = int.MinValue;
         // Read-ahead keys by (frame key, frame) for one environment/usage/view (render thread only): a playing window
         // gains one frame per update, so the others are not composed and hashed again.
@@ -442,6 +446,7 @@ internal static partial class TimelineFrameCache
             var context = devices.DeviceContext;
             if (!ValidContext(context)) return Bypass("描画コンテキストの状態が対象外のため、通常描画を使用します。");
             var state = sources.GetValue(__instance, _ => new SourceState(scene));
+            if (state.DeviceLost) return Bypass("描画デバイスの再作成を待っているため、通常描画を使用します。");
             string environment = KeyEnvironment(context);
             state.Environment = environment;
             if (!state.Tracker.TryCapture(FrameOf(time, scene), out capture, out var reason, settle: true, background: preview)) return Bypass(reason);
@@ -506,7 +511,7 @@ internal static partial class TimelineFrameCache
             if (stored is not null && cacheKey is not null && viewport is { } resident && TryRestoreGpu(__instance, pending))
             {
                 // A run of GPU-resident frames still reads the frames after it ahead from disk.
-                ReadAhead(state, scene, time, usageKey, resident, !paused);
+                ReadAhead(state, scene, time, usageKey, resident, !paused, devices);
                 Hit(__instance, pending, stored.Value, recalled);
                 Interlocked.Increment(ref gpuHits);
                 pending.Path = GpuTimes;
@@ -524,7 +529,7 @@ internal static partial class TimelineFrameCache
                 if (found)
                     using (PreviewPerformance.Measure(PreviewStage.CacheRestore)) replaced = TryReplaceFrame(__instance, pending, record);
             }
-            if (viewport is { } view) ReadAhead(state, scene, time, usageKey, view, !paused);
+            if (viewport is { } view) ReadAhead(state, scene, time, usageKey, view, !paused, devices);
             if (replaced)
             {
                 Hit(__instance, pending, stored!.Value, recalled);
@@ -538,7 +543,11 @@ internal static partial class TimelineFrameCache
             __state = pending;
             return true;
         }
-        catch (Exception error) { pending?.Dispose(); return Bypass("キャッシュを使用しませんでした: " + error.GetType().Name); }
+        catch (Exception error)
+        {
+            ObserveDeviceLoss(pending?.State ?? (sources.TryGetValue(__instance, out var failedState) ? failedState : null), error);
+            pending?.Dispose(); return Bypass("キャッシュを使用しませんでした: " + error.GetType().Name);
+        }
         finally
         {
             capture?.Dispose();
@@ -586,14 +595,15 @@ internal static partial class TimelineFrameCache
             if (__state.CacheKey is not null)
                 deferred = __state.Viewport is { } view ? StorePreview(__instance, __state, output, view) : StoreExport(__state, output);
         }
-        catch (Exception error) { status = "フレームの保存に失敗しました: " + error.GetType().Name; }
+        catch (Exception error) { ObserveDeviceLoss(__state.State, error); status = "フレームの保存に失敗しました: " + error.GetType().Name; }
         finally { if (!deferred) __state.Dispose(); }
     }
 
     // Queues disk reads for the frames the player shows next (playback: the next half second; paused: two frames
     // either way, for stepping and scrubbing). Keys come from the current description without leasing files: a read
     // only moves a stored record into RAM, and showing it still needs the exact key of a validated capture.
-    private static void ReadAhead(SourceState state, Scene scene, TimeSpan time, string usage, PreviewViewport viewport, bool playing)
+    private static void ReadAhead(SourceState state, Scene scene, TimeSpan time, string usage, PreviewViewport viewport, bool playing,
+        IGraphicsDevicesAndContext devices)
     {
         try
         {
@@ -626,17 +636,25 @@ internal static partial class TimelineFrameCache
             }
             int queued = store.Value.Prefetch(keys);
             if (queued != 0) Interlocked.Add(ref readAheads, queued);
+            if (playing && viewport.IsPlaying) WarmNextGpuFrame(state, devices, keys, viewport, scene.FPS);
         }
-        catch { } // optional
+        catch (Exception error) { ObserveDeviceLoss(state, error); } // optional
     }
 
-    private static Exception? Finalizer(Exception? __exception, UpdateMeasurement? __state)
+    private static Exception? Finalizer(object __instance, Exception? __exception, UpdateMeasurement? __state)
     {
+        if (__exception is null && sources.TryGetValue(__instance, out var lostState) && lostState.DeviceLost)
+            lostState.Released(); // The bypassed host update released its old displayed borrower.
         if (__state is not null)
         {
             __state.EndHost();
             __state.Pending?.Dispose();
             __state.TotalTicks = PreviewPerformance.Timestamp - __state.Started;
+            if (__state.Pending is { } pending)
+            {
+                pending.State.RecentUpdateTicks = __state.TotalTicks;
+                ObserveDeviceLoss(pending.State, __exception);
+            }
             __state.Pending?.Path?.Add(__state.TotalTicks);
             if (__state.Preview) PreviewPerformance.Add(PreviewStage.TotalUpdate, __state.TotalTicks);
             __state.Completed = __exception is null;

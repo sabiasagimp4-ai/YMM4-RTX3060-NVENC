@@ -15,10 +15,10 @@ internal sealed class GpuMemoryPolicy
     internal const long Step = 128 * MiB;
     private int healthySamples;
 
-    // The most retention can grow to on this adapter: a quarter of its dedicated memory, 128 MiB to 4 GiB.
+    // The physical-memory ceiling; Next also applies the OS budget and keeps room for other allocations.
     // Integrated GPUs report little dedicated memory and stay at 128 MiB.
     internal static long Ceiling(long maximum, long dedicatedVideoMemory) =>
-        Math.Min(maximum, Math.Clamp(dedicatedVideoMemory / 4, InitialBudget, 4096 * MiB));
+        Math.Min(maximum, Math.Clamp(dedicatedVideoMemory, InitialBudget, 8192 * MiB));
 
     // Headroom left for YMM4 itself (effects, decoders, export textures), other processes and usage spikes.
     internal static long Reserve(long budget) => Math.Max(1024 * MiB, budget / 5);

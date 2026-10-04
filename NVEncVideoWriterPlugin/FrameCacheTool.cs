@@ -41,9 +41,17 @@ public sealed class FrameCacheToolSettings : SettingsBase<FrameCacheToolSettings
     // Restored preview frames kept on the GPU (VRAM): sized from the adapter's video memory up to the limit, or fixed
     // at the limit. Zero keeps none.
     private bool automaticGpuBudget = true;
-    private int gpuLimitMiB = 2048;
-    public bool AutomaticGpuBudget { get => automaticGpuBudget; set => Set(ref automaticGpuBudget, value); }
-    public int GpuLimitMiB { get => gpuLimitMiB; set => Set(ref gpuLimitMiB, Math.Clamp(value, 0, 8192)); }
+    private int gpuLimitMiB = -1;
+    public bool AutomaticGpuBudget
+    {
+        get => automaticGpuBudget;
+        set { if (!value && gpuLimitMiB == -1) GpuLimitMiB = 2048; Set(ref automaticGpuBudget, value); }
+    }
+    public int GpuLimitMiB
+    {
+        get => gpuLimitMiB;
+        set { if (value < 0) AutomaticGpuBudget = true; Set(ref gpuLimitMiB, Math.Clamp(value, -1, 8192)); }
+    }
     public bool CacheFramesWhenIdle { get => cacheFramesWhenIdle; set => Set(ref cacheFramesWhenIdle, value); }
     public double IdleDelaySeconds
     {
@@ -193,8 +201,8 @@ public sealed class PluginSettingsPanel : StackPanel
         Bind(automaticGpu, nameof(FrameCacheToolSettings.AutomaticGpuBudget));
         Children.Insert(at++, automaticGpu);
         AddChoice("VRAM上限", nameof(FrameCacheToolSettings.GpuLimitMiB),
-            new[] { 0, 128, 256, 512, 1024, 2048, 4096, 8192 }.Append(settings.GpuLimitMiB).Distinct().Order()
-                .Select(value => (value == 0 ? "使わない" : $"{value:N0} MiB", (object)value)));
+            new[] { -1, 0, 128, 256, 512, 1024, 2048, 4096, 8192 }.Append(settings.GpuLimitMiB).Distinct().Order()
+                .Select(value => (value == -1 ? "Auto（GPU予算から配分）" : value == 0 ? "使わない" : $"{value:N0} MiB", (object)value)));
         // The pre-renderer reads the timeline from the tool (IdleFramePreRenderer.SetTimelineToolInfo).
         var idle = new CheckBox
         {
@@ -396,7 +404,7 @@ public sealed class FrameCacheToolView : UserControl
             + $"プレビュー保存 {TimelineFrameCache.PreviewStored:N0}（描画スレッド {TimelineFrameCache.PreviewStoreMilliseconds:N1} ms/枚）/ 先読み読込 {TimelineFrameCache.ReadAheads:N0}"
             + (store is null ? "\n" : $" / ディスク読込 {store.DiskReads:N0}（{store.DiskReadMilliseconds:N1} ms/枚）/ 書込 {store.DiskWrites:N0}（混雑で見送り {store.DroppedWrites:N0}）\n")
             + $"描画の所要時間 p50/p95: 新規描画 {TimelineFrameCache.RenderTimes} / GPU {TimelineFrameCache.GpuTimes} / RAM {TimelineFrameCache.RamTimes} / ディスク {TimelineFrameCache.DiskTimes} / 同じ画像 {TimelineFrameCache.LiveTimes}\n"
-            + $"GPU {TimelineFrameCache.GpuBytes / 1048576.0:N1} MiB（保持 {TimelineFrameCache.GpuRetainedBytesNow / 1048576.0:N0} / {TimelineFrameCache.GpuRetentionBudgetNow / 1048576.0:N0} MiB）/ RAM {(store?.RamBytes ?? 0) / 1048576.0:N0} / {(store?.RamBudget ?? 0) / 1048576.0:N0} MiB（設定上限 {CacheMemoryController.Maximum / 1048576.0:N0} MiB）"
+            + $"GPU {TimelineFrameCache.GpuBytes / 1048576.0:N1} MiB（保持 {TimelineFrameCache.GpuRetainedBytesNow / 1048576.0:N0} / {TimelineFrameCache.GpuRetentionBudgetNow / 1048576.0:N0} MiB、先回り転送 {TimelineFrameCache.GpuReadAheads:N0}）/ RAM {(store?.RamBytes ?? 0) / 1048576.0:N0} / {(store?.RamBudget ?? 0) / 1048576.0:N0} MiB（設定上限 {CacheMemoryController.Maximum / 1048576.0:N0} MiB）"
             + $" / ディスク {(store?.DiskBytes ?? 0) / 1048576.0:N0} MiB / 4 GiB\n"
             + $"ディスク書込待ち {(store?.QueuedWriteBytes ?? 0) / 1048576.0:N0} MiB（RAMの使用量表示とは別に保持）";
         if (CacheTrace.Enabled && Environment.TickCount64 >= metricsAt)

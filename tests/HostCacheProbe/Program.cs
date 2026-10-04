@@ -35,6 +35,11 @@ internal static class Program
             GpuFirstRevisitMeasurements.Run(host);
             return 0;
         }
+        if (args.Contains("--gpu-retention-check"))
+        {
+            GpuRetentionChecks.Run(host);
+            return 0;
+        }
         if (args.Contains("--simple-tachie-measure"))
         {
             SimpleTachieMeasurements.Run(host);

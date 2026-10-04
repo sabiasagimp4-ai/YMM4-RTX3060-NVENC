@@ -125,6 +125,7 @@ internal static partial class TimelineFrameCache
 
     private static Exception? DrawFinalizer(Exception? __exception, DrawMeasurement __state)
     {
+        ObserveDeviceLoss(__state.Update?.Pending?.State, __exception);
         long drawTicks = PreviewPerformance.Timestamp - __state.Started;
         if (__state.Trace is { } trace)
         {
@@ -139,6 +140,7 @@ internal static partial class TimelineFrameCache
             PreviewPerformance.Add(PreviewStage.TotalPreview, ticks);
             if (update.Pending is { CacheKey: { } key, Viewport: { } view } pending)
             {
+                pending.State.RecentUpdateTicks = ticks;
                 if (update.RunsHost) pending.State.Economics.ObserveRender(key, ticks);
                 else if (ReferenceEquals(pending.Path, RamTimes))
                     pending.State.Economics.ObserveRestore(view.FrameBytes + PreviewRecordHeader, ticks);

@@ -16,13 +16,13 @@ using YukkuriMovieMaker.Project.Items;
 
 internal static class GpuFirstRevisitMeasurements
 {
-    internal static void Run(Assembly host)
+    internal static void Run(Assembly host, bool regression = false)
     {
         Exception? failure = null;
         using var finished = new ManualResetEventSlim();
         var worker = new Thread(() =>
         {
-            try { RunCase(host); }
+            try { RunCase(host, regression); }
             catch (Exception error) { failure = error; }
             finally { finished.Set(); }
         }) { IsBackground = true, Name = "GPU first revisit measurement" };
@@ -31,7 +31,7 @@ internal static class GpuFirstRevisitMeasurements
         if (failure is not null) throw new InvalidOperationException("GPU first revisit measurement", failure);
     }
 
-    private static void RunCase(Assembly host)
+    private static void RunCase(Assembly host, bool regression)
     {
         const int Frames = 8, Width = 1920, Height = 1080;
         var harmony = new Harmony("ymm.tests.gpu-first-revisit");
@@ -95,7 +95,10 @@ internal static class GpuFirstRevisitMeasurements
                 for (int frame = 0; frame < Frames; frame++)
                 { Update(frame); Draw(); if (finish) TimelineFrameCache.CompletePendingStore(source); }
                 double elapsed = watch.Elapsed.TotalMilliseconds;
-                Console.WriteLine("SPEEDUP6 " + JsonSerializer.Serialize(new
+                if (regression && mode == "first-revisit")
+                    Check(TimelineFrameCache.Hits - hits == Frames && TimelineFrameCache.GpuHits - gpu == Frames,
+                        "The first revisit did not use the GPU for every cold-retained frame");
+                Console.WriteLine((regression ? "GPU_CHECK6 " : "SPEEDUP6 ") + JsonSerializer.Serialize(new
                 {
                     mode, repeat, frames = Frames, width = Width, height = Height, ms_per_frame = elapsed / Frames,
                     cache_hits = TimelineFrameCache.Hits - hits, gpu_hits = TimelineFrameCache.GpuHits - gpu,
@@ -109,10 +112,52 @@ internal static class GpuFirstRevisitMeasurements
                 TimelineFrameCache.Enabled = true; TimelineFrameCache.Clear();
                 Measure("cold-store", true, repeat, true);
                 Measure("first-revisit", true, repeat, false);
+                if (regression) Check(TimelineFrameCache.GpuRetainedBytes == Frames * (long)Width * Height * 4,
+                    "Cold copies were not retained for every frame");
                 for (int frame = 0; frame < Frames; frame++)
                 {
                     Update(frame); Check(TimelineFrameCache.CapturePreview(dc, source.Output, view)!.SequenceEqual(pixels[frame]), "GPU first revisit pixel mismatch at " + frame);
                 }
+            }
+            if (regression)
+            {
+                TimelineFrameCache.Clear(); TimelineFrameCache.GpuRetentionEnabled = false;
+                for (int frame = 0; frame < Frames; frame++) { Update(frame); Draw(); TimelineFrameCache.CompletePendingStore(source); }
+                TimelineFrameCache.GpuRetentionEnabled = true;
+                long ahead = TimelineFrameCache.GpuReadAheads;
+                Update(0); Draw();
+                Check(TimelineFrameCache.GpuReadAheads > ahead, "Playback did not warm the next RAM frame on the GPU");
+                long gpu = TimelineFrameCache.GpuHits; Update(1);
+                Check(TimelineFrameCache.GpuHits > gpu && TimelineFrameCache.CapturePreview(dc, source.Output, view)!.SequenceEqual(pixels[1]),
+                    "GPU read-ahead did not serve matching pixels");
+                long bytes = TimelineFrameCache.GpuBytes;
+                var lost = new System.Runtime.InteropServices.COMException("Test-only DXGI device removal notification", unchecked((int)0x887A0005));
+                TimelineFrameCache.NotifyDeviceLossForTests(source, lost);
+                Check(TimelineFrameCache.GpuRetainedBytes == 0 && TimelineFrameCache.GpuBytes <= bytes,
+                    "Device loss did not discard retained ownership");
+                long hits = TimelineFrameCache.Hits;
+                for (int frame = 0; frame < Frames; frame++)
+                {
+                    Update(frame); Check(TimelineFrameCache.CapturePreview(dc, source.Output, view)!.SequenceEqual(pixels[frame]),
+                        "Device-loss fallback differs from normal host pixels");
+                }
+                Check(TimelineFrameCache.Hits == hits && TimelineFrameCache.GpuBytes == 0 && TimelineFrameCache.ReadbackPoolBytes == 0,
+                    "Device-loss fallback hit the cache or leaked resources");
+                using (var fresh = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [context, scene, null], null)!)
+                {
+                    TimelineFrameCache.TestViewport = value => ReferenceEquals(value, fresh) ? view : null;
+                    Check(SpinWait.SpinUntil(() =>
+                    {
+                        fresh.Update(TimeSpan.Zero, TimelineSourceUsage.Playing); TimelineFrameCache.CompletePendingStore(fresh);
+                        long previousHits = TimelineFrameCache.Hits;
+                        fresh.Update(TimeSpan.Zero, TimelineSourceUsage.Playing);
+                        return TimelineFrameCache.Hits > previousHits;
+                    }, TimeSpan.FromSeconds(10)), "Caching did not recover on a fresh source after device loss");
+                    Check(TimelineFrameCache.CapturePreview(dc, fresh.Output, view)!.SequenceEqual(pixels[0]),
+                        "Fresh source recovery pixels differ");
+                }
+                Console.WriteLine("GPU extension: cold retention, RAM read-ahead pixels and simulated device-loss fallback passed.");
             }
         }
         finally

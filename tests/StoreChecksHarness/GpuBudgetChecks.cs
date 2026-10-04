@@ -7,7 +7,7 @@ internal static class GpuBudgetChecks
 
     internal static void Run()
     {
-        // RTX 3060 12 GB: grows in steps after three healthy samples, up to the limit (a quarter of 12 GB is more).
+        // Synthetic 12 GB adapter sample: three healthy samples per growth step; manual limits still apply.
         var policy = new GpuMemoryPolicy();
         var rtx3060 = new GpuMemorySnapshot(11264 * M, 1500 * M, 12288 * M, false);
         long current = GpuMemoryPolicy.InitialBudget;
@@ -18,15 +18,15 @@ internal static class GpuBudgetChecks
         current = Settle(policy, current, 2048 * M, rtx3060);
         Check(current == 2048 * M, $"a 12 GB card reaches the 2048 MiB limit, not {current / M} MiB");
         Check(Settle(new GpuMemoryPolicy(), 128 * M, 512 * M, rtx3060) == 512 * M, "a lower limit wins");
-        Check(Settle(new GpuMemoryPolicy(), 128 * M, 8192 * M, rtx3060) == 3072 * M, "at most a quarter of dedicated memory");
+        CheckBudgetTarget(rtx3060, "12 GB sample");
 
         // Its own retained frames are not pressure: they are part of the usage the target subtracts.
         Check(new GpuMemoryPolicy().Next(2048 * M, 2048 * M, 2048 * M, rtx3060 with { CurrentUsage = 3500 * M }) == 2048 * M,
             "retained frames do not shrink their own budget");
 
-        // 4 GB (laptop RTX 3050): a quarter is 1 GiB; 8 GB (RTX 4060): 2 GiB.
-        Check(Settle(new GpuMemoryPolicy(), 128 * M, 8192 * M, new(3584 * M, 1000 * M, 4096 * M, false)) == 1024 * M, "4 GB card: 1 GiB");
-        Check(Settle(new GpuMemoryPolicy(), 128 * M, 8192 * M, new(7400 * M, 1200 * M, 8192 * M, false)) == 2048 * M, "8 GB card: 2 GiB");
+        // These are policy samples, not measurements of any actual card. Preserve the larger of 1 GiB/20%.
+        CheckBudgetTarget(new(3584 * M, 1000 * M, 4096 * M, false), "4 GB sample");
+        CheckBudgetTarget(new(7400 * M, 1200 * M, 8192 * M, false), "8 GB sample");
         // Integrated GPU: little dedicated memory, stays at the initial budget whatever its shared budget.
         Check(Settle(new GpuMemoryPolicy(), 128 * M, 2048 * M, new(8192 * M, 500 * M, 128 * M, false)) == 128 * M, "integrated GPU holds 128 MiB");
 
@@ -52,7 +52,17 @@ internal static class GpuBudgetChecks
 
         Check(GpuMemoryPolicy.EntryLimit(128 * M) == 64 && GpuMemoryPolicy.EntryLimit(2048 * M) == 512
             && GpuMemoryPolicy.EntryLimit(64 * 1024 * M) == 1024, "entry limit scales with the budget, 64 to 1024");
-        Console.WriteLine("VRAM budget: growth to the card's limit (4/8/12 GB, integrated), own frames, pressure, unmeasured adapters and entry limit passed.");
+        Console.WriteLine("VRAM budget: synthetic OS-budget targets (4/8/12 GB, integrated), reserve, manual limits, own frames, pressure, failed samples and entry limit passed.");
+    }
+
+    private static void CheckBudgetTarget(GpuMemorySnapshot sample, string label)
+    {
+        long maximum = 8192 * M;
+        long target = Math.Min(maximum, Math.Min(sample.DedicatedVideoMemory,
+            sample.Budget - GpuMemoryPolicy.Reserve(sample.Budget) - sample.CurrentUsage));
+        long settled = Settle(new GpuMemoryPolicy(), 128 * M, maximum, sample);
+        Check(settled <= target && settled >= target - 64 * M, label + ": uses OS headroom within growth hysteresis");
+        Check(sample.Budget - settled - sample.CurrentUsage >= Math.Max(1024 * M, sample.Budget / 5), label + ": reserve remains");
     }
 
     private static long Settle(GpuMemoryPolicy policy, long current, long maximum, GpuMemorySnapshot sample)

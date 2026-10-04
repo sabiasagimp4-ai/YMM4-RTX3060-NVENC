@@ -148,6 +148,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Integration checks failed' }
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu
           if ($LASTEXITCODE -ne 0) { throw 'Pixel checks failed' }
+      - name: GPU cold copies, read-ahead and device-loss notification
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu-retention-check
+          if ($LASTEXITCODE -ne 0) { throw 'GPU retention extension checks failed' }
       - name: GPU retention, invalidation and trace measurement (WARP)
         run: |
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR --preview-performance
@@ -170,6 +174,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Simple tachie measurements failed' }
       - name: First GPU revisit measurements (two samples, WARP)
         run: |
+          $before = Join-Path $env:RUNNER_TEMP 'gpu-first-revisit-before'
+          git fetch origin 55e9a4762d1419a4c3f25d69033851f1514416df
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch GPU revisit baseline' }
+          git worktree add --detach $before 55e9a4762d1419a4c3f25d69033851f1514416df
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create GPU revisit baseline' }
+          try {
+            $project = Join-Path $before 'tests/HostCacheProbe/HostCacheProbe.csproj'
+            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu-first-revisit-measure
+            if ($LASTEXITCODE -ne 0) { throw 'Before GPU revisit measurement failed' }
+          } finally {
+            git worktree remove --force $before
+          }
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu-first-revisit-measure
           if ($LASTEXITCODE -ne 0) { throw 'GPU first revisit measurement failed' }
       - uses: actions/upload-artifact@v4

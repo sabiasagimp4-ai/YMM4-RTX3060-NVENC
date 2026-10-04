@@ -169,6 +169,7 @@ internal static partial class TimelineFrameCache
             shown.Dispose();
             var released = Interlocked.Exchange(ref state.Bytes, 0);
             if (released != 0) Interlocked.Add(ref gpuBytes, -released);
+            state.ActiveGpuFrame?.Release(); state.ActiveGpuFrame = null;
             state.ReleaseShownTarget();
             state.HostOutput = null;
             state.LastOutput = host;
@@ -238,6 +239,12 @@ internal static partial class TimelineFrameCache
             {
                 if (preview && !deferred.Pending.State.Economics.ShouldAdmit(deferred.Pending.CacheKey!, record!.LongLength, gpuRetentionEnabled)) return true;
                 if (deferred.Pending.Publication.Owner?.PutOwned(deferred.Pending.CacheKey!, record!, deferred.Pending.Publication) != true) return true;
+                // Only a verified, still displayed copy can transfer its reservation and immutable target.
+                // Copies already released by another update keep their RAM record without GPU retention.
+                if (preview && state.ShownTarget is { } target && state.ActiveGpuFrame is null
+                    && state.LastOutput is { NativePointer: not 0 } shown && state.Bytes == deferred.Pending.Viewport?.FrameBytes
+                    && state.LastViewportKey == deferred.Pending.CacheKey)
+                    RetainUploaded(deferred.Pending, shown, state.Bytes, target, state.ShownViewport);
                 if (preview) Interlocked.Increment(ref previewStored);
                 status = preview ? "描画したプレビューのフレームを保存しました。" : "描画したフレームを保存しました。";
             }
@@ -245,6 +252,8 @@ internal static partial class TimelineFrameCache
         }
         catch (Exception error)
         {
+            if (IsDeviceLoss(error)) deferred.Readback.Failed();
+            ObserveDeviceLoss(state, error);
             status = "プレビューのフレームの保存に失敗しました: " + error.GetType().Name;
             return !busy;
         }
