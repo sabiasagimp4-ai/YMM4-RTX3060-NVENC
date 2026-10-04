@@ -123,3 +123,41 @@ DXGI/D2Dのdevice lostを観測したら、すべてのGPU保持を捨て、問�
 GitHubの支払い／利用上限を解消後、この項目の最終headでcache-developmentを実行し、成功を確認してから項目8の計測だけのcommitへ進む。項目8は別のローカル作業領域で準備中だが、Windowsの画素一致・2本／4本の取消・同じjobの前後計測は未実行で、製品変更として公開していない。項目5・2b・2cは未着手。この外部の停止理由によって依頼全体は未完了。
 
 利用者から復旧の連絡を受け、最終head d73a2d3 の [run 37207129256](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37207129256) を手動実行した。portable・host・Windowsの通常3ジョブが成功し、任意RTX検査は未選択でskip。先の開始前停止は実装の失敗と数えず、復旧後の成功を確認した。この復旧記録のcommitにも手動CIを実行し、その最終runをPR #9へ記録する。
+
+## 項目8：複数のフレームを同時に描く（PR #10、済）
+
+`codex/speedup-8-parallel-idle`、PR #9 の最終commit ac0c940 から積み重ねたdraft。mainへのmerge、releaseはしない。利用者がClaudeによるレビューを予定しているため、draftを維持する。
+
+各作業者は専用STAスレッドで、自分の複製・tracker・`TimelineSourceAndDevices`を作成・使用・破棄する。通常フレームを先読み順の番号で分配し、Sessionは作業者0だけが描く。二次作業者は描画直前にもライブ経路を拒否する。完成順が前後しても再開位置は完成した連続区間までしか進めない。入力・再生・編集・無効化・AutoのGPU圧力では取消し、全作業者が戻ってからjobを解放する。破棄要求は各所有スレッドへ送る。描画器は2秒の待機で返す。
+
+Auto／1／2／4本（保存設定の3本も保持）。Autoは半コア・最大4・GPU余裕で制限し、GPU使用量の正の増加を観測できるまでは1本。描画器を作った後のプロセスGPU使用量増加の2倍と512 MiBの大きい方を予約に使う。並行した割当も含む保守的な見積もりであり、厳密な単一device VRAMではない。unknown／WARP／取得失敗も1本、adapter変更では測定を捨てる。GPU設定変更では古いsampleも捨てる。
+
+### CI・前後各2回
+
+計測だけの30abd8cは [run 37208314841](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37208314841) の通常3ジョブが成功。別jobの基準値18.05／18.06 fpsは改善率へ使わない。
+
+[run 37209699332](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37209699332)、Windows job 111458243442。同じjobで前30abd8c／後fe37b24を別processとして各2回測り、全通常ジョブが成功した。任意RTXは未選択。321×181・60フレーム・図形200＋文字20、RAM64 MiB、GPU保持なし。準備・全画素検査は時間の外。offはUpdate＋CapturePreview、idleはPrimeBatchFrameの描画・読み戻し・保存・全員joinを含む。GUI／音声／Presentを含まない。Windows/WARPの値で、RTX3060の値ではない。
+
+| 対象 | 前：1本（2回） | 後：2本（2回） | 判定 |
+| --- | --- | --- | --- |
+| idle fps | 21.1687／23.6159 | 27.0327／27.6434 | 両試行で速い |
+| idle 60フレーム合計 | 2834.3712／2540.6580 ms | 2219.5331／2170.4983 ms | 両試行で短縮 |
+| 自身のoff合計 | 2538.2510／2514.3063 ms | 2483.9929／2453.1474 ms | 各processの速度基準 |
+| idle時間／off時間 | 1.116663／1.010481 | 0.893534／0.884781 | 正規化後、約20%／12%短縮 |
+| Rendered／保存後のhit | 60／60、60／60 | 60／60、60／60 | 一度保存、全画素一致 |
+
+準備前後のprocess private bytes増加は1本12,677,120 byte、2本の合計345,915,392 byte。WARPのGPU CurrentUsageは前後とも0で、VRAM単体の値は測れない。この差にはallocator・GC・フォント・他のプロセス内割当が含まれ、1本当たりのVRAMへ換算しない。4本の速度効果は2コアCIから実機へ外挿しない。
+
+### 継続検査・失敗の修正
+
+新しい3caseは2本、4本、4本で後半だけ実ランダム移動を描く混在シーン。それぞれ別STA・別device・30秒上限。24フレーム×16回×3caseの計1152フレームで、保存の競合がなく、全画素一致・全件hitを確認した。作業者間のthread／deviceは別で、各描画器を作った所有threadで使い、返す。mixed Sessionでlive rendererが作業者0だけに作られることを検査した。
+
+各caseは実Updateの中にBarrierを置き、全作業者が描いた直後に取消／消去する。全員join、全保存拒否、RAM0を必須にした。SessionのUpdate途中の消去も保存を拒否する。全描画器・プレーヤーをdisposeした後にGPU／readback poolが0になる。既存の消去・編集・Undo・live負の対照・選択枠・素材lease・GPU保持・デバイス障害検査も通過した。検査は削除・弱化・skipしていない。
+
+実装最初のca37dffは [run 37208905643](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37208905643) のmixed Sessionで失敗した。記述のRoot Resourcesが、画面に出ていないランダム項目のobject identityも持つため、複製との全文Model比較が通常フレームを拒否していた。失敗commitを再実行せず、identity://値だけを比較用に揃え、entry数・それ以外の全記述・フレームキー・captureの現行性検証を保持する修正をした。
+
+最終補強では、identity://値以外のJSONを解析し直して書き直さず、元のUTF-8部分をそのままつなぐ。数値の精度・表記、Unicode文字列、入れ子や他のResources、entry数が違えば拒否するportable検査を100系列で追加した。既存の200モデルの埋め込み配列検査も成功。最新commitのWindowsを含む最終CIリンクはPR #10へ記録し、成功まで次へ進めない。
+
+計画との差と未確認：Autoは測定が取れるまで1本を維持し、複数作業者が使ったGPU増分も予約へ含める。実機での厳密なdevice別VRAM、重いデコーダー・PSDを多数持つ場面、ホストの共有状態すべて、4本の効果、実GUIの応答は未確認。CIの連続描画は計1152フレームであり、長時間の実作業の保証ではない。
+
+利用者のPCでは、同じ重い場面で停止中の描画器を1本→2本と変え、保存帯が埋まる時間を測る。詳細ログのidle-frame（Component＝worker番号、Outcome＝Rendered等、Detail＝workers／measured-worker-reserve）とGPU使用量／予算を見る。再生・ドラッグ・編集を始めると先読みが取り消され、古い画面が保存されないことも確認する。

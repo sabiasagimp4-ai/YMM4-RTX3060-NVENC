@@ -4,6 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../NVEncVideoWriterPlugin/FrameRenderModelComparison.cs" Link="FrameRenderModelComparison.cs" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameDescriptionJson.cs" Link="FrameDescriptionJson.cs" />
   </ItemGroup>
