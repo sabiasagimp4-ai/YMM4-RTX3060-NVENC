@@ -30,6 +30,11 @@ internal static class Program
         bool unread = args.Contains("--unread");
         bool known = HostIntegration.VerifyHost(host, out var hostReason);
         if (!unread) Check(known, "Host binary verification failed: " + hostReason);
+        if (args.Contains("--gpu-first-revisit-measure"))
+        {
+            GpuFirstRevisitMeasurements.Run(host);
+            return 0;
+        }
         if (args.Contains("--simple-tachie-measure"))
         {
             SimpleTachieMeasurements.Run(host);
