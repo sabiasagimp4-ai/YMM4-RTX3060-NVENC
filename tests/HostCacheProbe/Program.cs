@@ -30,6 +30,11 @@ internal static class Program
         bool unread = args.Contains("--unread");
         bool known = HostIntegration.VerifyHost(host, out var hostReason);
         if (!unread) Check(known, "Host binary verification failed: " + hostReason);
+        if (args.Contains("--simple-tachie-measure"))
+        {
+            SimpleTachieMeasurements.Run(host);
+            return 0;
+        }
         if (args.Contains("--preview-performance"))
         {
             PreviewPerformanceChecks.Run(host);
@@ -176,7 +181,8 @@ internal static class ProbeLoader
     internal static IEnumerable<Assembly> Assemblies(Assembly host)
     {
         var assemblies = new List<Assembly> { host, typeof(YukkuriMovieMaker.Plugin.CacheProvider).Assembly };
-        foreach (string name in new[] { "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation", "YukkuriMovieMaker.Plugin.FileSource.WIC" })
+        foreach (string name in new[] { "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation", "YukkuriMovieMaker.Plugin.FileSource.WIC",
+            "YukkuriMovieMaker.Plugin.Tachie.SimpleTachie" })
         {
             string reader = Path.Combine(Path.GetDirectoryName(host.Location)!, name + ".dll");
             var loaded = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == name);
@@ -186,4 +192,3 @@ internal static class ProbeLoader
         return assemblies;
     }
 }
-
