@@ -56,10 +56,17 @@ internal static partial class IdleFramePreRenderer
         internal Scene CloneScene { get; }
         internal KeyDependencyTracker CloneTracker { get; }
         internal TimelineSourceAndDevices Source { get; }
+        // A renderer of the live scene itself, made on the first frame keyed by the live objects' identities.
+        internal TimelineSourceAndDevices? LiveSource { get; private set; }
+        internal TimelineSourceAndDevices LiveSourceFor(Scene liveScene) => LiveSource ??= CreateBatchSource(liveScene);
         public void Dispose()
         {
             try { ((IDisposable)Source).Dispose(); }
-            finally { CloneTracker.Dispose(); }
+            finally
+            {
+                try { if (LiveSource is not null) ((IDisposable)LiveSource).Dispose(); }
+                finally { CloneTracker.Dispose(); }
+            }
         }
     }
 

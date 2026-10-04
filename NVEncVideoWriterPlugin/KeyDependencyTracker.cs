@@ -119,6 +119,17 @@ internal sealed class KeyDependencyTracker : IDisposable
                     || dependencies.Files.Any(unverifiable.ContainsKey));
     }
 
+    // True when the frame is keyed only by the live objects' identities (identity-seeded randomness) and nothing else
+    // keeps it from being cached: the idle pre-renderer renders such a frame from the live scene, not the clone.
+    internal bool IsSessionKeyed(int frame)
+    {
+        lock (gate)
+            return !disposed && cachedRevision >= 0 && cachedRevision == Revision && cachedEligible
+                && cachedFrames is { } frames && frames.For(frame) is var dependencies
+                && dependencies.Cacheable && dependencies.Session && !dependencies.Files.Any(HostContent.Changed)
+                && !dependencies.Files.Any(unverifiable.ContainsKey);
+    }
+
     private sealed record Description(bool Eligible, string Model, string[] Paths, FrameDependencyIndex? Frames, string Reason,
         Type[][] SourceReaders, long Ticks, long Code, string Settings, long Fonts);
 

@@ -265,6 +265,23 @@ internal static partial class IdleFramePreRenderer
                         || !TimelineFrameCache.TryGetLatestPreviewViewport(current.Info.Timeline, current.Info.Scenes, out var latestViewport)
                         || !SameView(latestViewport, viewport) || latestViewport.IsPlaying)
                         return;
+                    // Identity-seeded randomness: the clone would draw other random values, so the live scene draws it.
+                    if (current.Tracker.IsSessionKeyed(frame))
+                    {
+                        var live = batch.LiveSourceFor(current.LiveScene);
+                        switch (PrimeLiveFrame(current.Tracker, current.LiveScene, live, time => live.Update(time, TimelineSourceUsage.Playing),
+                            frame, latestViewport, () => CanContinue(current, job.Token, anchorFrame), job.Token))
+                        {
+                            case IdleFrameResult.Rendered: rendered++; break;
+                            case IdleFrameResult.Stored: skipped++; break;
+                            case IdleFrameResult.Stopped: return;
+                            case IdleFrameResult.Normal: normal++; break;
+                            default: unavailable++; break;
+                        }
+                        Advance(current, job, ordinal + 1);
+                        Thread.Yield();
+                        continue;
+                    }
                     switch (PrimeFrame(current.Tracker, current.LiveScene, cloneTracker, cloneScene, source,
                         time => source.Update(time, TimelineSourceUsage.Playing), frame, latestViewport,
                         () => CanContinue(current, job.Token, anchorFrame), job.Token, out reason))
@@ -354,6 +371,30 @@ internal static partial class IdleFramePreRenderer
             render(time);
             if (!canContinue()) return IdleFrameResult.Stopped;
             return TryPrimeIfCurrent(token, liveScene, cloneScene, source, time, viewport, liveCapture, cloneCapture)
+                ? IdleFrameResult.Rendered : IdleFrameResult.Unavailable;
+        }
+    }
+
+    // A frame keyed by the live objects' identities (identity-seeded randomness) from a renderer of the live scene
+    // itself, stored under the live key: a clone has other objects and so draws other random values. The live model
+    // is read off the UI thread as the player's own render thread reads it; the capture is validated again after the
+    // render and at the store commit, so an edit meanwhile discards the frame.
+    internal static IdleFrameResult PrimeLiveFrame(KeyDependencyTracker liveTracker, Scene liveScene, object source, Action<TimeSpan> render,
+        int frame, TimelineFrameCache.PreviewViewport viewport, Func<bool> canContinue, CancellationToken token)
+    {
+        if (!liveTracker.TryCapture(frame, out var capture, out _))
+            return liveTracker.RendersNormally(frame) && !liveTracker.IsSessionKeyed(frame) ? IdleFrameResult.Normal : IdleFrameResult.Unavailable;
+        using (capture)
+        {
+            if (!canContinue() || !capture!.Validate(files: false)) return IdleFrameResult.Stopped;
+            var time = liveScene.Timeline.VideoInfo.GetTimeFrom(frame);
+            if (TimelineFrameCache.IsPreviewStored(source, time, capture, viewport)) return IdleFrameResult.Stored;
+            render(time);
+            if (!canContinue()) return IdleFrameResult.Stopped;
+            if (token.IsCancellationRequested || !capture.Validate(files: false)
+                || viewport.SceneId != liveScene.ID || viewport.TimelineId != liveScene.Timeline.ID)
+                return IdleFrameResult.Unavailable;
+            return TimelineFrameCache.TryPrimePreviewIfCurrent(source, time, TimelineSourceUsage.Playing, viewport, capture.Key, token, capture)
                 ? IdleFrameResult.Rendered : IdleFrameResult.Unavailable;
         }
     }

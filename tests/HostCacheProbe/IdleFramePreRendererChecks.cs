@@ -17,7 +17,8 @@ internal static class IdleFramePreRendererChecks
         CheckClonedSceneIsIndependent();
         CheckCancelledJobCannotCommit();
         CheckUnverifiableFramePassed();
-        Console.WriteLine("Idle pre-render: independent scene clone, cancelled commit guard and unverifiable frames passed over OK");
+        CheckSessionFrameRenderedLive();
+        Console.WriteLine("Idle pre-render: independent scene clone, cancelled commit guard, unverifiable frames passed over and identity-random frames rendered from the live scene OK");
     }
 
     // A frame showing a file that cannot be verified (behind a directory junction, as in a OneDrive folder) is passed
@@ -66,6 +67,67 @@ internal static class IdleFramePreRendererChecks
             if (Directory.Exists(link)) Directory.Delete(link);
             Directory.Delete(folder, recursive: true);
         }
+    }
+
+    // A frame keyed by object identities (a random move) is not rendered from the clone, which draws other random
+    // values, but from the live scene under the live key; an edit during the render discards the frame.
+    private static void CheckSessionFrameRenderedLive()
+    {
+        var timeline = new Timeline();
+        var still = new ShapeItem { Frame = 0, Length = 30, Layer = 0 };
+        var shaking = new ShapeItem { Frame = 60, Length = 30, Layer = 1 };
+        shaking.X.AnimationType = YukkuriMovieMaker.Commons.AnimationType.ランダム移動;
+        timeline.Items = timeline.Items.Add(still).Add(shaking);
+        timeline.RefreshTimelineLengthAndMaxLayer();
+        var scenes = new Scenes(false);
+        scenes.AddScene(timeline);
+        var live = new Scene(timeline, scenes, []);
+        Check(FrameCacheKey.TryDescribe(live, out var model, out _, out var reason), reason);
+        var clone = IdleFramePreRenderer.CloneSceneFromModel(model);
+        using var liveTracker = new KeyDependencyTracker(live);
+        using var cloneTracker = new KeyDependencyTracker(clone, liveTracker.VerifiedFingerprints);
+        Check(SpinWait.SpinUntil(() =>
+        {
+            if (liveTracker.TryCapture(70, out var capture, out _)) capture!.Dispose();
+            return liveTracker.IsSessionKeyed(70);
+        }, TimeSpan.FromSeconds(15)), "A random move's frame was not keyed by its objects");
+        Check(!liveTracker.IsSessionKeyed(10), "A frame without randomness was keyed by its objects");
+        var viewport = new TimelineFrameCache.PreviewViewport(64, 36, Matrix3x2.Identity, Vector2.Zero, 96f, 96f,
+            new Vortice.DCommon.PixelFormat(Vortice.DXGI.Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),
+            Vortice.Direct2D1.AntialiasMode.PerPrimitive, Vortice.Direct2D1.TextAntialiasMode.Default,
+            Vortice.Direct2D1.PrimitiveBlend.SourceOver, Vortice.Direct2D1.UnitMode.Dips,
+            live.ID, live.Timeline.ID, Stopwatch.GetTimestamp(), false);
+        // The clone path passes it over.
+        var result = IdleFramePreRenderer.PrimeFrame(liveTracker, live, cloneTracker, clone, new object(),
+            _ => throw new InvalidOperationException("The clone rendered an identity-random frame"), 70, viewport, () => true, CancellationToken.None, out reason);
+        Check(result == IdleFramePreRenderer.IdleFrameResult.Normal, $"The clone path did not pass over an identity-random frame ({result}: {reason})");
+
+        var harmony = new Harmony("ymm.tests.idle-pre-renderer.live");
+        harmony.Patch(typeof(TimelineFrameCache).GetMethod("TryPrimePreviewIfCurrent", BindingFlags.Static | BindingFlags.NonPublic)!,
+            prefix: new HarmonyMethod(typeof(IdleFramePreRendererChecks), nameof(AcceptPrimePreview)));
+        try
+        {
+            primeCalls = 0;
+            var rendered = new List<TimeSpan>();
+            result = IdleFramePreRenderer.PrimeLiveFrame(liveTracker, live, new object(), rendered.Add, 70, viewport, () => true, CancellationToken.None);
+            Check(result == IdleFramePreRenderer.IdleFrameResult.Rendered && Volatile.Read(ref primeCalls) == 1
+                && rendered.SequenceEqual([live.Timeline.VideoInfo.GetTimeFrom(70)]),
+                $"An identity-random frame was not rendered from the live scene ({result}, {primeCalls} stores, {rendered.Count} renders)");
+
+            primeCalls = 0;
+            result = IdleFramePreRenderer.PrimeLiveFrame(liveTracker, live, new object(),
+                _ => shaking.X.SetFirstValue(shaking.X.GetValue(0, 100, 30) + 1), 70, viewport, () => true, CancellationToken.None);
+            Check(result == IdleFramePreRenderer.IdleFrameResult.Unavailable && Volatile.Read(ref primeCalls) == 0,
+                $"A frame edited during its live render was stored ({result})");
+        }
+        finally { harmony.UnpatchAll(harmony.Id); }
+    }
+
+    private static bool AcceptPrimePreview(ref bool __result)
+    {
+        Interlocked.Increment(ref primeCalls);
+        __result = true;
+        return false;
     }
 
     private static void CheckClonedSceneIsIndependent()
