@@ -61,7 +61,7 @@ internal static class SimpleTachiePixelChecks
         using var store = new FrameCacheStore(Path.Combine(fixture.Root, "store"), 64L << 20, 0);
         using var tracker = new KeyDependencyTracker(fixture.Scene);
         var oldStore = TimelineFrameCache.StoreIfCreated;
-        int[] frames = [0, 3, 29, 30, 44, 45, 59, 60, 74, 75, 89, 90, 119, 120, 899, 900];
+        int[] frames = [0, 3, 4, 6, 10, 29, 30, 44, 45, 59, 60, 74, 75, 89, 90, 119, 120, 899, 900];
         void Update(int frame) => player.Update(fixture.Timeline.VideoInfo.GetTimeFrom(frame), TimelineSourceUsage.Paused);
         byte[] Pixels() => TimelineFrameCache.CapturePreview(dc, player.Output, view)!;
         try
@@ -73,7 +73,13 @@ internal static class SimpleTachiePixelChecks
             foreach (int frame in frames) { Update(frame); baseline[frame] = Pixels(); }
             Check(!baseline[30].SequenceEqual(baseline[0]), "Speech did not change the fixture's image");
             Check(!baseline[44].SequenceEqual(baseline[45]), "The upper face did not change the fixture's image");
-            if (video) Check(!baseline[0].SequenceEqual(baseline[3]), "The GIF was not decoded as a moving image");
+            if (video)
+            {
+                // WIC includes the preceding frame at its ending time; frame3 is the 200ms boundary.
+                Check(!baseline[0].SequenceEqual(baseline[4]), "The GIF was not decoded as a moving image");
+                Check(baseline[0].SequenceEqual(baseline[6]) && baseline[4].SequenceEqual(baseline[10]),
+                    "The GIF did not repeat its two images after looping");
+            }
             TimelineFrameCache.Enabled = true;
             Check(SpinWait.SpinUntil(() =>
             {
