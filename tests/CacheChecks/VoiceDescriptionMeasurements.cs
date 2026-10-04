@@ -27,19 +27,14 @@ internal static class VoiceDescriptionMeasurements
         {
             var timeline = new Timeline();
             var scenes = new Scenes(false); scenes.AddScene(timeline);
-            timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, count).Select(index => new VoiceItem
+            var character = new Character { Name = "voice-description", Font = "Arial" };
+            timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, count).Select(index => new VoiceItem(character)
             {
                 Frame = index * 90, Length = 90, Layer = 1, Serif = "voice " + index, Font = "Arial",
                 JimakuVisibility = JimakuVisibility.Custom,
                 VoiceCache = (byte[])cache.Clone(),
             }));
             var scene = new Scene(timeline, scenes, []);
-            var first = (VoiceItem)timeline.Items[0];
-            Console.WriteLine($"VOICE_FIXTURE: known={KnownCode.Capture().Knows(first.GetType())}, files={first.GetFiles().Count()}, resources={first.GetResources().Count()}, words={FrameCacheKey.AsteriskWordSets() is not null}");
-            FrameCacheKey.IdentitySeeds(first, out _);
-            var fonts = (IEnumerable<string>)typeof(FrameCacheKey).GetMethod("DecorationFonts", BindingFlags.Static | BindingFlags.NonPublic)!
-                .Invoke(null, [first, Array.Empty<string>()])!;
-            Console.WriteLine("VOICE_FIXTURE: decoration fonts=" + string.Join(",", fonts));
             // Warm the serializer, font resolution and dependency split before recording two separate observations.
             FrameCacheKey.TryDescribe(scene, readers, out _, out _, out _, out _);
             for (int repeat = 1; repeat <= 2; ++repeat)
