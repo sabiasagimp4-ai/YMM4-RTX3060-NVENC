@@ -72,18 +72,6 @@ jobs:
         run: |
           dotnet build NVEncVideoWriterPlugin/NVEncVideoWriterPlugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --nologo
           if ($LASTEXITCODE -ne 0) { throw 'Plugin build failed' }
-      - name: Package the plugin (temporary; build.ps1 without -Smoke, no NVENC here)
-        run: |
-          ./build.ps1 -Ymm4DirPath $env:YMM4_DIR
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path dist/YMM4-RTX3060-NVENC.ymme)) { throw 'Packaging failed' }
-          Get-Content dist/YMM4-RTX3060-NVENC.ymme.sha256
-      - uses: actions/upload-artifact@v4
-        with:
-          name: YMM4-RTX3060-NVENC-package
-          path: |
-            dist/YMM4-RTX3060-NVENC.ymme
-            dist/YMM4-RTX3060-NVENC.ymme.sha256
-          retention-days: 30
       - name: Native invariants (no NVENC hardware needed)
         run: |
           msbuild NvencNative/NvencNative.vcxproj /t:Build /p:Configuration=Release /p:Platform=x64 /m /nologo /v:minimal
@@ -104,10 +92,6 @@ jobs:
         run: |
           dotnet run --project tests/CacheChecks/CacheChecks.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR
           if ($LASTEXITCODE -ne 0) { throw 'Cache checks failed' }
-      - name: Lip-sync experiments (temporary)
-        run: |
-          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --lipsync
-          if ($LASTEXITCODE -ne 0) { throw 'Lip-sync experiments failed' }
       - name: Host integration and WARP pixel parity
         run: |
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --integration
