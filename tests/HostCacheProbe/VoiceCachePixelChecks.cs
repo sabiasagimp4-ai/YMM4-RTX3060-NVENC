@@ -23,7 +23,7 @@ internal static class VoiceCachePixelChecks
         }).ToArray();
         foreach (var voice in voices)
         {
-            voice.JimakuX.SetFirstValue(0); voice.JimakuY.SetFirstValue(0);
+            voice.JimakuX.SetFirstValue(-12.25); voice.JimakuY.SetFirstValue(8.75);
             voice.FontColor = System.Windows.Media.Colors.White;
         }
         timeline.Items = timeline.Items.AddRange(voices);

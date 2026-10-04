@@ -31,6 +31,8 @@
 
 ## 1. ボイスのキャッシュをハッシュにする
 
+**済：PR #6**（`codex/speedup-1-voice-cache-hash`）。計測・検査と計画との差は [結果](SPEEDUP_RESULTS_2026-10.md) を参照。
+
 ### 今
 
 - YMM4 の設定「ボイスのキャッシュをプロジェクトに保存する」（`IsProjectVoiceCacheEnabled`、既定 ON。Google・Azure・OpenAI などは設定によらず保存）では、各 `VoiceItem.VoiceCache`（`byte[]`、Brotli で圧縮した WAV）がプロジェクトに入る。
