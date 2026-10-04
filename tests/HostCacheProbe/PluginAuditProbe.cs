@@ -255,15 +255,18 @@ internal static class PluginAuditProbe
         Console.WriteLine($"TRIAL|plain shape: {baseMoving} of {Samples.Length - 1} sample steps differ");
 
         var total = Stopwatch.StartNew();
-        foreach (var type in effects)
+        string[] focus = ["CircularBlurEffect", "AfterImageEffect", "MotionBlurEffect", "CameraShakeEffect", "BloomEffect", "LensBlurEffect"];
+        foreach (var entry in effects.Where(type => focus.Contains(type.Name)).SelectMany(type => new[] { type, type }).Select((type, i) => (type, i)).ToArray())
         {
-            string area = Area(type.Namespace);
-            string manual = Manual(area);
+            var (type, index) = (entry.type, entry.i);
+            bool moveIt = moving && index % 2 == 0;
+            string area = Area(type.Namespace) + (moveIt ? " moving" : " still");
+            string manual = Manual(Area(type.Namespace));
             if (total.Elapsed > TimeSpan.FromMinutes(15)) { Console.WriteLine($"TRIAL|{area}|{type.Name}|manual={manual}|trial=not-run (time budget)"); continue; }
             Console.WriteLine($"TRIAL-START|{type.Name}");
             string? line = null;
             // Each effect on its own device and thread: one that hangs or breaks its renderer cannot stop the rest.
-            var worker = new Thread(() => line = Trial(host, type, moving, linear, plain)) { IsBackground = true };
+            var worker = new Thread(() => line = Trial(host, type, moveIt, linear, plain)) { IsBackground = true };
             worker.SetApartmentState(ApartmentState.STA);
             worker.Start();
             if (!worker.Join(TimeSpan.FromSeconds(30))) line = "trial=timeout (30 s)";
@@ -291,23 +294,26 @@ internal static class PluginAuditProbe
             var flags = new List<string>();
             var a = Create(host, context, scene);
             var first = Render(a, timeline, dc, viewport, Enumerable.Range(0, Frames).ToArray());
+            var repeat = Render(a, timeline, dc, viewport, [17]);
+            var repeat2 = Render(a, timeline, dc, viewport, [17]);
+            if (!repeat[17].SequenceEqual(repeat2[17])) flags.Add("repeat" + Diff(repeat[17], repeat2[17]));
             var order = Render(a, timeline, dc, viewport, [29, 3, 17]);
-            if (Samples.Any(f => !order[f].SequenceEqual(first[f]))) flags.Add("order");
+            if (Samples.Any(f => !order[f].SequenceEqual(first[f]))) flags.Add("order" + Diff(order[17], first[17]));
             Thread.Sleep(350);
             var later = Render(a, timeline, dc, viewport, [17]);
-            if (!later[17].SequenceEqual(first[17])) flags.Add("later");
+            if (!later[17].SequenceEqual(first[17])) flags.Add("later" + Diff(later[17], first[17]));
             a.Dispose();
             var b = Create(host, context, scene);
             var fresh = Render(b, timeline, dc, viewport, [17, 3, 29]);
-            if (Samples.Any(f => !fresh[f].SequenceEqual(first[f]))) flags.Add("fresh-renderer");
+            if (Samples.Any(f => !fresh[f].SequenceEqual(first[f]))) flags.Add("fresh-renderer" + Diff(fresh[17], first[17]));
             b.Dispose();
             var c = Create(host, context, copyScene);
             var copied = Render(c, copyTimeline, dc, viewport, Samples);
-            if (Samples.Any(f => !copied[f].SequenceEqual(first[f]))) flags.Add("copy");
+            if (Samples.Any(f => !copied[f].SequenceEqual(first[f]))) flags.Add("copy" + Diff(copied[17], first[17]));
             c.Dispose();
             bool noop = Samples.All(f => first[f].SequenceEqual(plain[f]));
             string verdict = flags.Count == 0 ? (noop ? "same-as-plain" : "deterministic")
-                : flags.SequenceEqual(["copy"]) ? "identity" : "unstable:" + string.Join("+", flags);
+                : flags.Count == 1 && flags[0].StartsWith("copy", StringComparison.Ordinal) ? "identity:" + flags[0] : "unstable:" + string.Join("+", flags);
             return $"trial={verdict}|{clock.ElapsedMilliseconds} ms";
         }
         catch (Exception error)
@@ -317,6 +323,18 @@ internal static class PluginAuditProbe
                     + "|data=" + string.Join(",", error.Data.Keys.Cast<object>().Select(key => $"{key}={error.Data[key]}")));
             return $"trial=error:{error.GetBaseException().GetType().Name}: {error.GetBaseException().Message}";
         }
+    }
+
+    // Frame 17's differing bytes and the largest difference of one byte (out of 255).
+    private static string Diff(byte[] a, byte[] b)
+    {
+        int count = 0, max = 0;
+        for (int i = 0; i < a.Length; i++)
+        {
+            int d = Math.Abs(a[i] - b[i]);
+            if (d != 0) { count++; max = Math.Max(max, d); }
+        }
+        return $"[{count}/{a.Length} bytes, max {max}]";
     }
 
     private static (Timeline, Scene) Build(Type? effect, bool moving, AnimationType linear)
