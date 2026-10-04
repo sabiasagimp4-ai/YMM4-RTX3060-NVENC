@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
@@ -40,6 +41,7 @@ internal static class LipSyncExperiments
         Step("render", () => Render(hostDir));
         Step("voice files and idle clones", VoiceFiles);
         Step("voice cache in the model", VoiceCacheModel);
+        Step("psd tachie", PsdTachie);
         try { Directory.Delete(work, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
@@ -524,6 +526,152 @@ internal static class LipSyncExperiments
         return output + "\n" + error.Result + $"\nexit {child.ExitCode}";
     }
 
+    // ---- A PSD tachie: what a mouth or eye change costs (the PSD is composited again whenever its active layers change) ----
+
+    private sealed record PsdRecord(int Layers, string LayersHash, bool Recomposited, ImmutableList<string>? Active);
+    private static readonly List<PsdRecord> psdRecords = [];
+    private static readonly List<double> compositeMs = [];
+
+    private static void PsdUpdatePrefix(object __instance, out object? __state) => __state = __instance.GetType().GetField("bitmap", Any)!.GetValue(__instance);
+
+    private static void PsdUpdatePostfix(object __instance, object? __state)
+    {
+        if (Environment.CurrentManagedThreadId != Volatile.Read(ref recordThread)) return;
+        var type = __instance.GetType();
+        var active = (ImmutableList<string>?)type.GetField("activeLayers", Any)!.GetValue(__instance);
+        bool recomposited = !ReferenceEquals(__state, type.GetField("bitmap", Any)!.GetValue(__instance));
+        lock (psdRecords) psdRecords.Add(new(active?.Count ?? -1, active is null ? "-" : Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(string.Join("\n", active))))[..8], recomposited, active));
+    }
+
+    private static void CompositePrefix(out long __state) => __state = Stopwatch.GetTimestamp();
+
+    private static void CompositePostfix(long __state)
+    {
+        if (Environment.CurrentManagedThreadId != Volatile.Read(ref recordThread)) return;
+        lock (compositeMs) compositeMs.Add(Stopwatch.GetElapsedTime(__state).TotalMilliseconds);
+    }
+
+    private static void PsdTachie()
+    {
+        var psdAssembly = AppDomain.CurrentDomain.GetAssemblies().First(a => a.GetName().Name == "YukkuriMovieMaker.Plugin.Tachie.Psd");
+        string psd = Path.Combine(work, "tachie.psd");
+        const int canvasWidth = 1200, canvasHeight = 2000;
+        string[] eyes = ["eye_open", "eye_half", "eye_closed"];
+        string[] mouths = ["mouth_open", "mouth_wide", "mouth_half", "mouth_closed"];
+        var layers = new List<PsdWriter.Layer> { PsdWriter.Rect("body", 200, 300, 1000, 1900, (x, y) => (180, 160, 150, 255)) };
+        for (int i = 0; i < 30; i++)
+        {
+            int index = i;
+            layers.Add(PsdWriter.Rect($"deco{i}", 250 + i * 10, 300 + i * 40, 950 - i * 5, 420 + i * 40, (x, y) => ((byte)(index * 8), (byte)(255 - index * 8), (byte)(x % 256), 200)));
+        }
+        for (int i = 0; i < eyes.Length; i++)
+        {
+            int index = i;
+            layers.Add(PsdWriter.Rect(eyes[i], 400, 600, 800, 700, (x, y) => y < 50 + 15 * index ? ((byte)0, (byte)0, (byte)0, (byte)0) : ((byte)30, (byte)40, (byte)200, (byte)255), visible: i == 0));
+        }
+        for (int i = 0; i < mouths.Length; i++)
+        {
+            int index = i;
+            layers.Add(PsdWriter.Rect(mouths[i], 500, 900, 700, 1000, (x, y) => y < 25 * index ? ((byte)0, (byte)0, (byte)0, (byte)0) : ((byte)220, (byte)40, (byte)40, (byte)255), visible: i == 0));
+        }
+        File.WriteAllBytes(psd, PsdWriter.Write(canvasWidth, canvasHeight, layers));
+        Console.WriteLine($"PSD: {new FileInfo(psd).Length / 1024} KiB, {layers.Count} layers, {canvasWidth}x{canvasHeight}");
+
+        var character = new Character { Name = "psd" };
+        character.TachieType = psdAssembly.GetType("YukkuriMovieMaker.Plugin.Tachie.Psd.PsdTachiePlugin", true);
+        object characterParameter = Activator.CreateInstance(psdAssembly.GetType("YukkuriMovieMaker.Plugin.Tachie.Psd.PsdTachieCharacterParameter", true)!)!;
+        Set(characterParameter, "FilePath", psd);
+        character.TachieCharacterParameter = (ITachieCharacterParameter)characterParameter;
+        var timeline = new Timeline();
+        timeline.VideoInfo.Width = Width;
+        timeline.VideoInfo.Height = Height;
+        timeline.VideoInfo.FPS = Fps;
+        var scenes = new Scenes(false);
+        scenes.AddScene(timeline);
+        var voice = CustomVoice(character, WriteWav("psd.wav", 24000, 6.0, 41), 6.0, 15);
+        var tachie = new TachieItem(character) { Frame = 0, Length = voice.Frame + voice.Length + 15, Layer = 1 };
+        // Left unset (null), the item's file path differs from the character's, so the PSD's own visibility applies.
+        tachie.TachieItemParameter = (ITachieItemParameter)Activator.CreateInstance(psdAssembly.GetType("YukkuriMovieMaker.Plugin.Tachie.Psd.PsdTachieItemParameter", true)!)!;
+        tachie.Zoom.SetFirstValue(10);
+        timeline.Items = timeline.Items.Add(tachie).Add(voice);
+        var scene = new Scene(timeline, scenes, []);
+        int frames = tachie.Length;
+
+        var probe = new Harmony("ymm.tests.lipsync-psd");
+        var sourceType = psdAssembly.GetType("YukkuriMovieMaker.Plugin.Tachie.Psd.PsdTachieSource", true)!;
+        probe.Patch(sourceType.GetMethod("Update", Any, [typeof(TachieSourceDescription)])!,
+            prefix: new HarmonyMethod(typeof(LipSyncExperiments), nameof(PsdUpdatePrefix)), postfix: new HarmonyMethod(typeof(LipSyncExperiments), nameof(PsdUpdatePostfix)));
+        probe.Patch(tachieSourceType.GetMethod("ReadVolumeAfterRequiredWait", Any)!,
+            prefix: new HarmonyMethod(typeof(LipSyncExperiments), nameof(ReadVolumePrefix)), postfix: new HarmonyMethod(typeof(LipSyncExperiments), nameof(ReadVolumePostfix)));
+        try
+        {
+            OnThread("psd", false, () =>
+            {
+                using var devices = new GraphicsDevices();
+                using var context = devices.CreateContext();
+                (Shot[] Shots, PsdRecord[] Records, double[] Composites) Pass(TimelineSourceUsage usage, IEnumerable<int> order)
+                {
+                    var shots = new Shot[frames];
+                    var records = new PsdRecord[frames];
+                    lock (compositeMs) compositeMs.Clear();
+                    using var source = NewSource(context, scene);
+                    foreach (int frame in order)
+                    {
+                        int before;
+                        lock (psdRecords) before = psdRecords.Count;
+                        shots[frame] = Shoot(source, context, frame, usage);
+                        lock (psdRecords) records[frame] = psdRecords.Count > before ? psdRecords[^1] : new(-2, "none", false, null);
+                    }
+                    double[] composites;
+                    lock (compositeMs) composites = compositeMs.ToArray();
+                    return (shots, records, composites);
+                }
+                // Without animations: the PSD's own visibility, and the identifiers YMM4 gives the layers.
+                var first = Pass(TimelineSourceUsage.Exporting, [0]);
+                if (first.Records[0].Active is not { } active) { Console.WriteLine("PSD tachie: no active layers recorded"); return; }
+                Console.WriteLine($"PSD tachie without animations: {active.Count} active layers, e.g. {string.Join(" | ", active.Take(4))} ... {string.Join(" | ", active.TakeLast(2))}; "
+                    + $"first frame {first.Shots[0].UpdateMs:F0} ms (opening and compositing the PSD)");
+                var compositeType = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType("YukkuriMovieMaker.Plugin.FileSource.Psd.PsdFileSourcePlugin")).FirstOrDefault(t => t is not null);
+                var composite = compositeType?.GetMethods(Any).FirstOrDefault(m => m.Name == "CreateBitmap" && m.IsStatic);
+                if (composite is not null)
+                    probe.Patch(composite, prefix: new HarmonyMethod(typeof(LipSyncExperiments), nameof(CompositePrefix)), postfix: new HarmonyMethod(typeof(LipSyncExperiments), nameof(CompositePostfix)));
+                string? Identifier(string name, string visible) => active.FirstOrDefault(id => id.Contains(visible, StringComparison.Ordinal))?.Replace(visible, name, StringComparison.Ordinal);
+                var mouthIds = mouths.Select(m => Identifier(m, mouths[0])).ToArray();
+                var eyeIds = eyes.Select(e => Identifier(e, eyes[0])).ToArray();
+                if (mouthIds.Any(id => id is null) || eyeIds.Any(id => id is null)) { Console.WriteLine("PSD tachie: layer identifiers not found"); return; }
+                var settingsType = psdAssembly.GetType("YukkuriMovieMaker.Plugin.Tachie.Psd.PsdFileSettings", true)!;
+                object settings = settingsType.GetMethod("LoadFromPsdFilePath", Any)!.Invoke(null, [psd])!;
+                object mouth = Activator.CreateInstance(psdAssembly.GetType("YukkuriMovieMaker.Plugin.Tachie.Psd.PsdMouthAnimation", true)!, [ImmutableList.CreateRange(mouthIds!)])!;
+                object eye = Activator.CreateInstance(psdAssembly.GetType("YukkuriMovieMaker.Plugin.Tachie.Psd.PsdEyeAnimation", true)!, [ImmutableList.CreateRange(eyeIds!), 0.0, 0.0])!;
+                Set(settings, "MouthAnimations", ImmutableListOf(mouth));
+                Set(settings, "EyeAnimations", ImmutableListOf(eye));
+
+                var export = Pass(TimelineSourceUsage.Exporting, Enumerable.Range(0, frames));
+                int recomposites = export.Records.Count(r => r.Recomposited);
+                var voiceFrames = Enumerable.Range(voice.Frame, voice.Length).ToArray();
+                double changed = voiceFrames.Where(f => export.Records[f].Recomposited).Select(f => export.Shots[f].UpdateMs).DefaultIfEmpty().Average();
+                double same = voiceFrames.Where(f => !export.Records[f].Recomposited).Select(f => export.Shots[f].UpdateMs).DefaultIfEmpty().Average();
+                Console.WriteLine($"PSD tachie, export in order: {recomposites}/{frames} frames composited the PSD again ({voiceFrames.Count(f => export.Records[f].Recomposited)} of the {voice.Length} voice frames); "
+                    + $"Update on those {changed:F1} ms, on the others {same:F2} ms; CreateBitmap {export.Composites.Length} calls, mean {export.Composites.DefaultIfEmpty().Average():F1} ms, max {export.Composites.DefaultIfEmpty().Max():F1} ms");
+                var states = export.Records.Select(r => r.LayersHash).Distinct().Count();
+                Console.WriteLine($"  distinct layer sets: {states}; authentic volumes {export.Shots.Count(s => s.Volume?.Authentic ?? true)}/{frames}");
+                var playing = Pass(TimelineSourceUsage.Playing, Enumerable.Range(0, frames));
+                Console.WriteLine($"  playing in order, a new source: same picture {Enumerable.Range(0, frames).Count(f => playing.Shots[f].Hash == export.Shots[f].Hash)}/{frames}");
+                var shuffled = Enumerable.Range(0, frames).OrderBy(f => (f * 7919) % 104729).ToArray();
+                var paused = Pass(TimelineSourceUsage.Paused, shuffled);
+                Console.WriteLine($"  paused shuffled: same picture {Enumerable.Range(0, frames).Count(f => paused.Shots[f].Hash == export.Shots[f].Hash)}/{frames}, composited again on {paused.Records.Count(r => r.Recomposited)} frames, "
+                    + $"mean Update {paused.Shots.Average(s => s.UpdateMs):F1} ms");
+            });
+        }
+        finally { probe.UnpatchAll(probe.Id); }
+    }
+
+    private static object ImmutableListOf(object item)
+    {
+        var create = typeof(ImmutableList).GetMethods().First(m => m.Name == nameof(ImmutableList.Create) && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType.IsGenericParameter);
+        return create.MakeGenericMethod(item.GetType()).Invoke(null, [item])!;
+    }
+
     // ---- Voice files: temporary files, project voice caches, idle clones ----
 
     private static VoiceItem CustomVoice(Character character, string wav, double seconds, int frame)
@@ -746,5 +894,83 @@ internal static class LipSyncExperiments
             for (int k = 0; k < 8; k++) crc = (crc & 1) != 0 ? (crc >> 1) ^ 0xEDB88320 : crc >> 1;
         }
         return ~crc;
+    }
+}
+
+// A minimal PSD (version 1, 8-bit RGB, raw channels) for the experiment; read back with psd-tools when written.
+internal static class PsdWriter
+{
+    internal sealed record Layer(string Name, int Left, int Top, int Right, int Bottom, byte[][] Channels, bool Visible); // channels: A, R, G, B planes
+
+    internal static Layer Rect(string name, int left, int top, int right, int bottom, Func<int, int, (byte R, byte G, byte B, byte A)> pixel, bool visible = true)
+    {
+        int w = right - left, h = bottom - top;
+        var planes = new byte[4][];
+        for (int c = 0; c < 4; c++) planes[c] = new byte[w * h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                var (r, g, b, a) = pixel(x, y);
+                int i = y * w + x;
+                planes[0][i] = a; planes[1][i] = r; planes[2][i] = g; planes[3][i] = b;
+            }
+        return new(name, left, top, right, bottom, planes, visible);
+    }
+
+    // PSD (version 1), 8-bit RGB, raw channel data. Layers bottom to top.
+    internal static byte[] Write(int width, int height, IReadOnlyList<Layer> layers)
+    {
+        var o = new MemoryStream();
+        void U8(int v) => o.WriteByte((byte)v);
+        void U16(int v) { o.WriteByte((byte)(v >> 8)); o.WriteByte((byte)v); }
+        void U32(long v) { o.WriteByte((byte)(v >> 24)); o.WriteByte((byte)(v >> 16)); o.WriteByte((byte)(v >> 8)); o.WriteByte((byte)v); }
+        void Ascii(string s) => o.Write(Encoding.ASCII.GetBytes(s));
+        Ascii("8BPS"); U16(1); o.Write(new byte[6]); U16(4); U32(height); U32(width); U16(8); U16(3);
+        U32(0); // color mode data
+        U32(0); // image resources
+        // layer and mask information
+        var info = new MemoryStream();
+        {
+            var li = new MemoryStream();
+            void LU8(int v) => li.WriteByte((byte)v);
+            void LU16(int v) { li.WriteByte((byte)(v >> 8)); li.WriteByte((byte)v); }
+            void LU32(long v) { li.WriteByte((byte)(v >> 24)); li.WriteByte((byte)(v >> 16)); li.WriteByte((byte)(v >> 8)); li.WriteByte((byte)v); }
+            LU16(layers.Count);
+            foreach (var layer in layers)
+            {
+                LU32(layer.Top); LU32(layer.Left); LU32(layer.Bottom); LU32(layer.Right);
+                LU16(4);
+                int size = (layer.Right - layer.Left) * (layer.Bottom - layer.Top);
+                foreach (int id in new[] { -1, 0, 1, 2 }) { LU16(id & 0xFFFF); LU32(2 + size); }
+                li.Write(Encoding.ASCII.GetBytes("8BIMnorm"));
+                LU8(255); LU8(0); LU8(layer.Visible ? 0 : 2); LU8(0);
+                var extra = new MemoryStream();
+                void EU32(long v) { extra.WriteByte((byte)(v >> 24)); extra.WriteByte((byte)(v >> 16)); extra.WriteByte((byte)(v >> 8)); extra.WriteByte((byte)v); }
+                EU32(0); EU32(0);
+                byte[] name = Encoding.ASCII.GetBytes(layer.Name);
+                int padded = (1 + name.Length + 3) / 4 * 4;
+                extra.WriteByte((byte)name.Length); extra.Write(name); extra.Write(new byte[padded - 1 - name.Length]);
+                // luni: unicode name
+                byte[] uni = Encoding.BigEndianUnicode.GetBytes(layer.Name);
+                extra.Write(Encoding.ASCII.GetBytes("8BIMluni"));
+                int uniLength = 4 + uni.Length;
+                int uniPadded = (uniLength + 3) / 4 * 4;
+                EU32(uniPadded); EU32(layer.Name.Length); extra.Write(uni); extra.Write(new byte[uniPadded - uniLength]);
+                LU32(extra.Length); li.Write(extra.ToArray());
+            }
+            foreach (var layer in layers)
+                foreach (int c in new[] { 0, 1, 2, 3 }) { LU16(0); li.Write(layer.Channels[c]); }
+            if (li.Length % 2 != 0) li.WriteByte(0);
+            var lic = li.ToArray();
+            info.Write(new[] { (byte)(lic.Length >> 24), (byte)(lic.Length >> 16), (byte)(lic.Length >> 8), (byte)lic.Length });
+            info.Write(lic);
+            info.Write(new byte[4]); // global layer mask
+        }
+        U32(info.Length); o.Write(info.ToArray());
+        // merged image: raw, R G B A planes (composite of visible layers, simply white here)
+        U16(0);
+        var plane = new byte[width * height];
+        for (int c = 0; c < 4; c++) { Array.Fill(plane, (byte)(c == 3 ? 255 : 255)); o.Write(plane); }
+        return o.ToArray();
     }
 }
