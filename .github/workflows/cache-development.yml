@@ -126,6 +126,18 @@ jobs:
           } finally {
             git worktree remove --force $before
           }
+      - name: File lookups before the notification decision (two samples on the same runner)
+        run: |
+          $before = Join-Path $env:RUNNER_TEMP 'file-lookups-before'
+          git fetch origin fc09a371d713dc42136e892fc577997fe0b8576e
+          git worktree add --detach $before fc09a371d713dc42136e892fc577997fe0b8576e
+          try {
+            $project = Join-Path $before 'tests/CacheChecks/CacheChecks.csproj'
+            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --file-measure
+            if ($LASTEXITCODE -ne 0) { throw 'Before file measurements failed' }
+          } finally {
+            git worktree remove --force $before
+          }
       - name: Dependency keys against the real host (includes two after measurements)
         run: |
           dotnet run --project tests/CacheChecks/CacheChecks.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR

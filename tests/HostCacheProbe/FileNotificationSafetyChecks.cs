@@ -52,6 +52,14 @@ internal static class FileNotificationSafetyChecks
             Check(FileDependencyLease.TryAcquire([path], null, 1L << 20, out var first), "Initial file was unverifiable");
             IReadOnlyDictionary<string, FileFingerprint> known;
             using (first) { known = first!.Fingerprints; Check(HostContent.Matches(known), "Initial content was already marked changed"); }
+            long pollGeneration = 0;
+            var pollingClock = Stopwatch.StartNew();
+            using var poll = new Timer(_ =>
+            {
+                if (FileDependencyLease.TryAcquire([path], known, 1L << 20, out var current))
+                    using (current)
+                        if (current!.Fingerprints[path] != known[path]) Interlocked.Increment(ref pollGeneration);
+            }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
             long captured = Interlocked.Read(ref generation);
             watcher.EnableRaisingEvents = true;
             File.WriteAllBytes(path, FramePixelChecks.Png(48, 32, (_, _) => (20, 30, 255, 255)));
@@ -64,8 +72,11 @@ internal static class FileNotificationSafetyChecks
             bool leased = FileDependencyLease.TryAcquire([path], known, 0, out var stale);
             stale?.Dispose();
             Check(!leased, "The current synchronous hit guard accepted changed content");
-            // A 30-second poll has performed no reconciliation during this gap. It has the same stale generation.
-            Check(captured == Interlocked.Read(ref generation), "The safety-poll candidate unexpectedly observed an event");
+            // Exercise the proposed 30-second reconciliation too. The first poll has not run in this bounded gap;
+            // combining it with the watcher still accepts the old pixels that a fresh host source no longer draws.
+            bool pollWouldHit = captured == Interlocked.Read(ref generation) && Interlocked.Read(ref pollGeneration) == 0;
+            double gapMilliseconds = pollingClock.Elapsed.TotalMilliseconds;
+            Check(pollWouldHit && gapMilliseconds < 30_000, "The periodic-reconciliation gap was not reproduced");
             Check(FileDependencyLease.TryAcquire([path], known, 1L << 20, out var changed), "Changed file could not be fingerprinted");
             using (changed) Check(!HostContent.Matches(changed!.Fingerprints), "An overwrite did not bypass until restart");
             release.Set();
@@ -73,7 +84,8 @@ internal static class FileNotificationSafetyChecks
             Console.WriteLine("SPEEDUP4_RACE " + JsonSerializer.Serialize(new
             {
                 fresh_host_pixels_differ = different, event_only_would_hit = eventOnlyAccepted,
-                periodic_poll_closes_gap = false, synchronous_lease_rejected = !leased, restart_bypass = HostContent.Changed(path),
+                periodic_poll_closes_gap = !pollWouldHit, gap_ms = gapMilliseconds,
+                synchronous_lease_rejected = !leased, restart_bypass = HostContent.Changed(path),
             }));
         }
         finally
