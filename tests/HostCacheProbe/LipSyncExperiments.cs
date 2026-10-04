@@ -653,7 +653,7 @@ internal static class LipSyncExperiments
                         ids[path] = id;
                     }
                 }
-                string? Identifier(string name) => ids.FirstOrDefault(pair => pair.Key == name || pair.Key.EndsWith("/" + name, StringComparison.Ordinal)).Value;
+                string? Identifier(string name) => ids.FirstOrDefault(pair => pair.Key.Split('/')[^1].TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9') == name).Value;
                 var mouthIds = mouths.Select(Identifier).ToArray();
                 var eyeIds = eyes.Select(Identifier).ToArray();
                 if (mouthIds.Any(id => id is null) || eyeIds.Any(id => id is null)) { Console.WriteLine("PSD tachie: layer identifiers not found"); return; }
