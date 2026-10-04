@@ -249,9 +249,6 @@ internal static partial class IdleFramePreRenderer
             {
                 if (!initial!.Validate() || !CanContinue(current, job.Token, anchorFrame)) return;
                 var batch = RendererFor(current, initial.Model);
-                var cloneScene = batch.CloneScene;
-                var cloneTracker = batch.CloneTracker;
-                var source = batch.Source;
 
                 for (long ordinal = first; ordinal <= endOrdinal; ordinal++)
                 {
@@ -265,25 +262,7 @@ internal static partial class IdleFramePreRenderer
                         || !TimelineFrameCache.TryGetLatestPreviewViewport(current.Info.Timeline, current.Info.Scenes, out var latestViewport)
                         || !SameView(latestViewport, viewport) || latestViewport.IsPlaying)
                         return;
-                    // Identity-seeded randomness: the clone would draw other random values, so the live scene draws it.
-                    if (current.Tracker.IsSessionKeyed(frame))
-                    {
-                        var live = batch.LiveSourceFor(current.LiveScene);
-                        switch (PrimeLiveFrame(current.Tracker, current.LiveScene, live, time => live.Update(time, TimelineSourceUsage.Playing),
-                            frame, latestViewport, () => CanContinue(current, job.Token, anchorFrame), job.Token))
-                        {
-                            case IdleFrameResult.Rendered: rendered++; break;
-                            case IdleFrameResult.Stored: skipped++; break;
-                            case IdleFrameResult.Stopped: return;
-                            case IdleFrameResult.Normal: normal++; break;
-                            default: unavailable++; break;
-                        }
-                        Advance(current, job, ordinal + 1);
-                        Thread.Yield();
-                        continue;
-                    }
-                    switch (PrimeFrame(current.Tracker, current.LiveScene, cloneTracker, cloneScene, source,
-                        time => source.Update(time, TimelineSourceUsage.Playing), frame, latestViewport,
+                    switch (PrimeBatchFrame(current.Tracker, current.LiveScene, batch, frame, latestViewport,
                         () => CanContinue(current, job.Token, anchorFrame), job.Token, out reason))
                     {
                         case IdleFrameResult.Normal:
@@ -294,8 +273,8 @@ internal static partial class IdleFramePreRenderer
                             skipped++;
                             Advance(current, job, ordinal + 1);
                             continue;
-                        // A frame whose clone does not key like the live scene (identity-seeded randomness, a plugin
-                        // that does not survive the copy) is passed over: stopping there kept every later frame from
+                        // A frame whose clone does not key like the live scene (a plugin that does not survive the
+                        // copy) is passed over: stopping there kept every later frame from
                         // ever being pre-rendered. A key that is not ready yet (files still being verified) stops the
                         // batch, to come back to it.
                         case IdleFrameResult.NotKeyed when reason == CloneMismatch:
@@ -373,6 +352,23 @@ internal static partial class IdleFramePreRenderer
             return TryPrimeIfCurrent(token, liveScene, cloneScene, source, time, viewport, liveCapture, cloneCapture)
                 ? IdleFrameResult.Rendered : IdleFrameResult.Unavailable;
         }
+    }
+
+    // One frame of a batch, as RenderBatch renders it: a frame keyed by the live objects' identities (identity-seeded
+    // randomness) from the live scene, since the clone would draw other random values; any other from the clone.
+    internal static IdleFrameResult PrimeBatchFrame(KeyDependencyTracker liveTracker, Scene liveScene, BatchRenderer batch, int frame,
+        TimelineFrameCache.PreviewViewport viewport, Func<bool> canContinue, CancellationToken token, out string reason)
+    {
+        reason = string.Empty;
+        if (liveTracker.IsSessionKeyed(frame))
+        {
+            var live = batch.LiveSourceFor(liveScene);
+            return PrimeLiveFrame(liveTracker, liveScene, live, time => live.Update(time, TimelineSourceUsage.Playing),
+                frame, viewport, canContinue, token);
+        }
+        var source = batch.Source;
+        return PrimeFrame(liveTracker, liveScene, batch.CloneTracker, batch.CloneScene, source,
+            time => source.Update(time, TimelineSourceUsage.Playing), frame, viewport, canContinue, token, out reason);
     }
 
     // A frame keyed by the live objects' identities (identity-seeded randomness) from a renderer of the live scene
