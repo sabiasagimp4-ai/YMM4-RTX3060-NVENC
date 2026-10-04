@@ -50,8 +50,7 @@ internal static class PluginAuditProbe
         if (!File.Exists(file)) { Console.WriteLine("AUDIT|skipped: no Community plugin"); return; }
         var community = Assembly.LoadFrom(file);
         Console.WriteLine($"AUDIT|community MVID {community.ManifestModule.ModuleVersionId}");
-        try { RunStatic(community); }
-        catch (Exception error) { Console.WriteLine("AUDIT|static failed: " + error); }
+        // The static scan's results are in run 37178809870 (this rerun only renders).
         try { RunTrials(host, context, community); }
         catch (Exception error) { Console.WriteLine("TRIAL|failed: " + error); }
     }
@@ -249,47 +248,63 @@ internal static class PluginAuditProbe
         int baseMoving = Enumerable.Range(1, Samples.Length - 1).Count(i => !plain[Samples[i]].SequenceEqual(plain[Samples[i - 1]]));
         Console.WriteLine($"TRIAL|plain shape: {baseMoving} of {Samples.Length - 1} sample steps differ");
 
+        var total = Stopwatch.StartNew();
         foreach (var type in effects)
         {
             string area = Area(type.Namespace);
             string manual = Manual(area);
-            var clock = Stopwatch.StartNew();
-            try
-            {
-                var (timeline, scene) = Build(type, moving, linear);
-                var copyTimeline = YukkuriMovieMaker.Json.Json.LoadFromText<Timeline>(YukkuriMovieMaker.Json.Json.GetJsonText(timeline))!;
-                var copyScenes = new Scenes(false); copyScenes.AddScene(copyTimeline);
-                var copyScene = new Scene(copyTimeline, copyScenes, []);
-                var flags = new List<string>();
-                Dictionary<int, byte[]> first;
-                using (var a = Create(host, context, scene))
-                {
-                    first = Render(a, timeline, dc, viewport, Enumerable.Range(0, Frames).ToArray());
-                    var order = Render(a, timeline, dc, viewport, [29, 3, 17]);
-                    if (Samples.Any(f => !order[f].SequenceEqual(first[f]))) flags.Add("order");
-                    Thread.Sleep(350);
-                    var later = Render(a, timeline, dc, viewport, [17]);
-                    if (!later[17].SequenceEqual(first[17])) flags.Add("later");
-                }
-                using (var b = Create(host, context, scene))
-                {
-                    var fresh = Render(b, timeline, dc, viewport, [17, 3, 29]);
-                    if (Samples.Any(f => !fresh[f].SequenceEqual(first[f]))) flags.Add("fresh-renderer");
-                }
-                using (var c = Create(host, context, copyScene))
-                {
-                    var copied = Render(c, copyTimeline, dc, viewport, Samples);
-                    if (Samples.Any(f => !copied[f].SequenceEqual(first[f]))) flags.Add("copy");
-                }
-                bool noop = Samples.All(f => first[f].SequenceEqual(plain[f]));
-                string verdict = flags.Count == 0 ? (noop ? "same-as-plain" : "deterministic")
-                    : flags.SequenceEqual(["copy"]) ? "identity" : "unstable:" + string.Join("+", flags);
-                Console.WriteLine($"TRIAL|{area}|{type.Name}|manual={manual}|trial={verdict}|{clock.ElapsedMilliseconds} ms");
-            }
-            catch (Exception error)
-            {
-                Console.WriteLine($"TRIAL|{area}|{type.Name}|manual={manual}|trial=error:{error.GetBaseException().GetType().Name}: {error.GetBaseException().Message}");
-            }
+            if (total.Elapsed > TimeSpan.FromMinutes(15)) { Console.WriteLine($"TRIAL|{area}|{type.Name}|manual={manual}|trial=not-run (time budget)"); continue; }
+            Console.WriteLine($"TRIAL-START|{type.Name}");
+            string? line = null;
+            // Each effect on its own device and thread: one that hangs or breaks its renderer cannot stop the rest.
+            var worker = new Thread(() => line = Trial(host, type, moving, linear, plain)) { IsBackground = true };
+            worker.SetApartmentState(ApartmentState.STA);
+            worker.Start();
+            if (!worker.Join(TimeSpan.FromSeconds(60))) line = "trial=timeout (60 s)";
+            Console.WriteLine($"TRIAL|{area}|{type.Name}|manual={manual}|{line}");
+        }
+    }
+
+    private static string Trial(Assembly host, Type type, bool moving, AnimationType linear, Dictionary<int, byte[]> plain)
+    {
+        var clock = Stopwatch.StartNew();
+        try
+        {
+            using var devices = new YukkuriMovieMaker.Commons.GraphicsDevices();
+            using var context = devices.CreateContext();
+            var dc = context.DeviceContext;
+            var (timeline, scene) = Build(type, moving, linear);
+            var viewport = new TimelineFrameCache.PreviewViewport(Width, Height, Matrix3x2.Identity, new Vector2(Width / 2f, Height / 2f), 96, 96,
+                new Vortice.DCommon.PixelFormat(Vortice.DXGI.Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),
+                dc.AntialiasMode, dc.TextAntialiasMode, dc.PrimitiveBlend, dc.UnitMode, scene.ID, timeline.ID, Stopwatch.GetTimestamp(), false);
+            var copyTimeline = YukkuriMovieMaker.Json.Json.LoadFromText<Timeline>(YukkuriMovieMaker.Json.Json.GetJsonText(timeline))!;
+            var copyScenes = new Scenes(false); copyScenes.AddScene(copyTimeline);
+            var copyScene = new Scene(copyTimeline, copyScenes, []);
+            var flags = new List<string>();
+            var a = Create(host, context, scene);
+            var first = Render(a, timeline, dc, viewport, Enumerable.Range(0, Frames).ToArray());
+            var order = Render(a, timeline, dc, viewport, [29, 3, 17]);
+            if (Samples.Any(f => !order[f].SequenceEqual(first[f]))) flags.Add("order");
+            Thread.Sleep(350);
+            var later = Render(a, timeline, dc, viewport, [17]);
+            if (!later[17].SequenceEqual(first[17])) flags.Add("later");
+            a.Dispose();
+            var b = Create(host, context, scene);
+            var fresh = Render(b, timeline, dc, viewport, [17, 3, 29]);
+            if (Samples.Any(f => !fresh[f].SequenceEqual(first[f]))) flags.Add("fresh-renderer");
+            b.Dispose();
+            var c = Create(host, context, copyScene);
+            var copied = Render(c, copyTimeline, dc, viewport, Samples);
+            if (Samples.Any(f => !copied[f].SequenceEqual(first[f]))) flags.Add("copy");
+            c.Dispose();
+            bool noop = Samples.All(f => first[f].SequenceEqual(plain[f]));
+            string verdict = flags.Count == 0 ? (noop ? "same-as-plain" : "deterministic")
+                : flags.SequenceEqual(["copy"]) ? "identity" : "unstable:" + string.Join("+", flags);
+            return $"trial={verdict}|{clock.ElapsedMilliseconds} ms";
+        }
+        catch (Exception error)
+        {
+            return $"trial=error:{error.GetBaseException().GetType().Name}: {error.GetBaseException().Message}";
         }
     }
 
