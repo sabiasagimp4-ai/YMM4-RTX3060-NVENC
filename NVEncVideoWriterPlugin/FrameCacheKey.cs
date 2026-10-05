@@ -770,7 +770,7 @@ internal static class FrameCacheKey
         foreach (var decoration in decorations ?? ImmutableList<TextDecoration>.Empty)
             if (decoration?.Font is { Length: > 0 } name) names.Add(name);
         foreach (string source in replacements.Prepend(text))
-            foreach (var decoration in ControlTagParser.Parse(source, ImmutableList<TextDecoration>.Empty, 1.0, font ?? string.Empty, false, false).decorations)
+            foreach (var decoration in HostApi.ControlTagDecorations(source, font ?? string.Empty))
                 if (decoration.Font is { Length: > 0 } name) names.Add(name);
         names.Remove(font ?? string.Empty);
         if (names.Count == 0) return [];

@@ -57,6 +57,21 @@ jobs:
           name: host
           path: host
           retention-days: 1
+      # The oldest YMM4 the plugin supports (HostReferenceVersion.targets): the plugin must load there.
+      - id: minimum
+        run: echo "version=$(sed -n 's:.*<Ymm4MinimumVersion[^>]*>\(.*\)</Ymm4MinimumVersion>.*:\1:p' NVEncVideoWriterPlugin/HostReferenceVersion.targets)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: minimum-cache
+        with:
+          path: host-min
+          key: cache-dev-ymm4-${{ steps.minimum.outputs.version }}-top
+      - if: steps.minimum-cache.outputs.cache-hit != 'true'
+        run: bash tools/ci/fetch-ymm4.sh "${{ steps.minimum.outputs.version }}" host-min --top
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-min
+          path: host-min
+          retention-days: 1
 
   windows:
     needs: host
@@ -78,6 +93,22 @@ jobs:
         run: |
           dotnet build NVEncVideoWriterPlugin/NVEncVideoWriterPlugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --nologo
           if ($LASTEXITCODE -ne 0) { throw 'Plugin build failed' }
+      - uses: actions/download-artifact@v4
+        with:
+          name: host-min
+          path: host-min
+      - name: The plugin on the oldest supported YMM4 (types load, missing members are guarded)
+        run: |
+          $plugin = 'NVEncVideoWriterPlugin\bin\Release\net10.0-windows10.0.19041.0\YMM4Rtx3060Nvenc.dll'
+          dotnet run --project tests\HostLoadChecks\HostLoadChecks.csproj -c Release --no-launch-profile -- "$env:GITHUB_WORKSPACE\host-min" $plugin
+          if ($LASTEXITCODE -ne 0) { throw 'The plugin does not load on the oldest supported YMM4' }
+          dotnet run --project tests\HostLoadChecks\HostLoadChecks.csproj -c Release --no-launch-profile -- $env:YMM4_DIR $plugin
+          if ($LASTEXITCODE -ne 0) { throw 'The plugin does not load on the verified YMM4' }
+          dotnet build tools\HostFingerprint -c Release --nologo -v q
+          dotnet tools\HostFingerprint\bin\Release\net10.0\HostFingerprintTool.dll api $plugin host-min | Set-Content -Encoding utf8 missing-on-minimum.txt
+          if ($LASTEXITCODE -ne 0) { throw 'API check failed' }
+          python tools\compat\ymm4_compat.py guarded missing-on-minimum.txt
+          if ($LASTEXITCODE -ne 0) { throw 'The plugin uses members the oldest supported YMM4 lacks without HostApi' }
       - name: Native invariants (no NVENC hardware needed)
         run: |
           msbuild NvencNative/NvencNative.vcxproj /t:Build /p:Configuration=Release /p:Platform=x64 /m /nologo /v:minimal

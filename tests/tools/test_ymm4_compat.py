@@ -68,6 +68,16 @@ class VerdictChecks(unittest.TestCase):
         self.assertEqual('no', verdict['load'])
         self.assertIn('YukkuriMovieMaker, Version=4.56.1.0', verdict['note'])
 
+    def test_members_the_plugin_guards_do_not_count_as_missing(self):
+        s = scan()
+        s['plugin'] = dict(PLUGIN, apiMissing=[
+            'YukkuriMovieMaker.Plugin: YukkuriMovieMaker.Plugin.FileWriter.IVideoFileWriter3',
+            'YukkuriMovieMaker.Plugin: YukkuriMovieMaker.Commons.ControlTagParser::Parse static System.ValueTuple`4<String>(String)'])
+        self.assertEqual('ok', compat.judge({'scan': s, 'start': started()})['load'])
+        rules = compat.guarded_rules()
+        self.assertFalse(compat.guarded('YukkuriMovieMaker: YukkuriMovieMaker.Project.Scenes::.ctor instance Void <0>()', rules))
+        self.assertTrue(compat.guarded('YukkuriMovieMaker: YukkuriMovieMaker.Project.Scenes::.ctor instance Void <0>(Boolean)', rules))
+
     def test_failed_scan_is_unknown(self):
         self.assertEqual('unknown', compat.judge({'scan': {'error': 'download failed'}})['load'])
 

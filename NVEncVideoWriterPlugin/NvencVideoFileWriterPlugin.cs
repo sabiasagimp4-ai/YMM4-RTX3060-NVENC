@@ -37,7 +37,8 @@ public sealed class NvencVideoFileWriterPlugin : IVideoFileWriterPlugin
             HevcAsync = _settings.HevcAsync,
             EnableDebugLog = _settings.EnableDebugLog,
         };
-        return new NvencVideoFileWriter(path, videoInfo, snapshot);
+        var writer = new NvencVideoFileWriter(path, videoInfo, snapshot);
+        return HostApi.VideoFileWriter3 is { } writer3 ? GpuWriterProxy.Create(writer3, writer) : writer;
     }
 
     public string GetFileExtention()

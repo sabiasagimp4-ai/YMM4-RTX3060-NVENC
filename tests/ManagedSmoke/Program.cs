@@ -12,11 +12,15 @@ using Vortice.Mathematics;
 var path = Path.Combine(Path.GetTempPath(), $"ymm4-rtx3060-smoke-{Guid.NewGuid():N}.mp4");
 var videoInfo = new VideoInfo { Width = 320, Height = 180, FPS = 30, Hz = 48000 };
 var plugin = new NvencVideoFileWriterPlugin();
+// On YMM4 4.54 and later the plugin hands out its writer behind an IVideoFileWriter3 made at run time (GpuWriterProxy).
+static object Writer(IVideoFileWriter writer) => writer is GpuWriterProxy
+    ? typeof(GpuWriterProxy).GetField("writer", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(writer)!
+    : writer;
 
 // Exercise the real writer's dispatcher without a GPU: the owner must remain MTA,
 // propagate exceptions synchronously, and terminate even after Dispose fails.
 var threadWriter = plugin.CreateVideoFileWriter(path, videoInfo);
-var dispatcher = threadWriter.GetType().GetField("_encoderThread", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(threadWriter)!;
+var dispatcher = Writer(threadWriter).GetType().GetField("_encoderThread", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Writer(threadWriter))!;
 var ownerThread = (Thread)dispatcher.GetType().GetField("_thread", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(dispatcher)!;
 var invoke = dispatcher.GetType().GetMethod("Invoke")!;
 Task.WaitAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
@@ -143,7 +147,7 @@ if (args.Length == 1)
 
         var threadedDestination = Path.Combine(args[0], "managed-threaded.mp4");
         var threadedWriter = plugin.CreateVideoFileWriter(threadedDestination, videoInfo);
-        var threadedDispatcher = threadedWriter.GetType().GetField("_encoderThread", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(threadedWriter)!;
+        var threadedDispatcher = Writer(threadedWriter).GetType().GetField("_encoderThread", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Writer(threadedWriter))!;
         var threadedOwner = (Thread)threadedDispatcher.GetType().GetField("_thread", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(threadedDispatcher)!;
         try
         {
@@ -234,7 +238,7 @@ if (args.Length == 1)
                 catch (InvalidOperationException) { }
                 try { writer.WriteAudio([0f, 0f]); throw new Exception("Failed writer accepted audio."); }
                 catch (InvalidOperationException) { }
-                var failedDispatcher = writer.GetType().GetField("_encoderThread", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(writer)!;
+                var failedDispatcher = Writer(writer).GetType().GetField("_encoderThread", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Writer(writer))!;
                 var failedOwner = (Thread)failedDispatcher.GetType().GetField("_thread", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(failedDispatcher)!;
                 Task.Run(writer.Dispose).GetAwaiter().GetResult();
                 if (failedOwner.IsAlive) throw new Exception("Encoder thread leaked after initialization failed.");

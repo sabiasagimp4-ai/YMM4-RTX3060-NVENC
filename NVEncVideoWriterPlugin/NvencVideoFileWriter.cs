@@ -9,7 +9,9 @@ using YukkuriMovieMaker.Project;
 
 namespace NVEncVideoWriterPlugin;
 
-internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
+// GPU frames: YMM4 before 4.54 hands them to an IVideoFileWriter2; 4.54 and later to an IVideoFileWriter3 that declares
+// the support, which GpuWriterProxy makes of this writer at run time (NvencVideoFileWriterPlugin.CreateVideoFileWriter).
+internal sealed class NvencVideoFileWriter : IVideoFileWriter2, IDisposable
 {
     private readonly string _outputPath;
     private readonly string _stagingPath;
@@ -37,7 +39,6 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
     }
 
     public VideoFileWriterSupportedStreams SupportedStreams => VideoFileWriterSupportedStreams.Audio | VideoFileWriterSupportedStreams.Video;
-    public bool IsGpuFrameSupported => true;
 
     private FileStream? _pendingAudio;
 

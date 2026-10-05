@@ -1,0 +1,14 @@
+# Members of YMM4 the plugin uses only after checking that the running YMM4 has them (NVEncVideoWriterPlugin/HostApi.cs,
+# GpuWriterProxy.cs). On an older YMM4, the file check (HostFingerprint api) reports them as missing; any other missing
+# member fails CI (cache-development) and marks that YMM4 as partly usable (ymm4-compat).
+# A line is an assembly, a type and optionally ::member and its signature, as HostFingerprint api prints them. A line
+# with a member but no signature also covers every signature of that member.
+YukkuriMovieMaker.Plugin: YukkuriMovieMaker.Commons.ControlTagParser
+YukkuriMovieMaker.Plugin: YukkuriMovieMaker.Commons.ControlTagParser::Parse
+YukkuriMovieMaker.Plugin: YukkuriMovieMaker.Commons.RubyInfo
+YukkuriMovieMaker.Plugin: YukkuriMovieMaker.Commons.TimingTag
+YukkuriMovieMaker.Plugin: YukkuriMovieMaker.Plugin.CacheProvider::InvalidateIfSourceSettingsChanged instance Void <0>()
+YukkuriMovieMaker.Plugin: YukkuriMovieMaker.Plugin.FileWriter.IVideoFileWriter3
+YukkuriMovieMaker.Plugin: YukkuriMovieMaker.Project.VideoInfo::get_BackgroundColor instance System.Windows.Media.Color <0>()
+YukkuriMovieMaker.Plugin: YukkuriMovieMaker.Project.VideoInfo::set_BackgroundColor instance Void <0>(System.Windows.Media.Color)
+YukkuriMovieMaker: YukkuriMovieMaker.Project.Scenes::.ctor instance Void <0>(Boolean)

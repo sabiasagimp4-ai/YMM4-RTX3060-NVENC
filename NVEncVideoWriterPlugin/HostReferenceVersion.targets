@@ -1,0 +1,14 @@
+<Project>
+  <!-- YMM4 does not load a plugin that references a newer YukkuriMovieMaker.dll than its own, and that assembly's
+       version is YMM4's version. The plugin is built against the YMM4 whose code was read; after compiling, its
+       reference is lowered to the oldest YMM4 it supports (tools/HostReference). HostApi guards the members that
+       YMM4 lacks, and CI checks the result against it. Ymm4MinimumVersion=none keeps the built reference. -->
+  <PropertyGroup>
+    <Ymm4MinimumVersion Condition="'$(Ymm4MinimumVersion)' == ''">4.47.0.0</Ymm4MinimumVersion>
+    <HostReferenceTool>$(MSBuildThisFileDirectory)../tools/HostReference/</HostReferenceTool>
+  </PropertyGroup>
+  <Target Name="LowerHostReference" AfterTargets="CoreCompile" Condition="'$(Ymm4MinimumVersion)' != 'none'">
+    <Exec Command="dotnet build &quot;$(HostReferenceTool)HostReference.csproj&quot; -c Release --nologo -v q" />
+    <Exec Command="dotnet &quot;$(HostReferenceTool)bin/Release/net10.0/HostReference.dll&quot; &quot;@(IntermediateAssembly->'%(FullPath)')&quot; YukkuriMovieMaker $(Ymm4MinimumVersion)" />
+  </Target>
+</Project>

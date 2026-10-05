@@ -929,7 +929,7 @@ internal static partial class TimelineFrameCache
     {
         pending.CacheHit = true;
         var devices = pending.Devices;
-        devices.CacheProvider.InvalidateIfSourceSettingsChanged();
+        HostApi.InvalidateIfSourceSettingsChanged(devices.CacheProvider);
         devices.CacheProvider.Clear();
         var rects = (IList)itemRects.GetValue(source)!;
         lock (rects)

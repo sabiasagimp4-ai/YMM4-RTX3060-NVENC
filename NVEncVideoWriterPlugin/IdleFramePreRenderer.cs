@@ -489,7 +489,7 @@ internal static partial class IdleFramePreRenderer
     {
         if (snapshot.Root == Guid.Empty || snapshot.ParentScenes.Length != 0 || snapshot.Timelines.Length == 0)
             throw new NotSupportedException("アイドル時の先読みはルートシーンのみ対応しています。");
-        var cloneScenes = new Scenes(false);
+        var cloneScenes = HostApi.NewScenes();
         var timelines = new Dictionary<Guid, Timeline>();
         foreach (var model in snapshot.Timelines)
         {
@@ -500,7 +500,7 @@ internal static partial class IdleFramePreRenderer
             timeline.VideoInfo.Height = model.VideoInfo.Height;
             timeline.VideoInfo.FPS = model.VideoInfo.FPS;
             timeline.VideoInfo.Hz = model.VideoInfo.Hz;
-            timeline.VideoInfo.BackgroundColor = model.VideoInfo.BackgroundColor;
+            HostApi.CopyBackgroundColor(model.VideoInfo, timeline.VideoInfo);
             timeline.LayerSettings.CopyFrom(model.LayerSettings);
             // Setting Items leaves Length at 1: YMM4 refreshes it on load and edits (private setter), and it can stay
             // longer than the items. It is part of the drawing state, so the clone takes the live value.

@@ -11,6 +11,7 @@ Usage:
   ymm4_compat.py render <data.json> <README.md> <docs/YMM4_VERSIONS.md>
   ymm4_compat.py plan <data.json> <server versions file> --plugin <version> [--mode new|stale|all|<v> <v>...]
   ymm4_compat.py runtime-ok <version.scan.json>   (exit 0 when the .NET runtime of that YMM4 can load the plugin)
+  ymm4_compat.py guarded <missing.txt>     (exit 1 when HostFingerprint api lists a member HostApi does not guard)
   ymm4_compat.py loadable <results dir>     (versions whose files allow the plugin to load: started on Windows)
   ymm4_compat.py issue <data.json> <version>  (a Markdown report for one version)
 """
@@ -23,6 +24,7 @@ import sys
 
 BEGIN = '<!-- ymm4-versions:begin -->'
 END = '<!-- ymm4-versions:end -->'
+GUARDED = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'guarded-host-apis.txt')
 
 # The cache features the plugin reports (HostIntegration.ReportStatus), in the order they are listed.
 FEATURES = [
@@ -100,6 +102,27 @@ def static_load_ok(scan):
             and plugin.get('references') is not None and not reference_problems(scan))
 
 
+def guarded_rules(path=GUARDED):
+    with open(path, encoding='utf-8') as stream:
+        return [line.strip() for line in stream if line.strip() and not line.startswith('#')]
+
+
+def guarded(entry, rules):
+    """Whether a missing member (HostFingerprint api) is one the plugin uses only when YMM4 has it."""
+    for rule in rules:
+        if entry == rule:
+            return True
+        # A member without a signature covers its every signature.
+        if '::' in rule and ' ' not in rule.split(': ', 1)[-1] and entry.startswith(rule + ' '):
+            return True
+    return False
+
+
+def unguarded(missing, rules=None):
+    rules = guarded_rules() if rules is None else rules
+    return [entry for entry in missing if not guarded(entry, rules)]
+
+
 def api_note(missing):
     if not missing:
         return ''
@@ -118,7 +141,7 @@ def judge(entry):
     if scan.get('knownBuild'):
         verdict['basis'] = scan['knownBuild']
     runtime_ok, runtime_reason = runtime_check(scan)
-    api = (scan.get('plugin') or {}).get('apiMissing') or []
+    api = unguarded((scan.get('plugin') or {}).get('apiMissing') or [])
     status = (start or {}).get('status')
     if status:
         verdict['load'] = 'partial' if api else 'ok'
@@ -366,6 +389,18 @@ def loadable(results):
             print(match.group(1))
 
 
+def guarded_check(path):
+    """Exit status of the CI check: every member the oldest supported YMM4 lacks must be guarded."""
+    with open(path, encoding='utf-8-sig') as stream:
+        missing = [line.strip() for line in stream if line.strip()]
+    left = unguarded(missing)
+    for entry in missing:
+        print(('guarded   ' if entry not in left else 'UNGUARDED ') + entry)
+    if left:
+        print(f'{len(left)} member(s) missing on that YMM4 are used without HostApi: guard them, or raise the minimum version.')
+    return 1 if left else 0
+
+
 def runtime_ok(scan_path):
     with open(scan_path, encoding='utf-8-sig') as stream:
         return runtime_check(json.load(stream))[0] is not False
@@ -413,6 +448,8 @@ def main(argv):
     p.add_argument('--mode', nargs='*', default=['new'])
     l = sub.add_parser('loadable')
     l.add_argument('results')
+    g = sub.add_parser('guarded')
+    g.add_argument('missing')
     o = sub.add_parser('runtime-ok')
     o.add_argument('scan')
     i = sub.add_parser('issue')
@@ -426,6 +463,8 @@ def main(argv):
         plan(args.data, args.server, args.plugin, args.mode)
     elif args.command == 'loadable':
         loadable(args.results)
+    elif args.command == 'guarded':
+        sys.exit(guarded_check(args.missing))
     elif args.command == 'runtime-ok':
         sys.exit(0 if runtime_ok(args.scan) else 1)
     elif args.command == 'issue':
