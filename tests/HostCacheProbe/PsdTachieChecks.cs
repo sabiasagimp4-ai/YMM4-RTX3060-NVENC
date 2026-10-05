@@ -102,7 +102,10 @@ internal static class PsdTachieChecks
             int frame = name == "inplace-layers" ? 0 : 32;
             test.Warm(frame);
             using var tracker = new KeyDependencyTracker(test.Fixture.Scene);
-            Check(tracker.TryCapture(frame, out var capture, out var reason), reason);
+            KeyCapture? capture = null;
+            string reason = string.Empty;
+            Check(SpinWait.SpinUntil(() => tracker.TryCapture(frame, out capture, out reason),
+                TimeSpan.FromSeconds(5)), "PSD settings capture did not finish keying: " + reason);
             using (capture)
             {
                 string oldModel = capture!.Model; long revision = tracker.Revision;
