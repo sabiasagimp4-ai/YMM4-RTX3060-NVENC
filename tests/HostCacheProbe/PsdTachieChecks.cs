@@ -99,7 +99,7 @@ internal static class PsdTachieChecks
         object eye = ((IEnumerable)eyes).Cast<object>().Single();
         if (name is "notify" or "inplace-offset" or "inplace-layers" or "settings-budget")
         {
-            int frame = name == "inplace-layers" ? 0 : 32;
+            const int frame = 32; // The active voice supplies AlwaysClose to the native PSD source.
             test.Warm(frame);
             using var tracker = new KeyDependencyTracker(test.Fixture.Scene);
             KeyCapture? capture = null;
