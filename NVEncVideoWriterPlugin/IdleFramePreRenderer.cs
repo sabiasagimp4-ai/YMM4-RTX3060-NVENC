@@ -408,7 +408,7 @@ internal static partial class IdleFramePreRenderer
             liveCapture = null;
             return false;
         }
-        if (liveCapture!.Model != cloneCapture!.Model || liveCapture.Key != cloneCapture.Key
+        if (!FrameRenderModelComparison.Matches(liveCapture!.Model, cloneCapture!.Model) || liveCapture.Key != cloneCapture.Key
             || !liveCapture.Validate(files: false) || !cloneCapture.Validate(files: false))
         {
             liveCapture.Dispose();
@@ -425,7 +425,7 @@ internal static partial class IdleFramePreRenderer
         KeyCapture liveCapture, KeyCapture cloneCapture)
     {
         if (token.IsCancellationRequested || liveCapture.Key != cloneCapture.Key
-            || liveCapture.Model != cloneCapture.Model || !liveCapture.Validate(files: false) || !cloneCapture.Validate(files: false)
+            || !FrameRenderModelComparison.Matches(liveCapture.Model, cloneCapture.Model) || !liveCapture.Validate(files: false) || !cloneCapture.Validate(files: false)
             || liveScene.ID != cloneScene.ID || liveScene.Timeline.ID != cloneScene.Timeline.ID
             || viewport.SceneId != cloneScene.ID || viewport.TimelineId != cloneScene.Timeline.ID)
             return false;

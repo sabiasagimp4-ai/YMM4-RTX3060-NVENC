@@ -98,6 +98,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Integration checks failed' }
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu
           if ($LASTEXITCODE -ne 0) { throw 'Pixel checks failed' }
+      - name: Independent host output / idle regressions and mutation controls
+        run: ./tools/ci/verify-host-output-idle.ps1 -HostDirectory $env:YMM4_DIR
       - name: GPU retention, invalidation and trace measurement (WARP)
         run: |
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR --preview-performance
