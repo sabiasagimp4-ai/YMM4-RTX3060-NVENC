@@ -79,3 +79,23 @@ PSD は 2 回目が速いものの確認だけで約 5.2 ms かかるため、�
 [GPU 配分の対応](GPU_BUDGET_REVIEW_2026-10-05.md) は #9 と後続 PR に反映。自動配分は dedicated VRAM の 1/2（OS 予算・余裕・利用者上限も同時適用）。旧設定の自動・2048 MiB だけを一度 -1 へ移し、専用 marker を保存する。手動設定と後から選び直した値は維持する。JSON からの移行・保存・再読込・再選択の検査を追加した。
 
 #13 の SHA task は ExecutionContext の flow を抑え、host の描画・readiness の状態を背景 task に持ち越さない。同期の待ちや host native object の背景呼び出しはしない。GPU とこの変更を含めた head の CI は完了後に PR に記録する。
+
+## GPU 変更を含む実装 head の確認
+
+GPU を含む #9〜#12 の通常 CI はそれぞれ [37285232309](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37285232309)、[37285307481](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37285307481)、[37285319474](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37285319474)、[37286061146](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37286061146) が成功。
+
+#13 の実装 head `6bb7b1dd996f764e62d0a4cfceec471dad179da8` の [CI 37286577932](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37286577932) も通常 3 ジョブ成功。移行の保存・再読込・再選択、既存の GPU 再訪・read-ahead・device lost・資源解放を含めて成功した。
+
+| head / fixture | OFF sample 1 / 2 ms | 2 回目 sample 1 / 2 ms | 2 回目 / 同じ sample の OFF |
+|---|---:|---:|---:|
+| #12・309 PNG | 2.02081 / 1.57715 | 1.50836 / 1.50743 | 0.746 / 0.956 |
+| #13・309 PNG | 1.26092 / 1.09140 | 1.03452 / 0.75189 | 0.820 / 0.689 |
+| #13・109 MiB PSD + 300 設定 | 4.19754 / 8.45567 | 2.01451 / 2.07750 | 0.480 / 0.246 |
+
+各 2 回とも animation は 900/900、PSD は 120/120 の hit と全バイト画素一致。GPU hit は 0。異なる job の OFF も変わるため、この追加結果も安定した実機の改善率の証明として扱わない。最終の文書 head の CI と再計測は PR #13 に追記し、文書更新のための再測定を繰り返さない。
+
+## レビューと取り込みの順序
+
+全件 Draft・未マージ、main への書込み・preview リリースは行っていない。#14 → #5 → #6 → #7 → #8 → #9 → #10 → #11 → #12 → #13 の順でレビューする。#14 は main からの独立修正、#5〜#13 は累積の main 宛 PR。#14 の修正は既存 #10 / #13 にも含まれるので、取り込んだ後の次の差分と重複を確認する。
+
+立ち絵の対応範囲は引き続き「一部」。表示区間内の idle、起動間のキャッシュ、多様な実プロジェクト・PSB・実機 GUI / 音声 / Present は今回保証しない。6 件のレビュー対応は、上記の修正・検査・判断理由・今後の課題として記録した。

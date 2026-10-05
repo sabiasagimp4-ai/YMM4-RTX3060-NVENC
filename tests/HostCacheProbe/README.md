@@ -44,3 +44,12 @@ dotnet run --project tests/HostCacheProbe -c Release "-p:YMM4DirPath=D:\YMM4\" -
 自作7layer PSDの画素、非表示／母音、設定通知、非通知Offset／Layersの実画素反例、共有sidecar、PSD上書き、時間切れ・部分失敗／取消、設定上限、CPU合成失敗と回復、最初の指紋より前のPSD上書き、アプリ全体のJSON設定の影響を独立STA／デバイス・各30秒以内で検査する。計測は2体・20voice・60秒15fps900frame。`SPEEDUP2C` の `cache_hits`／`ms_per_frame` と `SPEEDUP2C_PIXELS` を出す。referenceとcacheの全900frameを全byte比較し、readbackは時間に含めない。WARPの値をRTX3060の速度としない。
 
 アニメーション立ち絵の `--animation-tachie-check` は、120 frameでキャッシュのオン・オフを切り替える `output-lifetime` も検査する。通常描画と全byte一致し、元のhost command listが更新ごとに管理リストへ蓄積しないことを確認する。
+
+
+## Claude レビュー追加検査（2026-10-05）
+
+`--animation-tachie-large` は 309 PNG のフォルダーと 900 フレーム、`--psd-tachie-large` は各 109 MiB の生成 raw layered PSD と 300 アニメーション設定、120 フレームを使い、2 回目の Update+Draw 時間・hit・全バイトの画素一致を測る。各 2 回、専用 STA / device。GPU 保持 OFF / RAM 256 MiB / WARP。画素読み出しは 2 回目の時間に含めない。生成素材のみで、実機の GUI・音声・Present を測らない。
+
+立ち絵が表示区間外の先読みは 6 フレームの実 RAM hit と画素一致を追加。表示区間は見送りを検査する。animation はフォルダー時刻を戻した新部品を拒否し、PSD は 100 回の非通知編集を従来の fresh serializer と全値で照合、同値 JSON の再利用、A/B/A の復元を検査する。既存の遅延・失敗・上書き・古い正規化・外部 serializer defaults の検査は残す。
+
+固定の過去 commit を取る 8 手順は workflow_dispatch の measure_baselines=true の時だけ動く。上記の検査・大きな素材の測定は常時動く。PR #14 は main 独立の出力寿命・inactive random idle の regression と各修正の個別除去による失敗を tools/ci/verify-host-output-idle.ps1 で検査する。最終 head の CI・追加計測は各 PR に記録する。

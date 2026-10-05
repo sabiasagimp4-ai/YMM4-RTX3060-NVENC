@@ -4,6 +4,10 @@
 
 全計測はWindows CI・WARPです。RTX3060や実GUIの音声／Presentを含む速度ではありません。任意RTX jobは未選択のためskipであり、全通常job成功とは区別します。前後の数値は、下記の計測runの同じWindows jobで各2回得たものです。少数の観測から安定した実機性能を保証しません。詳しい条件と失敗の記録は [SPEEDUP_RESULTS_2026-10.md](SPEEDUP_RESULTS_2026-10.md)、実装仕様は [CACHE_BEHAVIOR.md](CACHE_BEHAVIOR.md)、ホスト監査は [HOST_CONTRACTS.md](HOST_CONTRACTS.md) にあります。
 
+## 2026-10-05 のレビュー対応
+
+[Claude レビュー対応（2026-10-05）](SPEEDUP_REVIEW_RESPONSE_2026-10-05.md) に、独立 PR #14、固定 commit の任意計測、表示区間外の先読み、309 PNG / 109 MiB PSD の計測と改善、VRAM 1/2 上限と旧既定の一度だけの移行、今後の課題を記録しました。最終 head の通常 CI と追加の実測は各 PR に記録します。以下の古い CI・表は当初の実装を比較した履歴です。
+
 ## 項目1: ボイスの埋め込みデータをハッシュにする
 
 - 状態: 完了
@@ -117,7 +121,7 @@
 
 ## 項目2b: 動く立ち絵
 
-- 状態: 一部（PNG・付属INIなし・Sessionキー、停止中先読み対象外）
+- 状態: 一部（PNG・付属INIなし・Sessionキー、立ち絵の表示区間のみ停止中先読み対象外）
 - ブランチ・PR: `codex/speedup-2b-animation-tachie`、[PR #12](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/pull/12)
 - 変更: 現在のsession／task／取消slotと公開済み音量sampleのbit一致を確認。部分終了や時間切れfallbackを保存せず、親へ未完成を伝播。全候補PNG・番号／母音部品の一覧と実sourceのINI保持状態・parts countを同期確認。ホスト契約・全記録済み基準を更新しました。
 - 検査: 8独立case（画素・非表示母音・timeout・残存INI・一覧変更・上書き・hook rollback・metadata上限）。別の計測で900frame×2のoff対cache全byte一致。[最終CI37244739478](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37244739478) 全通常job成功。
@@ -129,7 +133,7 @@
 | 2回目時間 | 1.052230／0.748328 ms/frame | 0.827060／0.820715 ms/frame | 短縮 | 安定した前後改善は未確認 |
 | 2回目／自身のoff | 1.055160／0.617762 | 0.837570／0.712560 | 正規化して短縮 | 約21%改善／15%悪化 |
 
-- 計画からの変更点: まばたきはホストの結果を起動中のSessionキーで保存。INI・動画・差分合成・group・表情同一layer・入れ子を対象外。音量計算2枠を再生へ残すためsceneのidle先読みは見送りました。
+- 計画からの変更点: まばたきはホストの結果を起動中のSessionキーで保存。INI・動画・差分合成・group・表情同一layer・入れ子を対象外。音量計算2枠を再生へ残すため、立ち絵の表示区間の idle 先読みを見送ります。表示区間外は複製から先読みし、追加した 6 フレームの検査で hit と全画素一致を確認しました。
 - 残った危険・未確認: 初回保存費用、実機速度、安定した前後改善は未確認。新設画素試験のexport透明背景対preview黒背景という比較誤りはPRで先に説明して修正し、900全byte・readiness・30秒上限を維持。失敗commitは再実行していません。2c基準CIでも30秒上限に達したため、PR #13で診断し、hostの元のoutputがcold frameごとに残る解放漏れを修正。120frameのcacheオン/オフ全byte一致とcommand list非増大が成功し、900frame保存は4.42／3.24秒で完了しました（CI37250668285）。
 - 利用者のPCで確かめてほしいこと: PNGのみ・INIなしで2回再生し「再利用」とtrace `timeline-update` Outcome `live/gpu/ram` を確認。`auxiliary-readiness` のComponent `lip-sync-published-value`、Outcome `ready/not-ready` を確認。未完成・部品追加・上書き後に保存されないか確認します。CLIは `SPEEDUP2B` のcache_hits／ms_per_frameと `SPEEDUP2B_PIXELS exact=true`。
 
@@ -150,8 +154,8 @@
 | 900frame画素比較 | 正常描画同士、各900一致 | off対cache、各900一致 | 全byte一致 | 達成 |
 | afterの初回900保存 | 対象外 | 4009.8563／2670.9473 ms | 30秒以内 | 達成、2回目時間に含めない |
 
-- 計画からの変更点: まばたきは起動中のSessionキーでホスト自身の結果を保持。音量計算2枠を再生へ残すため、PSDを含むsceneのidle先読みは対象外。sidecarの外部変更がホストの共有設定へ反映されない場合は、実際の共有オブジェクトを入力とします。未知module・group・入れ子・表情同一layer競合は拒否。実値検証を省かず、不変のAssembly名とPropertyInfoだけを再利用しました。PSD前のCIで見つかった元のhost output解放漏れをPR #13で修正しました。
-- 残った危険・未確認: afterは自身のoffより約36.8%／40.0%短い一方、直前の別runでは正規化が約2.5%悪化／31.5%改善でした。最新2回だけで安定した高速化を保証しません。小さい自作PSDに限る計測で、実プロジェクトの大きいPSD、PSB、RTX3060、GUI音声／Present、長時間使用は未確認。上書きやsource設定不一致は再起動まで対象外になり得ます。誤った新設fixtureの修正理由は先にPRへ記録し、結果文書にも残しました。同一の失敗commitの再実行はありません。
+- 計画からの変更点: まばたきは起動中のSessionキーでホスト自身の結果を保持。音量計算2枠を再生へ残すため、PSD 立ち絵の表示区間の idle 先読みは対象外。表示区間外は先読みします。sidecarの外部変更がホストの共有設定へ反映されない場合は、実際の共有オブジェクトを入力とします。未知module・group・入れ子・表情同一layer競合は拒否。実値の bounded な検査を維持し、設定 JSON は通知世代と全値の witness が一致する場合に再利用します。assembly の監査は新しい AssemblyLoad の世代でやり直します。読込済み bytes の SHA は背景で計算し、完了までは通常描画です。PSD前のCIで見つかった元のhost output解放漏れをPR #13で修正しました。
+- 残った危険・未確認: afterは自身のoffより約36.8%／40.0%短い一方、直前の別runでは正規化が約2.5%悪化／31.5%改善でした。最新2回だけで安定した高速化を保証しません。当初は小さい自作 PSD の計測でした。レビュー対応では生成した 109 MiB PSD と 300 個の設定も測定しました。実プロジェクトの多様な PSD、PSB、RTX3060、GUI 音声／Present、長時間使用は未確認です。上書きやsource設定不一致は再起動まで対象外になり得ます。誤った新設fixtureの修正理由は先にPRへ記録し、結果文書にも残しました。同一の失敗commitの再実行はありません。
 - 利用者のPCで確かめてほしいこと: PSD2体・20voiceを2回再生し、「再利用（同じ画像／GPU／RAM／ディスク）」「新規描画」「対象外」とp50/p95を比較。trace `timeline-update` のOutcome `live/gpu/ram`、`auxiliary-readiness` のComponent `lip-sync-published-value` とOutcome `ready/not-ready` を確認。目／口設定の変更・素材上書き・未完成描画が古い画面を保存しないか確認します。CLIの `--psd-tachie-check`／`--psd-tachie-measure` は `SPEEDUP2C` のcache_hits／ms_per_frame、`SPEEDUP2C_PIXELS exact=true`、`SPEEDUP2C_PHASE` のcold_warm_msを確認します。
 
 
@@ -159,5 +163,5 @@
 
 - 製品化: 1、2aの限定範囲、6、8、2b・2cの限定範囲。4は通知遅延で画素一致を守れず中止。5は内容一致した試作でも10ms台未達のため製品導入を中止。2a・2b・2cは対応範囲と実機未確認を含め「一部」と報告。
 - 先行レビュー修正 [PR #5](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/pull/5): layer順の曖昧性、採用直前検証、disk keyと画素checksum、計算待機cycle、providerのslot同一性、Session保存前検証、HEVC設定のportable検査。mainの進展を起点に修正済み。[最終CI37186362385](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37186362385) 全通常job成功。Session先読みのpurge漏れは項目8で追加修正しています。
-- マージの順番（利用者がレビュー後に行う場合）: **#5 → #6（1）→ #7（4）→ #8（2a）→ #9（6）→ #10（8）→ #11（5）→ #12（2b）→ #13（2c）**。全PRはmain宛の累積差分です。順に取り込んだ際は次PRの差分を再確認してください。こちらでは全件draft・未マージを維持します。
+- マージの順番（利用者がレビュー後に行う場合）: **#14（main 起点の独立修正）→ #5 → #6（1）→ #7（4）→ #8（2a）→ #9（6）→ #10（8）→ #11（5）→ #12（2b）→ #13（2c）**。#14 は main 起点の独立差分、#5〜#13 は main 宛の累積差分です。#14 の修正は #10 / #13 にも含まれるため、先行マージ後の差分・重複を再確認してください。順に取り込んだ際は次PRの差分を再確認してください。こちらでは全件draft・未マージを維持します。
 - 次にやるとよいこと: Claudeで各項目の境界とhost契約・採用直前検証をレビュー。利用者のRTX3060 PCで同じfixtureと実プロジェクトを測り、GUI応答・ドライバー・OS予算を確認。4／5を再開するなら、通知だけの安全性を仮定せず、同期検証と全文処理の費用を先に分離して調べてください。2b・2cの初回保存費用と対応外の経路は、画素一致を維持する検査から追加してください。
