@@ -7,6 +7,10 @@ on:
     paths: ['NVEncVideoWriterPlugin/**', 'tests/**', '.github/workflows/cache-development.yml']
   workflow_dispatch:
     inputs:
+      measure_baselines:
+        description: 'Measure historical fixed commits (requires their branches/commits to remain available)'
+        type: boolean
+        default: false
       rtx_check:
         description: 'Also run tools/rtx-check.ps1 -NoNvenc under Windows PowerShell 5.1 and PowerShell 7'
         type: boolean
@@ -87,6 +91,7 @@ jobs:
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --psd-tachie-check
           if ($LASTEXITCODE -ne 0) { throw 'PSD tachie checks failed' }
       - name: PSD tachie before and after (two bounded samples each, WARP)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
         run: |
           $before = Join-Path $env:RUNNER_TEMP 'psd-tachie-before'
           git fetch origin 0b10e2623fd30cc90c2d03cb10e77677eca4e65a
@@ -103,6 +108,7 @@ jobs:
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --psd-tachie-measure
           if ($LASTEXITCODE -ne 0) { throw 'PSD tachie measurement failed' }
       - name: Animation tachie before and after (two bounded samples each, WARP)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
         run: |
           $before = Join-Path $env:RUNNER_TEMP 'animation-tachie-before'
           git fetch origin 1fbf4c625ca9236fd60fd0b015990a0f87bf15cc
@@ -162,6 +168,7 @@ jobs:
             git worktree remove --force $before
           }
       - name: File lookups before the notification decision (two samples on the same runner)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
         run: |
           $before = Join-Path $env:RUNNER_TEMP 'file-lookups-before'
           git fetch origin fc09a371d713dc42136e892fc577997fe0b8576e
@@ -200,6 +207,7 @@ jobs:
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR --preview-performance
           if ($LASTEXITCODE -ne 0) { throw 'Preview performance checks failed' }
       - name: Simple tachie second-play measurements (two samples, WARP)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
         run: |
           $before = Join-Path $env:RUNNER_TEMP 'simple-tachie-before'
           git fetch origin 67b208027d85c5e169fd18313368a09fff347fb0
@@ -216,6 +224,7 @@ jobs:
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --simple-tachie-measure
           if ($LASTEXITCODE -ne 0) { throw 'Simple tachie measurements failed' }
       - name: First GPU revisit measurements (two samples, WARP)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
         run: |
           $before = Join-Path $env:RUNNER_TEMP 'gpu-first-revisit-before'
           git fetch origin 55e9a4762d1419a4c3f25d69033851f1514416df
@@ -232,6 +241,7 @@ jobs:
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu-first-revisit-measure
           if ($LASTEXITCODE -ne 0) { throw 'GPU first revisit measurement failed' }
       - name: Idle before and after measurements (two samples each, WARP)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
         run: |
           $before = Join-Path $env:RUNNER_TEMP 'idle-parallel-before'
           git fetch origin 30abd8cc1e4cbeb4dc95cab172cd4cff731871b9
@@ -248,6 +258,7 @@ jobs:
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --idle-parallel-measure
           if ($LASTEXITCODE -ne 0) { throw 'After idle rendering measurements failed' }
       - name: Single-item edit descriptions before and after (two samples each)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
         run: |
           $before = Join-Path $env:RUNNER_TEMP 'edit-description-before'
           git fetch origin 7ef3980d0b192c0d9009aa1984c226122ae06415
