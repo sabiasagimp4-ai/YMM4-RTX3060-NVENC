@@ -7,6 +7,10 @@ on:
     paths: ['NVEncVideoWriterPlugin/**', 'tests/**', '.github/workflows/cache-development.yml']
   workflow_dispatch:
     inputs:
+      measure_baselines:
+        description: 'Measure historical fixed commits (requires their branches/commits to remain available)'
+        type: boolean
+        default: false
       rtx_check:
         description: 'Also run tools/rtx-check.ps1 -NoNvenc under Windows PowerShell 5.1 and PowerShell 7'
         type: boolean
