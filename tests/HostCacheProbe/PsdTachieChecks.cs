@@ -17,7 +17,7 @@ internal static class PsdTachieChecks
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     internal static void Run(Assembly host)
     {
-        foreach (string name in new[] { "pixels", "hidden-vowels", "notify", "inplace-offset", "inplace-layers", "sidecar", "overwrite", "timeout", "settings-budget", "composite-failure", "preobserved-overwrite", "serializer-defaults", "idle-inactive" })
+        foreach (string name in new[] { "pixels", "hidden-vowels", "notify", "inplace-offset", "inplace-layers", "sidecar", "overwrite", "timeout", "settings-budget", "composite-failure", "preobserved-overwrite", "serializer-defaults", "idle-inactive", "snapshot-encoding" })
         {
             Exception? failure = null;
             using var finished = new ManualResetEventSlim();
@@ -124,6 +124,31 @@ internal static class PsdTachieChecks
         object settings = PsdTachieDependencies.Settings(test.Fixture.Characters[0]);
         object eyes = settings.GetType().GetProperty("EyeAnimations")!.GetValue(settings)!;
         object eye = ((IEnumerable)eyes).Cast<object>().Single();
+        if (name == "snapshot-encoding")
+        {
+            string Legacy()
+            {
+                using var output = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
+                using (var writer = new Newtonsoft.Json.JsonTextWriter(output) { Formatting = Newtonsoft.Json.Formatting.None })
+                    Newtonsoft.Json.JsonSerializer.Create().Serialize(writer, settings);
+                return output.ToString();
+            }
+            for (int edit = 0; edit < 100; edit++)
+            {
+                eye.GetType().GetProperty("Offset")!.SetValue(eye, edit % 3 == 0 ? -0.0 : edit / 3.0);
+                eye.GetType().GetProperty("Interval")!.SetValue(eye, edit / 7.0);
+                eye.GetType().GetProperty("Layers")!.SetValue(eye, ImmutableList.Create("i1", "日本語／😀 " + edit));
+                string snapshot = PsdTachieDependencies.Snapshot(settings);
+                Check(Newtonsoft.Json.Linq.JToken.DeepEquals(Newtonsoft.Json.Linq.JToken.Parse(snapshot), Newtonsoft.Json.Linq.JToken.Parse(Legacy())),
+                    "Captured PSD encoding omitted or rewrote an actual property");
+                Check(ReferenceEquals(snapshot, PsdTachieDependencies.Snapshot(settings)), "Unchanged PSD settings were serialized again");
+            }
+            eye.GetType().GetProperty("Offset")!.SetValue(eye, 1.0); string a = PsdTachieDependencies.Snapshot(settings);
+            eye.GetType().GetProperty("Offset")!.SetValue(eye, 2.0); string b = PsdTachieDependencies.Snapshot(settings);
+            eye.GetType().GetProperty("Offset")!.SetValue(eye, 1.0); string restored = PsdTachieDependencies.Snapshot(settings);
+            Check(a != b && restored == a, "Non-notifying A/B/A edits left a stale serialized witness");
+            return;
+        }
         if (name == "serializer-defaults")
         {
             string before = PsdTachieDependencies.Snapshot(settings);

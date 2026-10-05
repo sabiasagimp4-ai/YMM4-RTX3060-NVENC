@@ -81,9 +81,9 @@ internal static class AnimationTachieDependencies
 
     // Image lists and INI existence are read synchronously. Watcher delivery can lag a host file read.
     // The first list is never replaced: an already-created native source can retain its old parts count.
-    internal static bool Listing(string path, out string[] files, out int count) => Listing(path, out files, out count, null);
+    internal static bool Listing(string path, out string[] files, out int count) => ListingCore(path, out files, out count);
 
-    private static bool Listing(string path, out string[] files, out int count, IReadOnlyDictionary<string, string[]>? inventories)
+    private static bool ListingCore(string path, out string[] files, out int count)
     {
         files = []; count = 0;
         if (!Path.IsPathFullyQualified(path) || !Path.GetExtension(path).Equals(".png", StringComparison.OrdinalIgnoreCase)
@@ -92,15 +92,17 @@ internal static class AnimationTachieDependencies
         if (changedListings.ContainsKey(path)) return false;
         if (!File.Exists(path)) { if (firstListings.ContainsKey(path)) changedListings.TryAdd(path, 0); return false; }
         string directory = Path.GetDirectoryName(path)!, stem = Path.GetFileNameWithoutExtension(path);
-        IEnumerable<string> candidates = inventories?.TryGetValue(directory, out var inventory) == true
-            ? inventory : Directory.EnumerateFiles(directory, stem + "*");
+        // Query only this native part's possible names, synchronously on every validation.
+        // A directory timestamp can be restored or delayed; it never authorizes reuse.
+        string[] candidates = Directory.EnumerateFiles(directory, stem + "*").Take(16385).ToArray();
+        if (candidates.Length > 16384) return false;
         var list = candidates.Where(file =>
         {
             string name = Path.GetFileNameWithoutExtension(file), suffix = name.StartsWith(stem + ".", StringComparison.OrdinalIgnoreCase) ? name[(stem.Length + 1)..].ToLowerInvariant() : "";
             return name.Equals(stem, StringComparison.OrdinalIgnoreCase) || suffix is "a" or "i" or "u" or "e" or "o"
                 || suffix.Length != 0 && suffix.All(char.IsAsciiDigit);
         }).Take(1025).Select(Path.GetFullPath).Order(StringComparer.OrdinalIgnoreCase).ToArray();
-        if (list.Length > 1024 || list.Any(file => !Path.GetExtension(file).Equals(".png", StringComparison.OrdinalIgnoreCase)))
+        if (list.Length > 1024 || list.Distinct(StringComparer.OrdinalIgnoreCase).Count() != list.Length || list.Any(file => !Path.GetExtension(file).Equals(".png", StringComparison.OrdinalIgnoreCase)))
         { if (firstListings.ContainsKey(path)) changedListings.TryAdd(path, 0); return false; }
         string listing = string.Join("\n", list);
         if (!firstListings.TryGetValue(path, out string? first))
@@ -137,24 +139,11 @@ internal static class AnimationTachieDependencies
             if (!(ReadinessInstalled?.Invoke() == true) || timelineSource.GetType().FullName != "YukkuriMovieMaker.Player.Video.TimelineSource") return false;
             var resources = timelineSource.GetType().GetField("timelineResources", Instance)?.GetValue(timelineSource) as IDictionary;
             if (resources is null) return false;
-            var inventories = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
-            // One fresh directory enumeration serves parts that share a folder, without deferring validation.
-            foreach (var item in active)
-            {
-                if (!witnesses.TryGetValue(item, out var witness)) return false;
-                foreach (string directory in witness.Paths.Select(Path.GetDirectoryName).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase))
-                {
-                    if (inventories.ContainsKey(directory)) continue;
-                    string[] inventory = Directory.EnumerateFiles(directory).Take(16385).Select(Path.GetFullPath).ToArray();
-                    if (inventory.Length > 16384 || inventory.Distinct(StringComparer.OrdinalIgnoreCase).Count() != inventory.Length) return false;
-                    inventories.Add(directory, inventory);
-                }
-            }
             var verifiedCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             bool CheckListing(string path, out int count)
             {
                 if (verifiedCounts.TryGetValue(path, out count)) return true;
-                if (!Listing(path, out _, out count, inventories)) return false;
+                if (!Listing(path, out _, out count)) return false;
                 verifiedCounts.Add(path, count); return true;
             }
             foreach (var item in active)
