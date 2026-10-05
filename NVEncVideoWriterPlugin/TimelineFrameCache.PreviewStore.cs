@@ -152,6 +152,25 @@ internal static partial class TimelineFrameCache
         return true;
     }
 
+    // The host releases only its current output in Update. Restore the original first so that
+    // the shown copy does not leave one native command list in its collector on every miss/bypass.
+    // Hits keep their replacement; only the branch about to run the host calls this.
+    private static void RestoreHostOutputBeforeUpdate(object source)
+    {
+        if (!sources.TryGetValue(source, out var state)) return;
+        lock (cacheGate)
+        {
+            if (state.HostOutput is not { NativePointer: not 0 } host
+                || state.LastOutput is not { NativePointer: not 0 } shown
+                || !ReferenceEquals(outputField.GetValue(source), shown)) return;
+            outputField.SetValue(source, host);
+            var collector = (DisposeCollector)collectorField.GetValue(source)!;
+            collector.Remove(shown);
+            shown.Dispose();
+            state.Released();
+        }
+    }
+
     // Before the player draws (its Draw prefix, on the render thread): a copy shown by ShowRendered is exact only for
     // the view it was drawn for. After a zoom, pan or resize the host's output is shown again, as without the copy.
     private static void ShowHostOutputIfViewChanged(object source, SourceState state, PreviewViewport viewport)

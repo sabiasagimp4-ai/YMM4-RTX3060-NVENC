@@ -419,6 +419,7 @@ internal static partial class TimelineFrameCache
         updateMeasurements.AddOrUpdate(__instance, __state);
         __state.RunsHost = CachePrefix(__instance, time, usage, out var pending);
         __state.Pending = pending;
+        if (__state.RunsHost) RestoreHostOutputBeforeUpdate(__instance);
         __state.HostStarted = PreviewPerformance.Timestamp;
         return __state.RunsHost;
     }

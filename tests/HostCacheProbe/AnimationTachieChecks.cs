@@ -17,7 +17,7 @@ internal static class AnimationTachieChecks
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     internal static void Run(Assembly host)
     {
-        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback", "metadata-budget" })
+        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback", "metadata-budget", "output-lifetime" })
         {
             Exception? failure = null;
             using var finished = new ManualResetEventSlim();
@@ -55,6 +55,24 @@ internal static class AnimationTachieChecks
         }
         TimelineFrameCache.Enabled = false; test.Update(0);
         if (name == "timeout") { CheckTimeout(test, host); return; }
+        if (name == "output-lifetime")
+        {
+            int[] samples = Enumerable.Range(0, 120).ToArray();
+            var normal = samples.Select(frame => { test.Update(frame); return test.Pixels(); }).ToArray();
+            test.Warm(0);
+            var collector = (DisposeCollector)test.Source.GetType().GetField("disposer", Instance)!.GetValue(test.Source)!;
+            var entries = (IList)collector.GetType().GetField("disposables", Instance)!.GetValue(collector)!;
+            for (int i = 0; i < samples.Length; i++)
+            {
+                // Include a normal-render bypass while a shown copy exists, and then resume caching.
+                TimelineFrameCache.Enabled = i % 11 != 0;
+                test.Update(samples[i]); TimelineFrameCache.CompletePendingStore(test.Source);
+                Check(test.Pixels().SequenceEqual(normal[i]), "Output lifetime changed pixels at " + i);
+                Check(entries.Cast<object>().OfType<Vortice.Direct2D1.ID2D1CommandList>().Count() <= 2,
+                    "Original host command lists accumulated across preview updates");
+            }
+            return;
+        }
         if (name == "metadata-budget")
         {
             test.Warm(0);
