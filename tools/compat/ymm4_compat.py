@@ -59,6 +59,13 @@ def major(version):
     return int(match.group(1)) if match else None
 
 
+def plugin_label(plugin):
+    """A build of a commit that is not its release tag carries "+<commit>" (the workflow's plan step): such a build
+    is not the release of that version, which may not behave the same on older YMM4 versions."""
+    version, _, commit = (plugin or '?').partition('+')
+    return f'{version} の後の開発版 {commit}' if commit else version
+
+
 def runtime_check(scan):
     """(ok, reason): can the .NET runtime this YMM4 starts load the plugin's target framework."""
     runtime = scan.get('runtime')
@@ -297,7 +304,7 @@ def detail_table(data):
     for version, (load, nvenc, cache, note) in rows(data):
         entry = versions[version]
         steps = '・'.join(name for name, key in (('照合', 'scan'), ('起動', 'start'), ('検査', 'tests')) if entry.get(key))
-        checked = f"{entry.get('checked', '?')}、{entry.get('plugin', '?')}、{steps}" + (f"（[記録]({entry['run']})）" if entry.get('run') else '')
+        checked = f"{entry.get('checked', '?')}、{plugin_label(entry.get('plugin'))}、{steps}" + (f"（[記録]({entry['run']})）" if entry.get('run') else '')
         api = (entry.get('verdict') or {}).get('referenceApi')
         if api:
             note += f'（参考: プラグインが使う YMM4 の API のうち {api} 個がこの版にありません）'
@@ -307,7 +314,7 @@ def detail_table(data):
 
 def render(data_path, readme_path, doc_path):
     data = load(data_path)
-    plugin, updated = data.get('plugin', '?'), data.get('updated', '?')
+    plugin, updated = plugin_label(data.get('plugin')), data.get('updated', '?')
     count = len(data.get('versions', {}))
     readme_block = '\n'.join([
         BEGIN,
@@ -412,7 +419,7 @@ def issue(data_path, version):
     load_, nvenc, cache, note = cells(verdict)
     tests = entry.get('tests') or {}
     word = {'success': '成功', 'failure': '**失敗**', 'skipped': '未実行', None: '未実行'}
-    print(f'YMM4 Lite **{version}** を、プラグイン {entry["plugin"]}（{entry["commit"][:7]}）で自動で確かめました。')
+    print(f'YMM4 Lite **{version}** を、プラグイン {plugin_label(entry["plugin"])}（{entry["commit"][:7]}）で自動で確かめました。')
     print()
     print('| 項目 | 結果 |')
     print('| --- | --- |')

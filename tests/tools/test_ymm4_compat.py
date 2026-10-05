@@ -132,6 +132,11 @@ class TableChecks(unittest.TestCase):
             (results / '4.56.1.0.start.json').unlink()
             compat.merge(str(results), str(data), '0.2.0', 'abcdef1', 'https://run2', '2026-10-06')
             self.assertEqual('ok', json.loads(data.read_text(encoding='utf-8'))['versions']['4.56.1.0']['verdict']['load'])
+            # A build that is not the release of its version says so.
+            compat.merge(str(results), str(data), '0.2.0+1720188', '1720188', 'https://run3', '2026-10-07')
+            compat.render(str(data), str(readme), str(d / 'doc.md'))
+            self.assertIn('プラグイン 0.2.0 の後の開発版 1720188 で', readme.read_text(encoding='utf-8'))
+            self.assertIn('2026-10-07、0.2.0 の後の開発版 1720188、', (d / 'doc.md').read_text(encoding='utf-8'))
 
     def test_plan_selects_new_and_recheck_after_plugin_change(self):
         with tempfile.TemporaryDirectory() as directory:

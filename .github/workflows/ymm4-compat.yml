@@ -75,6 +75,9 @@ jobs:
           # The read builds are checked too, also one the update server does not list.
           grep -o 'new("[0-9.]*",' NVEncVideoWriterPlugin/HostKnownBuilds.cs | grep -o '[0-9][0-9.]*[0-9]' >> server.txt
           plugin=$(sed -n 's:.*<InformationalVersion>\(.*\)</InformationalVersion>.*:\1:p' NVEncVideoWriterPlugin/NVEncVideoWriterPlugin.csproj)
+          # Only the commit of the release tag is that release; any other commit is a development build after it.
+          tagged=$(git ls-remote --tags origin | awk -v t="refs/tags/v$plugin" '$2 == t || $2 == t "^{}" {print $1}')
+          printf '%s\n' $tagged | grep -qx "$GITHUB_SHA" || plugin="$plugin+${GITHUB_SHA::7}"
           python3 tools/compat/ymm4_compat.py plan "$DATA" server.txt --plugin "$plugin" --mode $MODE > targets.txt
           echo "$(wc -l < targets.txt) to check with plugin $plugin:"; cat targets.txt
           echo "plugin=$plugin" >> "$GITHUB_OUTPUT"
