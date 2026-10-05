@@ -4,9 +4,13 @@
 
 ## 対応版の判断
 
-プラグインはビルドに使ったYMM4の `YukkuriMovieMaker.dll`（アセンブリの版はYMM4の版と同じ）を参照する。それより古いYMM4は、プラグインを読み込まずに「必要なファイルを読み込めませんでした」（`YukkuriMovieMaker, Version=<参照した版>`）と表示する。リリースは4.56.1.0でビルドするので、利用できるのは4.56.1.0以降（4.47.0.0・4.50.0.0・4.56.0.1で起動して確認、2026-10-05）。古い版にも対応させるには、古い版のDLLでビルドし、その版にないAPIを使わない必要がある（`ymm4-compat` の結果に、版ごとの足りないAPIの数を記録している）。
+プラグインは参照する `YukkuriMovieMaker.dll` の版（YMM4の版と同じ）より古いYMM4では読み込まれない。YMM4は「必要なファイルを読み込めませんでした」（`YukkuriMovieMaker, Version=<参照した版>`）と表示する（4.56.1.0でビルドしたものを4.47.0.0・4.50.0.0・4.56.0.1で起動して確認、2026-10-05）。
 
-`HostIntegration` の既知ビルドは配置・MVID・SHA-256を確認する。4.56.1.0が全機能の基準で、4.55.1.1は一部機能のみ（4.56.1.0でビルドしたリリースは、上の理由で4.55.1.1では読み込まれない）。NVENC出力は `HostExportScope` のメソッド／field構造が一致する版で接続し、出力フックの失敗はキャッシュ全体を停止しない。
+そのため、プラグインはコードを読んだ4.56.1.0でビルドし、ビルドの後に参照の版を対応する最も古い版（`Ymm4MinimumVersion`、4.47.0.0）へ下げる（`NVEncVideoWriterPlugin/HostReferenceVersion.targets`、`tools/HostReference`）。4.47.0.0は.NET 10で動く最初の版で、4.46以前は.NET 8・9なので.NET 10のプラグインを読み込めない。
+
+その版にないメンバーは `HostApi` を通してだけ使う。存在を確かめてから、そのメンバーだけを名指す別のメソッドで呼ぶ（名指すメソッドはJITのときに失敗するため）。YMM4はプラグインの全部の型を読み込むので、その版にないinterfaceを実装する型は置かない。`IVideoFileWriter3`（4.54）は `GpuWriterProxy`（DispatchProxy）が実行時に実装し、それより前の版にはGPUフレームを受ける `IVideoFileWriter2` として書き込みクラスを渡す。CI（cache-development）は、最も古い版に対してプラグインの全型が読み込めること（HostLoadChecks）と、足りないメンバーが `tools/compat/guarded-host-apis.txt` に挙げたものだけであること（`HostFingerprint api`）を確かめる。新しいメンバーを使うときは `HostApi` に加え、この一覧へ足す。
+
+`HostIntegration` の既知ビルドは配置・MVID・SHA-256を確認する。4.56.1.0が全機能の基準で、4.55.1.1は一部機能のみ。NVENC出力は `HostExportScope` のメソッド／field構造が一致する版で接続し、出力フックの失敗はキャッシュ全体を停止しない。
 
 未知版のキャッシュは `HostContracts`／`HostFingerprint` が前提コードを機能ごとに照合する。`core`、`preview`、`selection-rects`、`wrapped-sources`、`ruler-bars`、`decoder:<assembly>` に依存関係があり、不一致の機能を通常描画へ落とす。照合成功は記録した前提との一致であり、新版全体の実使用保証ではない。
 
