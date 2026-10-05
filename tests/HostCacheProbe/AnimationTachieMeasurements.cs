@@ -191,6 +191,7 @@ internal static class AnimationTachieMeasurements
             }
             {
                 Measure("off", false, repeat);
+                var phase = Stopwatch.StartNew();
                 var reference = new byte[AnimationTachieFixture.Frames][];
                 for (int frame = 0; frame < reference.Length; frame++)
                 {
@@ -201,9 +202,12 @@ internal static class AnimationTachieMeasurements
                     Check(reference[frame].Any(value => value != 0), "Animation reference was empty");
                 }
                 Check(reference.Any(pixels => !pixels.SequenceEqual(reference[0])), "Animated eye or mouth never changed pixels");
+                Console.WriteLine($"SPEEDUP2B_PHASE repeat={repeat}; reference_ms={phase.Elapsed.TotalMilliseconds:R}");
+                phase.Restart();
                 TimelineFrameCache.Enabled = true; TimelineFrameCache.Clear();
                 for (int frame = 0; frame < AnimationTachieFixture.Frames; frame++)
                 { Update(frame); Draw(); TimelineFrameCache.CompletePendingStore(source); }
+                Console.WriteLine($"SPEEDUP2B_PHASE repeat={repeat}; cold_warm_ms={phase.Elapsed.TotalMilliseconds:R}");
                 Measure("second-play", true, repeat);
                 for (int frame = 0; frame < reference.Length; frame++)
                 {

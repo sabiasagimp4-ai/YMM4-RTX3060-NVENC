@@ -26,6 +26,7 @@ internal static class AnimationTachieDependencies
     private static readonly ConcurrentDictionary<string, string> firstListings = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object listingGate = new();
     private static long listingCharacters;
+    private static readonly ConcurrentDictionary<Type, (PropertyInfo Blend, PropertyInfo Opacity, PropertyInfo PlaceOn)> configAccess = new();
     private const long MaximumListingCharacters = 8L << 20; // 16 MiB of UTF-16 listing content, besides bounded table metadata.
 
     internal static bool Verified(Type? plugin) => plugin?.FullName == PluginName
@@ -148,9 +149,16 @@ internal static class AnimationTachieDependencies
                     inventories.Add(directory, inventory);
                 }
             }
+            var verifiedCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            bool CheckListing(string path, out int count)
+            {
+                if (verifiedCounts.TryGetValue(path, out count)) return true;
+                if (!Listing(path, out _, out count, inventories)) return false;
+                verifiedCounts.Add(path, count); return true;
+            }
             foreach (var item in active)
             {
-                if (!witnesses.TryGetValue(item, out var witness) || witness.Paths.Any(path => !Listing(path, out _, out _, inventories))
+                if (!witnesses.TryGetValue(item, out var witness) || witness.Paths.Any(path => !CheckListing(path, out _))
                     || resources[item] is not { } effected) return false;
                 var coreSource = effected.GetType().GetProperty("Source", Instance)?.GetValue(effected);
                 if (coreSource?.GetType().FullName != "YukkuriMovieMaker.Player.Video.Items.TachieSource"
@@ -164,15 +172,17 @@ internal static class AnimationTachieDependencies
                 {
                     total++;
                     var config = layer.GetType().GetProperty("Config")!.GetValue(layer)!;
-                    if ((int)config.GetType().GetProperty("blend")!.GetValue(config)! != 0
-                        || (double)config.GetType().GetProperty("opacity")!.GetValue(config)! != 100
-                        || !string.IsNullOrWhiteSpace((string?)config.GetType().GetProperty("placeon")!.GetValue(config))) return false;
+                    var access = configAccess.GetOrAdd(config.GetType(), static type =>
+                        (type.GetProperty("blend")!, type.GetProperty("opacity")!, type.GetProperty("placeon")!));
+                    if ((int)access.Blend.GetValue(config)! != 0
+                        || (double)access.Opacity.GetValue(config)! != 100
+                        || !string.IsNullOrWhiteSpace((string?)access.PlaceOn.GetValue(config))) return false;
                 }
                 if (total != 13) return false;
                 foreach (string part in new[] { "eye", "mouth" })
                 {
                     if (native.GetType().GetField(part + "File", Instance)!.GetValue(native) is string path && !string.IsNullOrEmpty(path)
-                        && (!Listing(path, out _, out int count, inventories) || (int)native.GetType().GetField(part + "PartsCount", Instance)!.GetValue(native)! != count)) return false;
+                        && (!CheckListing(path, out int count) || (int)native.GetType().GetField(part + "PartsCount", Instance)!.GetValue(native)! != count)) return false;
                 }
             }
             return true;
