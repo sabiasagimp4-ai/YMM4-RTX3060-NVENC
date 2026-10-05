@@ -160,6 +160,10 @@ jobs:
             if python3 tools/compat/ymm4_compat.py runtime-ok "results/$v.scan.json"; then echo "$v" >> loadable.txt; fi
             echo "$v $(cat "results/$v.scan.json")"
           done
+          # (temporary) the folders of the newest target and their sizes
+          v=$(echo $TARGETS | cut -d' ' -f1)
+          tools/ci/fetch-ymm4.sh manifest "$v" | jq -r '.Files[] | [.File, .Size] | @tsv' \
+            | awk -F'\t' '{ n = index($1, "\\"); d = n ? substr($1, 1, n - 1) : "(top)"; s[d] += $2; c[d]++ } END { for (d in s) printf "%8.1f MB %5d files  %s\n", s[d] / 1048576, c[d], d }' | sort -rn
       - id: groups
         run: |
           # Oldest first, in up to two groups, each checked in one folder.

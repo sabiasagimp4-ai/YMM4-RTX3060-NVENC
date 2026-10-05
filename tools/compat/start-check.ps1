@@ -9,7 +9,6 @@ param(
     [int] $TimeoutSeconds = 150
 )
 $ErrorActionPreference = 'Stop'
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 Add-Type @'
 using System;
 using System.Collections.Generic;
@@ -24,6 +23,14 @@ public static class StartWin
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr parent, EnumProc f, IntPtr p);
+    // The texts of a message box: its title, then each child (the message and the buttons), as "Class: text".
+    public static string Describe(IntPtr h)
+    {
+        var parts = new List<string> { Text(h) };
+        EnumChildWindows(h, (c, p) => { var t = Text(c); if (t.Length != 0) parts.Add(Class(c) + ": " + t); return true; }, IntPtr.Zero);
+        return string.Join(" | ", parts);
+    }
     public static List<IntPtr> Windows(uint pid)
     {
         var list = new List<IntPtr>();
@@ -34,10 +41,8 @@ public static class StartWin
     public static string Class(IntPtr h) { var s = new StringBuilder(256); GetClassName(h, s, 256); return s.ToString(); }
 }
 '@
-$ae = [System.Windows.Automation.AutomationElement]
 # Windows PowerShell reads this file in the system code page: non-ASCII text is written as escapes.
 $aboutTitle = [regex]::Unescape('^About|\u30D0\u30FC\u30B8\u30E7\u30F3\u60C5\u5831')
-$scope = [System.Windows.Automation.TreeScope]
 
 # Install the plugin (every file of the package) and answer YMM4's first-start questions in its settings.
 $target = Join-Path $HostDir 'user\plugin\YMM4Rtx3060Nvenc'
@@ -69,13 +74,10 @@ try {
             if (-not $seen.ContainsKey($key)) { $seen[$key] = $true; $result.windows.Add($key); Write-Output "window: $key" }
             if ($class -like 'HwndWrapper*' -and $title -match '^YukkuriMovieMaker v') { $result.mainWindow = $true }
             if ($class -eq '#32770') {
-                # A message box: keep its text (plugin load errors are shown this way), then answer No / close it.
-                $texts = $ae::FromHandle($handle).FindAll($scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition ($ae::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text))) |
-                    ForEach-Object { $_.Current.Name } | Where-Object { $_ }
-                $text = "$title :: $(@($texts) -join ' / ')"
-                if (-not $result.dialogs.Contains($text)) { $result.dialogs.Add($text); Write-Output "dialog: $text" }
-                [StartWin]::PostMessage($handle, 0x0111, [IntPtr]7, [IntPtr]::Zero) | Out-Null   # WM_COMMAND, IDNO
-                [StartWin]::PostMessage($handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null # WM_CLOSE
+                # A message box (plugin load errors are shown this way): keep its texts. It is left open: which answer
+                # a box needs is not known here, and answering one can end YMM4 or start its updater.
+                $text = [StartWin]::Describe($handle)
+                if ($text -and -not $result.dialogs.Contains($text)) { $result.dialogs.Add($text); Write-Output "dialog: $text" }
             } elseif ($class -like 'HwndWrapper*' -and $title -match $aboutTitle) {
                 [StartWin]::PostMessage($handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
             }
