@@ -35,11 +35,14 @@ internal static class FrameRenderModelComparison
                 { resourceDepth = -1; continue; }
                 if (reader.TokenType != System.Text.Json.JsonTokenType.String || reader.CurrentDepth != resourceDepth + 1)
                     throw new InvalidDataException("描画記述の同一性情報を確認できません。");
-                if (reader.GetString()!.StartsWith("identity://", StringComparison.Ordinal))
+                string resource = reader.GetString()!;
+                string? scheme = new[] { "identity://", "animation-blink-session://", "psd-blink-session://" }
+                    .FirstOrDefault(prefix => resource.StartsWith(prefix, StringComparison.Ordinal));
+                if (scheme is not null)
                 {
                     int start = checked((int)reader.TokenStartIndex);
                     output.Write(bytes.AsSpan(copied, start - copied));
-                    output.Write("\"identity://[object identity]\""u8);
+                    output.Write(Encoding.UTF8.GetBytes("\"" + scheme + "[object identity]\""));
                     copied = checked((int)reader.BytesConsumed);
                 }
             }

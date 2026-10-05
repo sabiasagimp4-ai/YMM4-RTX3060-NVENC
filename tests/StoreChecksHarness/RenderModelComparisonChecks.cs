@@ -23,6 +23,14 @@ internal static class RenderModelComparisonChecks
         Check(!FrameRenderModelComparison.Matches(model, model.Replace("\"Format\":3", "\"Format\":4")), "Unknown model version was accepted");
         Check(!FrameRenderModelComparison.Matches(model, "{broken"), "Malformed model was accepted");
         Check(!FrameRenderModelComparison.Matches(model, model.Replace("[\"identity://1\"]", "[12]")), "Non-string resources were accepted");
+        foreach (string scheme in new[] { "animation-blink-session://", "psd-blink-session://" })
+        {
+            string a = "{\"Format\":3,\"Resources\":[\"" + scheme + "live\"],\"Nested\":{\"Resources\":[\"" + scheme + "live\"]}}";
+            string b = a.Replace(scheme + "live\"],\"Nested", scheme + "clone\"],\"Nested");
+            Check(FrameRenderModelComparison.Matches(a, b), "Inactive tachie session prevented clone comparison");
+            Check(!FrameRenderModelComparison.Matches(a, b.Replace("live", "other")), "Nested session was ignored");
+            Check(!FrameRenderModelComparison.Matches(a, b.Replace(scheme, "identity://")), "Resource kind was ignored");
+        }
         Console.WriteLine("Clone model comparison: only root identity values differ; numeric precision, text, nested/other resources and counts remain exact.");
     }
     private static void Check(bool condition, string message)

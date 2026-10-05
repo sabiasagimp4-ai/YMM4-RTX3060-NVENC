@@ -30,6 +30,11 @@ internal static class Program
         bool unread = args.Contains("--unread");
         bool known = HostIntegration.VerifyHost(host, out var hostReason);
         if (!unread) Check(known, "Host binary verification failed: " + hostReason);
+        if (args.Contains("--animation-tachie-large"))
+        {
+            AnimationTachieMeasurements.Run(host, large: true);
+            return 0;
+        }
         if (args.Contains("--animation-tachie-check"))
         {
             AnimationTachieChecks.Run(host);

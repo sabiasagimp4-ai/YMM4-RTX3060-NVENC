@@ -241,6 +241,10 @@ jobs:
         run: |
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --animation-tachie-check
           if ($LASTEXITCODE -ne 0) { throw 'Animation tachie checks failed' }
+      - name: Large animation tachie second playback and exact pixels (309 PNG parts)
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --animation-tachie-large
+          if ($LASTEXITCODE -ne 0) { throw 'Large animation tachie measurement/checks failed' }
       - name: Animation tachie before and after (two bounded samples each, WARP)
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
         run: |
