@@ -24,3 +24,6 @@ foreach ($case in $cases) {
         [System.IO.File]::WriteAllText((Join-Path $pwd $case.Path), $original)
     }
 }
+# The last dotnet process is an intentionally failing mutation. Do not pass its accepted exit code
+# to the Actions pwsh wrapper (which checks LASTEXITCODE after this script returns).
+$global:LASTEXITCODE = 0
