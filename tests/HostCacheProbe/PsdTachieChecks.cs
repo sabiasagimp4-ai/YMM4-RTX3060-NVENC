@@ -295,7 +295,23 @@ internal static class PsdTachieChecks
             return;
         }
         int[] frames = [0, 29, 30, 31, 35, 40, 45, 50, 59, 60, 74, 89, 90, 104, 119, 120, 149, 150];
-        var reference = frames.ToDictionary(frame => frame, frame => { test.Update(frame); return test.Pixels(); });
+        // The host draws a closed mouth when the volume is not published in time (2.5 seconds on a thread with a
+        // Dispatcher; the first calculation is cold), and the cache never stores such a frame: redraw the reference.
+        var voices = test.Fixture.Timeline.Items.OfType<VoiceItem>().ToArray();
+        var budget = Stopwatch.StartNew();
+        var unpublished = new HashSet<int>();
+        var reference = frames.ToDictionary(frame => frame, frame =>
+        {
+            var time = test.Fixture.Timeline.VideoInfo.GetTimeFrom(frame);
+            bool speaking = voices.Any(voice => frame >= voice.Frame && frame < voice.Frame + voice.Length);
+            test.Update(frame);
+            while (speaking && !FrameRenderReadiness.WasLastUpdateReady(test.Source, time) && budget.Elapsed < TimeSpan.FromSeconds(10))
+            {
+                Thread.Sleep(10); test.Update(frame);
+            }
+            if (speaking && !FrameRenderReadiness.WasLastUpdateReady(test.Source, time)) unpublished.Add(frame);
+            return test.Pixels();
+        });
         Check(reference.Values.Any(value => !value.SequenceEqual(reference[30])), "PSD mouth never changed pixels");
         if (name == "hidden-vowels") Check(!reference[29].SequenceEqual(reference[30]) && !reference[35].SequenceEqual(reference[40]),
             "PSD no-speech visibility or vowel mouth never changed");
@@ -305,7 +321,8 @@ internal static class PsdTachieChecks
             bool ready = PsdTachieDependencies.SafeSource(test.Source, test.Fixture.Scene, frame);
             if (name == "hidden-vowels" && !ready) { TimelineFrameCache.Enabled = true; test.Update(frame); }
             else test.Warm(frame);
-            Check(test.Pixels().SequenceEqual(reference[frame]), "PSD cached pixels differ at " + frame);
+            Check(test.Pixels().SequenceEqual(reference[frame]), "PSD cached pixels differ at " + frame
+                + (unpublished.Contains(frame) ? " (the ordinary reference never got a published volume)" : string.Empty));
         }
         using var idleTracker = new KeyDependencyTracker(test.Fixture.Scene); int rendered = 0;
         var result = IdleFramePreRenderer.PrimeLiveFrame(idleTracker, test.Fixture.Scene, test.Source, _ => rendered++,
