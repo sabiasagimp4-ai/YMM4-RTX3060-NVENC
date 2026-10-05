@@ -54,6 +54,10 @@ dotnet run --project tests/HostCacheProbe -c Release "-p:YMM4DirPath=D:\YMM4\" -
 
 固定の過去 commit を取る 8 手順は workflow_dispatch の measure_baselines=true の時だけ動く。上記の検査・大きな素材の測定は常時動く。PR #14 は main 独立の出力寿命・inactive random idle の regression と各修正の個別除去による失敗を tools/ci/verify-host-output-idle.ps1 で検査する。最終 head の CI・追加計測は各 PR に記録する。
 
+## 診断レポートの操作検査
+
+`--diagnostic-ui-check` は STA の WPF 窓で、読み取り専用の送信本文・詳細、明示操作のみのコピー/保存/ブラウザー、保存取消・非同期保存・操作失敗、不正 URL の拒否と実プラグインの「問題を報告」ボタンを検査する。全アクションは fake で、ブラウザーも実 Issue も開かない。`--integration` は未読ホストの契約拒否が診断へ記録され、正常な接続では増えないことも検査する。portable の収集・秘匿・上限・URL 検査は `dotnet run --project tests/DiagnosticChecks -c Release`。
+
 ## PSD の同名依存 DLL の反例
 
 `--psd-duplicate-parser` / `--psd-duplicate-source` は、real host の正常な module verdict をキャッシュした後、専用 AssemblyLoadContext に同じ DLL を二重ロードする。PSD の判定が例外なく false へ変わること、立ち絵のない図形の区間が実 RAM hit と全バイト画素一致を保つことを検査する。DLL は検査 process の終了まで載るので、各反例は別 process で実行する。通常 CI では常時実行し、素材の固定 commit の測定とは独立する。

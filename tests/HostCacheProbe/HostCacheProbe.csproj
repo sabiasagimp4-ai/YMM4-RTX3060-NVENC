@@ -7,6 +7,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../NVEncVideoWriterPlugin/DiagnosticReports.cs" Link="DiagnosticReports.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/DiagnosticReportWindow.cs" Link="DiagnosticReportWindow.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/PsdTachieDependencies.cs" Link="PsdTachieDependencies.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/AnimationTachieDependencies.cs" Link="AnimationTachieDependencies.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/NativeTachieReadiness.cs" Link="NativeTachieReadiness.cs" />

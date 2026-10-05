@@ -72,6 +72,9 @@ internal static class HostIntegrationChecks
                 && HostIntegration.Status.Contains("TimelineSource", StringComparison.Ordinal), HostIntegration.Status);
             Check(Hooked(export, HostIntegration.PatchId), "An unread build did not get the export hook");
             Check(!Hooked(update, HostIntegration.PatchId + ".cache"), "An unread build with other code got the cache");
+            var reported = DiagnosticReports.Snapshot(DiagnosticUiChecks.Environment);
+            Check(reported.Events.Any(e => e.Component == DiagnosticComponent.Host && e.Kind == DiagnosticKind.ContractMismatch),
+                "Real host contract rejection was not added to diagnostics");
             File.Delete(verdicts);
             Console.WriteLine("Host integration: a build whose code differs from the read builds keeps the protected export, without the cache");
 
@@ -81,6 +84,8 @@ internal static class HostIntegrationChecks
                 "Decided features: " + HostFeatures.For(host));
             Check(Hooked(export, HostIntegration.PatchId) && Hooked(update, HostIntegration.PatchId + ".cache"), "The matched build did not get both hooks");
             Check(File.Exists(verdicts), "The verdict was not kept for the next start");
+            Check(DiagnosticReports.Snapshot(DiagnosticUiChecks.Environment).Events.SequenceEqual(reported.Events),
+                "A successful matched host added a diagnostic failure");
             Console.WriteLine("Host integration: a build whose code matches 4.56.1.0 gets the cache: " + HostIntegration.Status);
         }
         finally

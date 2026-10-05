@@ -331,6 +331,7 @@ internal static partial class IdleFramePreRenderer
         catch (OperationCanceledException) { }
         catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
         {
+            DiagnosticReports.RecordException(DiagnosticComponent.Idle, error);
             DropRenderer(); // its state after the failure is unknown
             SetStatus("先読みをスキップしました: " + error.GetBaseException().Message);
         }

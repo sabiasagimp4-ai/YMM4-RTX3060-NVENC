@@ -35,7 +35,7 @@ internal static class PluginSettings
             settings.GpuBudgetMigrationPending = false;
             SaveError = null;
         }
-        catch (Exception exception) { SaveError = exception.GetBaseException().Message; }
+        catch (Exception exception) { DiagnosticReports.RecordException(DiagnosticComponent.Settings, exception); SaveError = exception.GetBaseException().Message; }
     }
 
     private static void ApplyNow(FrameCacheToolSettings settings)
