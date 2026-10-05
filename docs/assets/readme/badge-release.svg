@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="217" height="28" viewBox="0 0 217 28" role="img" aria-label="release: v0.2.0-preview.2">
-  <title>release: v0.2.0-preview.2</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="217" height="28" viewBox="0 0 217 28" role="img" aria-label="release: v0.2.0-preview.3">
+  <title>release: v0.2.0-preview.3</title>
   <rect width="75" height="28" fill="#16191d"/>
   <rect x="75" width="142" height="28" fill="#8fd3f4"/>
   <g font-family="'Segoe UI','Hiragino Sans','Yu Gothic UI','Noto Sans JP',Meiryo,Verdana,sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central">
     <text x="37.5" y="14.5" fill="#f0f3f6" textLength="53" lengthAdjust="spacingAndGlyphs">release</text>
-    <text x="146.0" y="14.5" fill="#0d1117" textLength="120" lengthAdjust="spacingAndGlyphs">v0.2.0-preview.2</text>
+    <text x="146.0" y="14.5" fill="#0d1117" textLength="120" lengthAdjust="spacingAndGlyphs">v0.2.0-preview.3</text>
   </g>
 </svg>
