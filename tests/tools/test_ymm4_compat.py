@@ -34,6 +34,24 @@ class VerdictChecks(unittest.TestCase):
         self.assertEqual(('no', 'off'), (verdict['load'], verdict['cache']))
         self.assertIn('.NET 8', verdict['note'])
 
+    def test_self_contained_runtime_is_read_from_its_target(self):
+        s = {'runtime': {'tfm': 'net9.0', 'selfContained': True, 'rollForward': 'LatestMajor', 'frameworks': {}}, 'plugin': PLUGIN}
+        self.assertEqual('no', compat.judge({'scan': s})['load'])
+        s['runtime']['tfm'] = 'net10.0'
+        self.assertEqual('unknown', compat.judge({'scan': s})['load'])
+
+    def test_missing_host_api_makes_a_loaded_version_partial(self):
+        s = scan()
+        s['plugin'] = dict(PLUGIN, apiMissing=['YukkuriMovieMaker: Y.Api::New instance Void <0>(String)'])
+        verdict = compat.judge({'scan': s, 'start': started()})
+        self.assertEqual('partial', verdict['load'])
+        load, _, _, note = compat.cells(dict(verdict, version='4.50.0.0'))
+        self.assertEqual('△', load)
+        self.assertIn('`Y.Api::New`', note)
+
+    def test_failed_scan_is_unknown(self):
+        self.assertEqual('unknown', compat.judge({'scan': {'error': 'download failed'}})['load'])
+
     def test_roll_forward_to_a_newer_major_needs_a_start(self):
         s = scan('9.0.0')
         s['runtime']['rollForward'] = 'LatestMajor'
@@ -94,10 +112,15 @@ class TableChecks(unittest.TestCase):
             server = d / 'server.txt'
             server.write_text('4.57.0.0\n4.56.1.0\n4.56.0.1\n', encoding='utf-8')
             import io, contextlib
-            out = io.StringIO()
-            with contextlib.redirect_stdout(out):
-                compat.plan(str(data), str(server), '0.2.0', ['new'])
-            self.assertEqual(['4.57.0.0', '4.56.0.1'], out.getvalue().split())
+            def plan(mode):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    compat.plan(str(data), str(server), '0.2.0', mode)
+                return out.getvalue().split()
+            self.assertEqual(['4.57.0.0'], plan(['new']))
+            self.assertEqual(['4.57.0.0', '4.56.0.1'], plan(['stale']))
+            self.assertEqual(['4.57.0.0', '4.56.1.0', '4.56.0.1'], plan(['all']))
+            self.assertEqual(['4.56.1.0'], plan(['4.56.1.0', 'x']))
 
 
 class ReadmeMarkerChecks(unittest.TestCase):

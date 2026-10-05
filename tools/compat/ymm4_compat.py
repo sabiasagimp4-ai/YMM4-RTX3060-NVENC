@@ -9,7 +9,8 @@ Inputs per version (written by .github/workflows/ymm4-compat.yml into one result
 Usage:
   ymm4_compat.py merge <results dir> <data.json> --plugin <version> --commit <sha> --run <url> [--date YYYY-MM-DD]
   ymm4_compat.py render <data.json> <README.md> <docs/YMM4_VERSIONS.md>
-  ymm4_compat.py plan <data.json> <server versions file> --plugin <version> [--mode new|all|<v> <v>...]
+  ymm4_compat.py plan <data.json> <server versions file> --plugin <version> [--mode new|stale|all|<v> <v>...]
+  ymm4_compat.py runtime-ok <version.scan.json>   (exit 0 when the .NET runtime of that YMM4 can load the plugin)
   ymm4_compat.py loadable <results dir>     (versions whose scan allows a start check, one per line)
   ymm4_compat.py issue <data.json> <version>  (a Markdown report for one version)
 """
@@ -64,10 +65,12 @@ def runtime_check(scan):
     if not runtime:
         return None, 'YMM4 の実行環境の設定（runtimeconfig）がありません'
     frameworks = runtime.get('frameworks') or {}
-    host = major(frameworks.get('Microsoft.NETCore.App') or frameworks.get('Microsoft.WindowsDesktop.App') or '')
+    host = major(frameworks.get('Microsoft.NETCore.App') or frameworks.get('Microsoft.WindowsDesktop.App')
+                 or (runtime.get('tfm') or '').replace('net', '', 1))
     if needed is None or host is None:
         return None, '.NET の版を読めませんでした'
-    if host >= needed or (runtime.get('rollForward') or '') in ('Major', 'LatestMajor'):
+    # A self-contained YMM4 runs on the runtime it carries; a framework-dependent one may roll forward.
+    if host >= needed or (not runtime.get('selfContained') and (runtime.get('rollForward') or '') in ('Major', 'LatestMajor')):
         return True, ''
     return False, f'YMM4 が .NET {host} で動くため、.NET {needed} 向けのプラグインを読み込めません'
 
@@ -82,16 +85,29 @@ def reference_problems(scan):
     return problems
 
 
+def api_note(missing):
+    if not missing:
+        return ''
+    names = sorted({line.split(': ', 1)[-1].split(' ')[0] for line in missing})
+    shown = '、'.join(f'`{name}`' for name in names[:3]) + (' など' if len(names) > 3 else '')
+    return f'プラグインが使う YMM4 の API のうち {len(names)} 個がこの版にありません（{shown}）。使う場面で失敗するおそれがあります'
+
+
 def judge(entry):
     """The verdict shown in the tables, from whatever was checked for this version."""
     scan, start, tests = entry.get('scan') or {}, entry.get('start'), entry.get('tests')
     verdict = {'load': 'unknown', 'nvenc': 'unknown', 'cache': 'unknown', 'missing': [], 'note': '', 'basis': None}
+    if scan.get('error'):
+        verdict['note'] = f"ファイルを照合できませんでした（{scan['error']}）"
+        return verdict
     if scan.get('knownBuild'):
         verdict['basis'] = scan['knownBuild']
     runtime_ok, runtime_reason = runtime_check(scan)
+    api = (scan.get('plugin') or {}).get('apiMissing') or []
     status = (start or {}).get('status')
     if status:
-        verdict['load'] = 'ok'
+        verdict['load'] = 'partial' if api else 'ok'
+        verdict['api'] = api_note(api)
         verdict['nvenc'] = 'ok' if status.get('exportHooked') else 'no'
         if not status.get('exportHooked') and status.get('exportProblem'):
             verdict['note'] = 'NVENC: ' + status['exportProblem']
@@ -126,6 +142,8 @@ def judge(entry):
             verdict['note'] = '未確認（参照の版: ' + '、'.join(problems) + '）'
         else:
             verdict['note'] = '未確認'
+        if api:
+            verdict['api'] = api_note(api)
     if tests:
         failed = [name for name, key in (('ビルド', 'build'), ('キー検査', 'keys'), ('実ホスト検査', 'probe')) if tests.get(key) == 'failure']
         if failed:
@@ -175,18 +193,21 @@ def save(path, data):
         stream.write('\n')
 
 
-MARK = {'ok': '○', 'no': '×', 'unknown': '？'}
+MARK = {'ok': '○', 'partial': '△', 'no': '×', 'unknown': '？'}
 
 
 def cells(verdict):
+    loaded = verdict['load'] in ('ok', 'partial')
     load = MARK[verdict['load']]
-    nvenc = MARK[verdict['nvenc']] if verdict['load'] == 'ok' else '—'
-    cache = {'full': '○', 'partial': '△', 'off': '×', 'unknown': '？'}[verdict['cache']] if verdict['load'] == 'ok' else '—'
+    nvenc = MARK[verdict['nvenc']] if loaded else '—'
+    cache = {'full': '○', 'partial': '△', 'off': '×', 'unknown': '？'}[verdict['cache']] if loaded else '—'
     notes = []
-    if verdict['load'] == 'ok' and verdict['cache'] == 'partial':
-        notes.append('使わない機能: ' + '、'.join(verdict['missing']))
-    if verdict['load'] == 'ok' and verdict.get('basis') and verdict['cache'] in ('full', 'partial'):
-        notes.append(f"{verdict['basis']} と同じコードで確認" if verdict['basis'] != verdict.get('version') else 'コードを読んだ版')
+    if verdict.get('api'):
+        notes.append(verdict['api'])
+    if loaded and verdict['cache'] == 'partial':
+        notes.append('キャッシュで使わない機能: ' + '、'.join(verdict['missing']))
+    if loaded and verdict.get('basis') and verdict['cache'] in ('full', 'partial'):
+        notes.append('コードを読んだ版' if verdict['basis'] == verdict.get('version') else f"キャッシュは {verdict['basis']} と一致した部分を使用")
     if verdict['note']:
         notes.append(verdict['note'])
     return load, nvenc, cache, '。'.join(notes)
@@ -231,7 +252,7 @@ def render(data_path, readme_path, doc_path):
         f'YMM4 の更新サーバーで公開されている {count} 版を、プラグイン {plugin} で自動で確かめた結果です（{updated} 更新）。'
         '同じ結果が続く版はまとめています。版ごとの結果と確かめ方は [YMM4 の版ごとの対応](docs/YMM4_VERSIONS.md) を参照してください。',
         '',
-        '**○** 使える　**△** 一部の機能だけ　**×** 使えない　**？** 未確認',
+        '**○** 使える　**△** 一部だけ使える　**×** 使えない　**？** 未確認',
         '',
         table(grouped(data)),
         END,
@@ -261,7 +282,7 @@ def render(data_path, readme_path, doc_path):
         '',
         'CI のランナーには NVIDIA の GPU がないため、NVENC で実際にエンコードできるかは確かめていません。「NVENC 出力」の ○ は、YMM4 の出力に取消保護を接続できたことを表します。',
         '',
-        '**○** 使える　**△** 一部の機能だけ　**×** 使えない　**？** 未確認　**—** 読み込めないため対象外',
+        '**○** 使える　**△** 一部だけ使える　**×** 使えない　**？** 未確認　**—** 読み込めないため対象外',
         '',
         '## 結果',
         '',
@@ -285,7 +306,9 @@ def plan(data_path, server_path, plugin, mode):
     if mode == ['all']:
         chosen = server
     elif mode == ['new'] or not mode:
-        # New on the server, never checked, or last checked with another plugin version.
+        chosen = [v for v in server if v not in known]
+    elif mode == ['stale']:
+        # Never checked, or last checked with another plugin version.
         chosen = [v for v in server if v not in known or known[v].get('plugin') != plugin]
     else:
         chosen = [v for v in mode if re.match(r'^\d+(\.\d+){3}$', v)]
@@ -302,6 +325,11 @@ def loadable(results):
             scan = json.load(stream)
         if runtime_check(scan)[0] is not False:
             print(match.group(1))
+
+
+def runtime_ok(scan_path):
+    with open(scan_path, encoding='utf-8-sig') as stream:
+        return runtime_check(json.load(stream))[0] is not False
 
 
 def issue(data_path, version):
@@ -346,6 +374,8 @@ def main(argv):
     p.add_argument('--mode', nargs='*', default=['new'])
     l = sub.add_parser('loadable')
     l.add_argument('results')
+    o = sub.add_parser('runtime-ok')
+    o.add_argument('scan')
     i = sub.add_parser('issue')
     i.add_argument('data'); i.add_argument('version')
     args = parser.parse_args(argv)
@@ -357,6 +387,8 @@ def main(argv):
         plan(args.data, args.server, args.plugin, args.mode)
     elif args.command == 'loadable':
         loadable(args.results)
+    elif args.command == 'runtime-ok':
+        sys.exit(0 if runtime_ok(args.scan) else 1)
     elif args.command == 'issue':
         issue(args.data, args.version)
 

@@ -52,6 +52,13 @@ export dest folder algorithm
 jq -r --arg f "$filter" '.Files[] | select(.File | test($f)) | [.File, .Hash, (.Size|tostring)] | @tsv' "$manifest" | tr -d '\r' > "$manifest.list"
 count=$(wc -l < "$manifest.list")
 tr '\t' '\n' < "$manifest.list" | xargs -d '\n' -n 3 -P 2 bash -c 'fetch_one "$@"' _
+# YMM4_FETCH_PRUNE=1: also delete top-level files the version does not have, so that checking versions one after
+# another in one folder (downloading only what changed, as YMM4's updater does) leaves no file of another version.
+if [ "${YMM4_FETCH_PRUNE:-}" = 1 ]; then
+  cut -f1 "$manifest.list" > "$manifest.keep"
+  find "$dest" -maxdepth 1 -type f -printf '%f\n' | while read -r f; do grep -qxF "$f" "$manifest.keep" || rm -f -- "${dest:?}/${f:?}"; done
+  rm -f "$manifest.keep"
+fi
 rm -f "$manifest.list"
 rm -f "$manifest"
 echo "fetched $count files of YMM4 $version into $dest" >&2

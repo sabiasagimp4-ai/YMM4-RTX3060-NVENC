@@ -9,6 +9,7 @@ using NVEncVideoWriterPlugin;
 //   dotnet run --project tools/HostFingerprint -- compare <read YMM4 dir> <new YMM4 dir>  (the verdict if the first were read)
 //   dotnet run --project tools/HostFingerprint -- emit <out.cs> <version>=<YMM4 dir>... (HostBaselines.cs, newest first)
 //   dotnet run --project tools/HostFingerprint -- scan <YMM4 dir> [<plugin dir>]   (one JSON line for tools/compat)
+//   dotnet run --project tools/HostFingerprint -- api <plugin dll> <YMM4 dir>      (references the YMM4 build does not define)
 switch (args)
 {
     case ["contracts", var directory]:
@@ -19,6 +20,9 @@ switch (args)
         return 0;
     case ["scan", var directory, .. var plugin] when plugin.Length <= 1:
         Scan(directory, plugin.FirstOrDefault());
+        return 0;
+    case ["api", var pluginDll, var directory]:
+        foreach (var line in ApiCheck.Missing(pluginDll, directory)) Console.WriteLine(line);
         return 0;
     case ["emit", var output, .. var builds]:
         Emit(output, builds);
@@ -178,26 +182,43 @@ static void Compare(string before, string after)
 static void Scan(string directory, string? pluginDirectory)
 {
     var result = new Dictionary<string, object?>();
-    string hostPath = Path.Combine(directory, "YukkuriMovieMaker.dll");
-    var host = AssemblyIdentity(hostPath);
-    result["assemblyVersion"] = host?.Version;
-    result["fileVersion"] = host?.FileVersion;
-    string sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(hostPath)));
-    result["knownBuild"] = HostKnownBuilds.All.FirstOrDefault(b => b.Host.Mvid == HostFingerprint.ReadMvid(hostPath) && b.Host.Sha256 == sha)?.Version;
     string runtimeConfig = Path.Combine(directory, "YukkuriMovieMaker.runtimeconfig.json");
     if (File.Exists(runtimeConfig))
     {
         using var json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(runtimeConfig));
         var options = json.RootElement.GetProperty("runtimeOptions");
-        var frameworks = options.TryGetProperty("frameworks", out var list) ? list.EnumerateArray().ToArray()
+        // A self-contained YMM4 lists the runtime it carries as includedFrameworks.
+        bool selfContained = options.TryGetProperty("includedFrameworks", out var included);
+        var frameworks = selfContained ? included.EnumerateArray().ToArray()
+            : options.TryGetProperty("frameworks", out var list) ? list.EnumerateArray().ToArray()
             : options.TryGetProperty("framework", out var single) ? [single] : [];
         result["runtime"] = new Dictionary<string, object?>
         {
             ["tfm"] = options.TryGetProperty("tfm", out var tfm) ? tfm.GetString() : null,
+            ["selfContained"] = selfContained,
             ["rollForward"] = options.TryGetProperty("rollForward", out var roll) ? roll.GetString() : null,
             ["frameworks"] = frameworks.ToDictionary(f => f.GetProperty("name").GetString()!, f => f.GetProperty("version").GetString()),
         };
     }
+    string? pluginPath = pluginDirectory is null ? null : Directory.GetFiles(pluginDirectory, "YMM4Rtx3060Nvenc.dll").Single();
+    if (pluginPath is not null)
+    {
+        using var stream = File.OpenRead(pluginPath);
+        using var pe = new System.Reflection.PortableExecutable.PEReader(stream);
+        result["plugin"] = new Dictionary<string, object?> { ["framework"] = TargetFramework(System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe)) };
+    }
+    // Only the runtime configuration was fetched (a YMM4 whose runtime cannot load the plugin): nothing more to read.
+    string hostPath = Path.Combine(directory, "YukkuriMovieMaker.dll");
+    if (!File.Exists(hostPath))
+    {
+        Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(result));
+        return;
+    }
+    var host = AssemblyIdentity(hostPath);
+    result["assemblyVersion"] = host?.Version;
+    result["fileVersion"] = host?.FileVersion;
+    string sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(hostPath)));
+    result["knownBuild"] = HostKnownBuilds.All.FirstOrDefault(b => b.Host.Mvid == HostFingerprint.ReadMvid(hostPath) && b.Host.Sha256 == sha)?.Version;
     try
     {
         var evaluation = HostContracts.Evaluate(HostContracts.Describe(directory));
@@ -209,9 +230,8 @@ static void Scan(string directory, string? pluginDirectory)
         };
     }
     catch (Exception ex) { result["contracts"] = new Dictionary<string, object?> { ["error"] = ex.GetBaseException().Message }; }
-    if (pluginDirectory is not null)
+    if (pluginPath is not null)
     {
-        string pluginPath = Directory.GetFiles(pluginDirectory, "YMM4Rtx3060Nvenc.dll").Single();
         using var stream = File.OpenRead(pluginPath);
         using var pe = new System.Reflection.PortableExecutable.PEReader(stream);
         var reader = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
@@ -221,7 +241,7 @@ static void Scan(string directory, string? pluginDirectory)
             var reference = reader.GetAssemblyReference(handle);
             string name = reader.GetString(reference.Name);
             // Framework assemblies come with the runtime checked above, and the plugin carries its own (Harmony).
-            if (File.Exists(Path.Combine(pluginDirectory, name + ".dll"))) continue;
+            if (File.Exists(Path.Combine(pluginDirectory!, name + ".dll"))) continue;
             string candidate = Path.Combine(directory, name + ".dll");
             bool fromHost = File.Exists(candidate);
             if (!fromHost && !name.StartsWith("YukkuriMovieMaker", StringComparison.Ordinal)) continue;
@@ -232,11 +252,10 @@ static void Scan(string directory, string? pluginDirectory)
                 ["host"] = fromHost ? AssemblyIdentity(candidate)?.Version : null,
             });
         }
-        result["plugin"] = new Dictionary<string, object?>
-        {
-            ["framework"] = TargetFramework(reader),
-            ["references"] = references,
-        };
+        var plugin = (Dictionary<string, object?>)result["plugin"]!;
+        plugin["references"] = references;
+        try { plugin["apiMissing"] = ApiCheck.Missing(pluginPath, directory); }
+        catch (Exception ex) { plugin["apiError"] = ex.GetBaseException().Message; }
     }
     Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(result));
 }
