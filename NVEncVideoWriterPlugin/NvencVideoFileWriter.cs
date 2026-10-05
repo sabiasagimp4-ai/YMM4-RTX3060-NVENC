@@ -19,6 +19,7 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
     private IntPtr _encoderHandle = IntPtr.Zero;
     private bool _disposed;
     private bool _failed;
+    private bool _expectedFailure;
     private readonly object _encodeLock = new();
     private readonly EncoderThread _encoderThread;
     private readonly HostExportScope.Snapshot? _exportScope;
@@ -72,8 +73,9 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
             else
                 WriteAudioInternal(samples);
         }
-        catch
+        catch (Exception error)
         {
+            if (!_expectedFailure) DiagnosticReports.RecordException(DiagnosticComponent.EncoderAudio, error);
             _failed = true;
             throw;
         }
@@ -105,7 +107,10 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
         {
             _exportScope?.CancellationToken.ThrowIfCancellationRequested();
             if (_videoInfo.HasErrors || _videoInfo.Width <= 0 || _videoInfo.Height <= 0)
+            {
+                _expectedFailure = true;
                 throw new InvalidOperationException("YMM4 の出力設定にエラーがあります。");
+            }
 
             using var surface = frame.Surface;
             using var texture = surface.QueryInterface<ID3D11Texture2D>();
@@ -119,8 +124,9 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
                 throw new InvalidOperationException(GetNativeError());
             ++_acceptedVideoFrames;
         }
-        catch
+        catch (Exception error)
         {
+            if (!_expectedFailure && error is not NotSupportedException) DiagnosticReports.RecordException(DiagnosticComponent.EncoderVideo, error);
             _failed = true;
             throw;
         }
@@ -156,6 +162,7 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
         try { File.Move(_stagingPath, _outputPath, true); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
+            DiagnosticReports.RecordException(DiagnosticComponent.EncoderFinish, error);
             throw new IOException($"NVENC 出力は完成しましたが、{_outputPath} に置けませんでした（他のアプリが開いている可能性があります）。完成したファイルは {_stagingPath} に残しています。", error);
         }
     }
@@ -183,8 +190,9 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
                     ? "NVENC 出力の終了処理に失敗しました。" : error);
             }
         }
-        catch
+        catch (Exception error)
         {
+            if (!_expectedFailure) DiagnosticReports.RecordException(DiagnosticComponent.EncoderFinish, error);
             _failed = true;
             throw;
         }
@@ -221,6 +229,7 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
 
         if ((_videoInfo.Width & 1) != 0 || (_videoInfo.Height & 1) != 0)
         {
+            _expectedFailure = true;
             throw new InvalidOperationException("NVENC は偶数サイズの解像度が必要です。");
         }
 
@@ -237,7 +246,10 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
         using (var adapter = dxgiDevice?.GetAdapter())
         {
             if (adapter is not null && NvencErrors.NonNvidiaAdapter(adapter.Description.VendorId, adapter.Description.Description) is { } wrongAdapter)
+            {
+                _expectedFailure = true;
                 throw new InvalidOperationException(wrongAdapter);
+            }
         }
         var quality = (int)_settings.Quality;
         var rateControl = _settings.RateControl == NvencRateControl.Variable ? 1 : 0;
@@ -274,6 +286,7 @@ internal sealed class NvencVideoFileWriter : IVideoFileWriter3, IDisposable
         var error = GetNativeError();
         if (!string.IsNullOrWhiteSpace(error))
         {
+            _expectedFailure = NvencErrors.IsExpectedCapabilityError(error);
             NvencNativeMethods.NvencDestroy(_encoderHandle);
             _encoderHandle = IntPtr.Zero;
             throw new InvalidOperationException(NvencErrors.Describe(error));

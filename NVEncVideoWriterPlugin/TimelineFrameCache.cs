@@ -555,6 +555,7 @@ internal static partial class TimelineFrameCache
         }
         catch (Exception error)
         {
+            DiagnosticReports.RecordException(DiagnosticComponent.CacheRead, error);
             ObserveDeviceLoss(pending?.State ?? (sources.TryGetValue(__instance, out var failedState) ? failedState : null), error);
             pending?.Dispose(); return Bypass("キャッシュを使用しませんでした: " + error.GetType().Name);
         }
@@ -605,7 +606,7 @@ internal static partial class TimelineFrameCache
             if (__state.CacheKey is not null)
                 deferred = __state.Viewport is { } view ? StorePreview(__instance, __state, output, view) : StoreExport(__state, output);
         }
-        catch (Exception error) { ObserveDeviceLoss(__state.State, error); status = "フレームの保存に失敗しました: " + error.GetType().Name; }
+        catch (Exception error) { DiagnosticReports.RecordException(DiagnosticComponent.CacheStore, error); ObserveDeviceLoss(__state.State, error); status = "フレームの保存に失敗しました: " + error.GetType().Name; }
         finally { if (!deferred) __state.Dispose(); }
     }
 

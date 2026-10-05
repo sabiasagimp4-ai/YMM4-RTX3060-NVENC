@@ -18,6 +18,8 @@ internal static class GpuMemoryController
     private sealed record SampleState(GpuMemorySnapshot Value);
     private static SampleState? latestSample;
     private static long adapterGeneration;
+    private static DiagnosticGpu? diagnosticAdapter;
+    internal static DiagnosticGpu? DiagnosticAdapter => Volatile.Read(ref diagnosticAdapter);
     internal static long AdapterGeneration => Interlocked.Read(ref adapterGeneration);
     internal static GpuMemorySnapshot? LatestSample => Volatile.Read(ref latestSample)?.Value;
 
@@ -61,6 +63,8 @@ internal static class GpuMemoryController
             using (var adapter1 = observed.QueryInterfaceOrNull<IDXGIAdapter1>())
                 if (adapter1 is not null) software |= (adapter1.Description1.Flags & AdapterFlags.Software) != 0;
             var seen = new Adapter(description.Luid, description.Description, (long)description.DedicatedVideoMemory, software);
+            Volatile.Write(ref diagnosticAdapter, new DiagnosticGpu(unchecked((uint)description.VendorId), unchecked((uint)description.DeviceId),
+                (long)description.DedicatedVideoMemory / GpuMemoryPolicy.MiB, software));
             lock (gate)
             {
                 if (adapter is { } known && known.Luid.LowPart == seen.Luid.LowPart && known.Luid.HighPart == seen.Luid.HighPart) return;

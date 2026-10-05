@@ -314,7 +314,7 @@ public sealed class FrameCacheToolView : UserControl
         protected override List<System.Windows.Automation.Peers.AutomationPeer>? GetChildrenCore()
         {
             var children = base.GetChildrenCore() ?? [];
-            foreach (var element in new UIElement[] { view.trace, view.scenario, view.purge, view.status, view.counts }.Concat(view.settingsPanel.AutomationControls))
+            foreach (var element in new UIElement[] { view.trace, view.scenario, view.purge, view.report, view.status, view.counts }.Concat(view.settingsPanel.AutomationControls))
                 if (System.Windows.Automation.Peers.UIElementAutomationPeer.CreatePeerForElement(element) is { } peer && !children.Contains(peer))
                     children.Add(peer);
             return children;
@@ -327,6 +327,7 @@ public sealed class FrameCacheToolView : UserControl
     private readonly TextBox scenario = new() { Text = "manual", Width = 180, Margin = new Thickness(8, 0, 0, 0) };
     private readonly TextBlock traceInfo = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 8) };
     private readonly Button purge = new() { Content = "保存したキャッシュを消去", HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(12, 6, 12, 6) };
+    private readonly Button report = new() { Content = "問題を報告", HorizontalAlignment = HorizontalAlignment.Left, Padding = new Thickness(12, 6, 12, 6), Margin = new Thickness(0, 8, 0, 4) };
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private readonly PluginSettingsPanel settingsPanel = new();
     private long metricsAt;
@@ -342,6 +343,7 @@ public sealed class FrameCacheToolView : UserControl
         System.Windows.Automation.AutomationProperties.SetAutomationId(trace, "CacheTraceToggle");
         System.Windows.Automation.AutomationProperties.SetAutomationId(scenario, "CacheTraceScenario");
         System.Windows.Automation.AutomationProperties.SetAutomationId(purge, "FrameCachePurge");
+        System.Windows.Automation.AutomationProperties.SetAutomationId(report, "DiagnosticReportOpen");
         System.Windows.Automation.AutomationProperties.SetAutomationId(status, "FrameCacheStatus");
         System.Windows.Automation.AutomationProperties.SetAutomationId(counts, "FrameCacheCounts");
         traceRow.Children.Add(trace); traceRow.Children.Add(scenario);
@@ -380,6 +382,18 @@ public sealed class FrameCacheToolView : UserControl
         panel.Children.Add(legend);
         panel.Children.Add(counts);
         panel.Children.Add(error);
+        panel.Children.Add(report);
+        report.Click += (_, _) =>
+        {
+            try
+            {
+                var document = DiagnosticReports.Build(DiagnosticReports.Snapshot(DiagnosticEnvironmentCapture.Capture()));
+                var window = new DiagnosticReportWindow(document);
+                if (Window.GetWindow(this) is { } owner) window.Owner = owner;
+                window.ShowDialog();
+            }
+            catch { error.Text = "診断レポートを作成できませんでした。GitHub の Issues から症状と利用中のバージョンを報告してください。"; }
+        };
         Content = new ScrollViewer
         {
             Content = panel,

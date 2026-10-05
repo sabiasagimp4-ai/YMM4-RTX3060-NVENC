@@ -70,7 +70,7 @@ internal static class HostIntegration
                 if (NvencOutputEnabled())
                 {
                     if (HostExportScope.TryInstall(host, harmony, out reason)) exportHooked = true;
-                    else exportProblem = reason;
+                    else { exportProblem = reason; DiagnosticReports.RecordUnavailable(DiagnosticComponent.ExportHook, DiagnosticKind.HookFailure); }
                 }
                 installed = true;
                 string features = string.Empty;
@@ -81,14 +81,19 @@ internal static class HostIntegration
                     if (!TryMatchReadBuild(host, out var matched, out var detail))
                     {
                         cacheAvailable = false;
+                        DiagnosticReports.RecordUnavailable(DiagnosticComponent.Host, DiagnosticKind.ContractMismatch);
                         status = $"YMM4 {version}（未確認の版）: {ExportStatus()}自動キャッシュは使いません: {detail}";
                         return true;
                     }
                     HostFeatures.Decide(host, matched);
+                    if (!matched.SimpleTachie || !matched.AnimationTachie || !matched.PsdTachie || !matched.LipSync
+                        || !matched.SelectionRects || !matched.WrappedSources || !matched.RulerBars)
+                        DiagnosticReports.RecordUnavailable(DiagnosticComponent.CacheHook, DiagnosticKind.FeatureUnavailable);
                     features = $"キャッシュが前提とする本体のコードが検証済みの {matched.Basis} と同じため使います。{detail}";
                 }
                 cacheAvailable = TimelineFrameCache.TryInstall(host, cacheHarmony, out reason);
-                if (!cacheAvailable) cacheHarmony.UnpatchAll(cacheHarmony.Id);
+                if (!cacheAvailable)
+                { DiagnosticReports.RecordUnavailable(DiagnosticComponent.CacheHook, DiagnosticKind.HookFailure); cacheHarmony.UnpatchAll(cacheHarmony.Id); }
                 else TimelineCacheBars.TryInstall(host, out _);
                 status = cacheAvailable
                     ? $"YMM4 {version}: {ExportStatus()}自動キャッシュの接続を確認しました。{features}"
@@ -97,12 +102,13 @@ internal static class HostIntegration
             }
             catch (Exception ex)
             {
+                DiagnosticReports.RecordException(DiagnosticComponent.Host, ex);
                 installed = false;
                 cacheAvailable = false;
                 exportHooked = false;
                 status = $"YMM4との連携を無効にしました: {ex.GetBaseException().Message}";
                 try { harmony.UnpatchAll(PatchId); cacheHarmony.UnpatchAll(cacheHarmony.Id); }
-                catch (Exception rollback) { status += $"（フックの解除にも失敗しました: {rollback.GetBaseException().Message}）"; }
+                catch (Exception rollback) { DiagnosticReports.RecordException(DiagnosticComponent.Host, rollback); status += $"（フックの解除にも失敗しました: {rollback.GetBaseException().Message}）"; }
                 return false;
             }
         }
@@ -120,7 +126,8 @@ internal static class HostIntegration
             reason = string.Empty;
             if (exportHooked) return true;
             if (!installed || installedHost is null) { reason = status; return false; }
-            if (!HostExportScope.TryInstall(installedHost, harmony, out reason)) { exportProblem = reason; return false; }
+            if (!HostExportScope.TryInstall(installedHost, harmony, out reason))
+            { DiagnosticReports.RecordUnavailable(DiagnosticComponent.ExportHook, DiagnosticKind.HookFailure); exportProblem = reason; return false; }
             exportHooked = true;
             exportProblem = string.Empty;
             status = status.Replace("NVENC 出力は設定で無効です。", "NVENC 出力（取消保護つき）を使えます。", StringComparison.Ordinal);
@@ -137,7 +144,10 @@ internal static class HostIntegration
         if (!EnsureInstalled() || !EnsureExportHooks(out var reason))
             throw new NotSupportedException($"このYMM4では安全な動画出力を開始できません。{Status}");
         if (HostExportScope.GetCurrent() is null)
+        {
+            DiagnosticReports.RecordUnavailable(DiagnosticComponent.ExportHook, DiagnosticKind.ContractMismatch);
             throw new InvalidOperationException("YMM4の出力範囲・取消状態を取得できなかったため、既存ファイルを保護して出力を中止しました。");
+        }
     }
 
     private sealed record KnownBinary(string File, Guid Mvid, string Sha256);

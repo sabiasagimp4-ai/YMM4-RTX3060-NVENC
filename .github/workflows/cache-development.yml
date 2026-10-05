@@ -40,6 +40,7 @@ jobs:
       - run: dotnet run --project tests/ReadinessChecks/ReadinessChecks.csproj -c Release
       - run: dotnet run --project tests/CacheAdversarialChecks/CacheAdversarialChecks.csproj -c Release
       - run: dotnet run --project tests/DescriptionJsonChecks/DescriptionJsonChecks.csproj -c Release
+      - run: dotnet run --project tests/DiagnosticChecks/DiagnosticChecks.csproj -c Release
 
   host:
     runs-on: ubuntu-latest
@@ -78,6 +79,10 @@ jobs:
         run: |
           dotnet build NVEncVideoWriterPlugin/NVEncVideoWriterPlugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --nologo
           if ($LASTEXITCODE -ne 0) { throw 'Plugin build failed' }
+      - name: Diagnostic report preview and explicit WPF actions (no actual upload)
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --diagnostic-ui-check
+          if ($LASTEXITCODE -ne 0) { throw 'Diagnostic UI checks failed' }
       - name: Native invariants (no NVENC hardware needed)
         run: |
           msbuild NvencNative/NvencNative.vcxproj /t:Build /p:Configuration=Release /p:Platform=x64 /m /nologo /v:minimal

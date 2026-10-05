@@ -9,6 +9,8 @@ internal static class NvencErrors
     private static readonly Regex DriverTooOld = new(@"^NVENC driver too old: supports API (\d+\.\d+), needs (\d+\.\d+)");
     private static readonly Regex CodecUnsupported = new(@"^NVENC codec unsupported: (\S+)");
     private static readonly Regex SizeUnsupported = new(@"^NVENC size unsupported: (\d+)x(\d+) > (\d+)x(\d+) \(([^)]+)\)");
+    internal static bool IsExpectedCapabilityError(string native) => native.StartsWith("nvEncodeAPI64.dll not found", StringComparison.Ordinal)
+        || DriverTooOld.IsMatch(native) || CodecUnsupported.IsMatch(native) || SizeUnsupported.IsMatch(native);
 
     internal static string Describe(string native)
     {
