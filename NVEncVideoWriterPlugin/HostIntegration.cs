@@ -201,7 +201,7 @@ internal static class HostIntegration
         evaluation.Features.Where(f => f.StartsWith(HostContracts.DecoderPrefix, StringComparison.Ordinal))
             .Select(f => f[HostContracts.DecoderPrefix.Length..]).ToHashSet(StringComparer.Ordinal))
         { SimpleTachie = evaluation.Has(HostContracts.SimpleTachie), LipSync = evaluation.Has(HostContracts.LipSync),
-            AnimationTachie = evaluation.Has(HostContracts.AnimationTachie) };
+            AnimationTachie = evaluation.Has(HostContracts.AnimationTachie), PsdTachie = evaluation.Has(HostContracts.PsdTachie) };
 
     // HostContracts against the read builds. The verdict is kept per set of host binaries (and plugin build), so
     // only the first start after a YMM4 update spends the few seconds of reading them.

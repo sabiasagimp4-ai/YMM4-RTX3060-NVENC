@@ -457,7 +457,8 @@ internal static partial class TimelineFrameCache
             string environment = KeyEnvironment(context);
             state.Environment = environment;
             if (!state.Tracker.TryCapture(FrameOf(time, scene), out capture, out var reason, settle: true, background: preview)) return Bypass(reason);
-            if (!AnimationTachieDependencies.SafeSource(__instance, scene, FrameOf(time, scene)))
+            if ((!AnimationTachieDependencies.SafeSource(__instance, scene, FrameOf(time, scene))
+                || !PsdTachieDependencies.SafeSource(__instance, scene, FrameOf(time, scene), capture)))
                 return Bypass("立ち絵の画像一覧・付属設定・描画ソースを確認できないため、通常描画を使用します。");
             var traits = modelTraits.GetValue(capture!.Model, static model => new ModelTraits(model));
             string usageKey = exporting ? usageName : PreviewUsage.KeyFor(usageName, traits.ShowOnlyPreview);
@@ -689,7 +690,8 @@ internal static partial class TimelineFrameCache
         if (!EnabledFor(value.UsageKey == "Exporting") || value.Generation != Interlocked.Read(ref generation)) return false;
         bool valid;
         using (CacheTrace.Measure(files ? "capture-dependency-validation" : "capture-state-validation")) valid = value.Capture.Validate(files);
-        if (!valid || !AnimationTachieDependencies.SafeSource(value.Owner, value.Scene, FrameOf(value.Time, value.Scene))) return false;
+        if (!valid || (!AnimationTachieDependencies.SafeSource(value.Owner, value.Scene, FrameOf(value.Time, value.Scene))
+            || !PsdTachieDependencies.SafeSource(value.Owner, value.Scene, FrameOf(value.Time, value.Scene), value.Capture))) return false;
         // The keys are functions of the capture, time, usage and viewport (fixed in Pending), the frame rate and the
         // context's render state: comparing those two is the same check as composing both keys again.
         using var keys = CacheTrace.Measure("render-environment-key-validation");

@@ -68,6 +68,7 @@ internal static class NativeTachieReadiness
             patched.Add(read);
             owner = harmony.Id;
             AnimationTachieDependencies.ReadinessInstalled = () => Installed;
+            PsdTachieDependencies.ReadinessInstalled = () => Installed;
             return true;
         }
         catch (Exception error)
@@ -90,7 +91,7 @@ internal static class NativeTachieReadiness
         __state = null;
         try
         {
-            if (itemField?.GetValue(__instance) is TachieItem item && AnimationTachieDependencies.Character(item.Character))
+            if (itemField?.GetValue(__instance) is TachieItem item && (AnimationTachieDependencies.Character(item.Character) || PsdTachieDependencies.Character(item.Character)))
                 current.Value = __state = new(__instance, item, current.Value);
         }
         catch { FrameRenderReadiness.ObserveAuxiliary(false, "lip-sync-source-inspection"); }

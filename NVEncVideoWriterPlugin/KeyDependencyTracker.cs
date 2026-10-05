@@ -1,3 +1,4 @@
+using System.IO;
 using System.ComponentModel;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project;
@@ -156,7 +157,7 @@ internal sealed class KeyDependencyTracker : IDisposable
             // A setting changed without a notification is caught here too: describe again rather than issue captures
             // that every validation would reject.
             if (cachedRevision >= 0 && cachedRevision == Revision && (!scene.ParentScenes.AsSpan().SequenceEqual(cachedParents)
-                || !CachedEnvironment.IsCurrent() || !FrameVoiceCloneState.Current(cachedModel))) Invalidate();
+                || !CachedEnvironment.IsCurrent() || !FrameVoiceCloneState.Current(cachedModel) || !PsdTachieDependencies.Current(cachedModel))) Invalidate();
             long before = Revision;
             if (cachedRevision != before)
             {
@@ -304,7 +305,7 @@ internal sealed class KeyDependencyTracker : IDisposable
         lastDescribeTicks = description.Ticks;
         if (current != Revision
             || !new EnvironmentWitness(description.Code, description.Fonts, description.SourceReaders, description.Settings).IsCurrent()
-            || !FrameVoiceCloneState.Current(description.Model))
+            || !FrameVoiceCloneState.Current(description.Model) || !PsdTachieDependencies.Current(description.Model))
         {
             if (current == Revision) Invalidate();
             return false;
@@ -639,8 +640,9 @@ internal sealed class KeyDependencyTracker : IDisposable
             Subscribe(timeline.LayerSettings);
             foreach (var item in timeline.Items) Subscribe(item);
         }
-        foreach (var character in timelines.SelectMany(t => t.Items).Select(FrameCacheKey.GetCharacter).OfType<Character>().Distinct())
-            Subscribe(character);
+        var characters = timelines.SelectMany(t => t.Items).Select(FrameCacheKey.GetCharacter).OfType<Character>().Distinct().ToArray();
+        foreach (var character in characters) Subscribe(character);
+        foreach (var shared in PsdTachieDependencies.SharedObjects(characters)) Subscribe(shared);
         var manager = scene.Scenes.UndoRedoManager;
         manager.Undoed += HistoryChanged;
         manager.Redoed += HistoryChanged;
@@ -745,7 +747,7 @@ internal sealed class KeyCapture : IDisposable
     public bool Validate(bool files = true)
     {
         if (Volatile.Read(ref disposed) != 0 || !tracker.ValidateRevision(Revision) || !environment.IsCurrent() || !tracker.HasParents(parents)
-            || !FrameVoiceCloneState.Current(Model))
+            || !FrameVoiceCloneState.Current(Model) || !PsdTachieDependencies.Current(Model))
             return false;
         // Without callbacks (no provider, no path check) nothing can change between the checks above and the return.
         bool checkPaths = files && lease is not null;
@@ -755,7 +757,15 @@ internal sealed class KeyCapture : IDisposable
         // callbacks. (Each provider is asked once: one that changes another provider's state during its own check, after
         // that provider was asked, is not caught.)
         return tracker.ValidateRevision(Revision) && environment.IsCurrent() && tracker.HasParents(parents)
-            && FrameVoiceCloneState.Current(Model) && Volatile.Read(ref disposed) == 0;
+            && FrameVoiceCloneState.Current(Model) && PsdTachieDependencies.Current(Model) && Volatile.Read(ref disposed) == 0;
+    }
+    // The native PSD parser can have loaded bytes before the cache first observed the file.
+    // Never associate those retained old pixels with a newer leased fingerprint.
+    internal bool MatchesLoadedFile(string path, string hash)
+    {
+        if (Volatile.Read(ref disposed) != 0 || lease is null || !lease.Fingerprints.TryGetValue(Path.GetFullPath(path), out var expected)) return false;
+        if (expected.ContentHash == hash) return true;
+        HostContent.Reject(path); return false;
     }
     public void Dispose() { if (Interlocked.Exchange(ref disposed, 1) == 0) lease?.Dispose(); }
 }

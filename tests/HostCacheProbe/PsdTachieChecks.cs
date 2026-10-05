@@ -1,0 +1,321 @@
+using System.Collections;
+using System.Collections.Immutable;
+using System.Diagnostics;
+using System.IO;
+using System.Numerics;
+using System.Reflection;
+using HarmonyLib;
+using NVEncVideoWriterPlugin;
+using YukkuriMovieMaker.Commons;
+using YukkuriMovieMaker.Player.Video;
+using YukkuriMovieMaker.Plugin;
+using YukkuriMovieMaker.Plugin.Voice;
+using YukkuriMovieMaker.Project.Items;
+
+internal static class PsdTachieChecks
+{
+    private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+    internal static void Run(Assembly host)
+    {
+        foreach (string name in new[] { "pixels", "hidden-vowels", "notify", "inplace-offset", "inplace-layers", "sidecar", "overwrite", "timeout", "settings-budget", "composite-failure", "preobserved-overwrite" })
+        {
+            Exception? failure = null;
+            using var finished = new ManualResetEventSlim();
+            var worker = new Thread(() =>
+            {
+                try { using var test = new Case(host, name == "hidden-vowels"); RunCase(test, name, host); }
+                catch (Exception error) { failure = error; }
+                finally { finished.Set(); }
+            }) { IsBackground = true, Name = "PSD tachie " + name };
+            worker.SetApartmentState(ApartmentState.STA); worker.Start();
+            Check(finished.Wait(TimeSpan.FromSeconds(30)), "PSD case exceeded 30 seconds: " + name);
+            if (failure is not null) throw new InvalidOperationException("PSD case " + name, failure);
+            Check(TimelineFrameCache.GpuBytes == 0 && TimelineFrameCache.ReadbackPoolBytes == 0, "PSD case leaked GPU resources");
+            Console.WriteLine("SPEEDUP2C_CHECK " + name + ": passed");
+        }
+    }
+    private static void RunCase(Case test, string name, Assembly host)
+    {
+        if (name == "inplace-layers")
+        {
+            foreach (object parameter in test.Fixture.Characters.Select(c => (object)c.TachieDefaultFaceParameter)
+                .Concat(test.Fixture.Timeline.Items.OfType<VoiceItem>().Select(v => (object)v.TachieFaceParameter)))
+            {
+                var eyeMode = parameter.GetType().GetProperty("EyeAnimation")!;
+                eyeMode.SetValue(parameter, Enum.Parse(eyeMode.PropertyType, "AlwaysClose"));
+            }
+        }
+        if (name == "composite-failure")
+        {
+            var compositing = new Harmony("ymm.tests.psd-composite-failure");
+            var assembly = Assembly.LoadFrom(Path.Combine(Path.GetDirectoryName(host.Location)!, "YukkuriMovieMaker.Plugin.FileSource.Psd.dll"));
+            var method = assembly.GetType("YukkuriMovieMaker.Plugin.FileSource.Psd.PsdFileSourcePlugin", true)!
+                .GetMethods(BindingFlags.Public | BindingFlags.Static).Single(m => m.Name == "CreateBitmap" && m.GetParameters().Length == 4);
+            try
+            {
+                compositing.Patch(method, prefix: new(typeof(PsdTachieChecks), nameof(FailComposite)));
+                TimelineFrameCache.Enabled = true;
+                for (int i = 0; i < 4; i++) { test.Update(0); TimelineFrameCache.CompletePendingStore(test.Source); }
+                Check(!PsdTachieDependencies.SafeSource(test.Source, test.Fixture.Scene, 0) && test.Store.RamBytes == 0,
+                    "Absorbed PSD compositing failure was cached");
+            }
+            finally { compositing.UnpatchAll(compositing.Id); }
+            TimelineFrameCache.Enabled = false;
+            foreach (var character in test.Fixture.Characters) PsdTachieFixture.Set(character.TachieCharacterParameter, "FilePath", Path.Combine(test.Fixture.Root, "missing.psd"));
+            test.Update(0);
+            for (int i = 0; i < 2; i++) PsdTachieFixture.Set(test.Fixture.Characters[i].TachieCharacterParameter, "FilePath", test.Fixture.Images[i]);
+            test.Update(0); byte[] recoveredPixels = test.Pixels(); test.Warm(0);
+            Check(test.Pixels().SequenceEqual(recoveredPixels), "PSD did not recover after a real source reload");
+            return;
+        }
+        TimelineFrameCache.Enabled = false; test.Update(0);
+        if (name == "timeout") { CheckTimeout(test, host); return; }
+        if (name == "preobserved-overwrite")
+        {
+            Check(!HostContent.Changed(test.Fixture.Images[0]), "Own fresh PSD was already rejected");
+            byte[] retained = test.Pixels();
+            File.WriteAllBytes(test.Fixture.Images[0], PsdTachieFixture.OwnPsd(false));
+            TimelineFrameCache.Enabled = false;
+            using (var fresh = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!, Instance, null,
+                [test.Context, test.Fixture.Scene, null], null)!)
+            {
+                fresh.Update(test.Fixture.Timeline.VideoInfo.GetTimeFrom(0), TimelineSourceUsage.Playing);
+                Check(!TimelineFrameCache.CapturePreview(test.Context.DeviceContext, fresh.Output, test.View)!.SequenceEqual(retained),
+                    "Pre-observation overwrite did not change a fresh host's pixels");
+            }
+            TimelineFrameCache.Enabled = true;
+            Check(SpinWait.SpinUntil(() =>
+            {
+                test.Update(0); TimelineFrameCache.CompletePendingStore(test.Source);
+                return HostContent.Changed(test.Fixture.Images[0]);
+            }, TimeSpan.FromSeconds(5)), "Retained PSD bytes did not reject the newer first fingerprint");
+            Check(test.Store.RamBytes == 0, "Old retained PSD pixels were stored under newer content");
+            Console.WriteLine("SPEEDUP2C_PREOBSERVED fresh_pixels_differ=true; loaded_bytes_mismatch_rejected=true");
+            return;
+        }
+
+        object settings = PsdTachieDependencies.Settings(test.Fixture.Characters[0]);
+        object eyes = settings.GetType().GetProperty("EyeAnimations")!.GetValue(settings)!;
+        object eye = ((IEnumerable)eyes).Cast<object>().Single();
+        if (name is "notify" or "inplace-offset" or "inplace-layers" or "settings-budget")
+        {
+            int frame = name == "inplace-layers" ? 0 : 32;
+            test.Warm(frame);
+            using var tracker = new KeyDependencyTracker(test.Fixture.Scene);
+            Check(tracker.TryCapture(frame, out var capture, out var reason), reason);
+            using (capture)
+            {
+                string oldModel = capture!.Model; long revision = tracker.Revision;
+                if (name == "notify")
+                {
+                    object replacement = Activator.CreateInstance(eye.GetType(), [ImmutableList.Create("i1", "i2", "i3"), 2.0, 4.0])!;
+                    var changed = eyes.GetType().GetMethod("SetItem")!.Invoke(eyes, [0, replacement]);
+                    settings.GetType().GetProperty("EyeAnimations")!.SetValue(settings, changed);
+                    Check(tracker.Revision > revision && !capture.Validate(), "Shared setting notification did not invalidate a capture");
+                }
+                else
+                {
+                    if (name == "inplace-offset") eye.GetType().GetProperty("Offset")!.SetValue(eye, 2.0);
+                    else eye.GetType().GetProperty("Layers")!.SetValue(eye, name == "settings-budget"
+                        ? Enumerable.Repeat("i1", 1025).ToImmutableList() : ImmutableList.Create("i1", "i2", "i7"));
+                    Check(tracker.Revision == revision, "The non-notifying control unexpectedly notified");
+                    Check(!PsdTachieDependencies.Current(oldModel) && !capture.Validate(), "Non-notifying shared settings left a stale capture valid");
+                }
+            }
+            if (name == "settings-budget")
+            {
+                Check(!FrameCacheKey.TryDescribe(test.Fixture.Scene, out _, out _, out _), "Oversized settings were admitted");
+                return;
+            }
+            if (name == "notify")
+            {
+                TimelineFrameCache.Enabled = false; test.Update(frame);
+                Check(PsdTachieDependencies.SafeSource(test.Source, test.Fixture.Scene, frame), "Notified native settings did not normalize");
+                byte[] notifiedPixels = test.Pixels(); test.Warm(frame);
+                Check(test.Pixels().SequenceEqual(notifiedPixels), "Notified settings cache differs from ordinary preview");
+                return;
+            }
+            Check(!PsdTachieDependencies.SafeSource(test.Source, test.Fixture.Scene, frame), "Stale normalized settings were admitted");
+            long hits = TimelineFrameCache.Hits;
+            test.Update(frame); TimelineFrameCache.CompletePendingStore(test.Source);
+            Check(TimelineFrameCache.Hits == hits, "Stale normalized source served a cached frame");
+            byte[] retained = test.Pixels();
+            TimelineFrameCache.Enabled = false;
+            using var fresh = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!, Instance, null,
+                [test.Context, test.Fixture.Scene, null], null)!;
+            fresh.Update(test.Fixture.Timeline.VideoInfo.GetTimeFrom(frame), TimelineSourceUsage.Playing);
+            byte[] updated = TimelineFrameCache.CapturePreview(test.Context.DeviceContext, fresh.Output, test.View)!;
+            Check(!retained.SequenceEqual(updated), "The stale-normalization pixel counterexample was not exercised");
+            Console.WriteLine("SPEEDUP2C_STALE " + name + ": live_vs_fresh_pixels_differ=true; cache_rejected=true");
+            return;
+        }
+        if (name is "sidecar" or "overwrite")
+        {
+            test.Warm(32); long hits = TimelineFrameCache.Hits;
+            byte[] before = test.Pixels(); string model;
+            Check(FrameCacheKey.TryDescribe(test.Fixture.Scene, out model, out _, out var reason), reason);
+            if (name == "sidecar")
+            {
+                File.WriteAllText(Path.Combine(test.Fixture.Root, "face-0-ymm.json"), "{\"EyeAnimations\":[]}");
+                Check(ReferenceEquals(PsdTachieDependencies.Settings(test.Fixture.Characters[0]), settings)
+                    && PsdTachieDependencies.Current(model), "Host unexpectedly reread its cached shared sidecar");
+                test.Update(32);
+                Check(TimelineFrameCache.Hits > hits && test.Pixels().SequenceEqual(before), "Unloaded sidecar changed the preview cache");
+                TimelineFrameCache.Enabled = false;
+                using var fresh = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!, Instance, null,
+                    [test.Context, test.Fixture.Scene, null], null)!;
+                fresh.Update(test.Fixture.Timeline.VideoInfo.GetTimeFrom(32), TimelineSourceUsage.Playing);
+                Check(TimelineFrameCache.CapturePreview(test.Context.DeviceContext, fresh.Output, test.View)!.SequenceEqual(before), "New source did not use shared cached settings");
+            }
+            else
+            {
+                File.WriteAllBytes(test.Fixture.Images[0], PsdTachieFixture.OwnPsd(false));
+                test.Update(32); Check(TimelineFrameCache.Hits == hits, "Overwritten PSD was served from cache");
+            }
+            return;
+        }
+        int[] frames = [0, 29, 30, 31, 35, 40, 45, 50, 59, 60, 74, 89, 90, 104, 119, 120, 149, 150];
+        var reference = frames.ToDictionary(frame => frame, frame => { test.Update(frame); return test.Pixels(); });
+        Check(reference.Values.Any(value => !value.SequenceEqual(reference[30])), "PSD mouth never changed pixels");
+        if (name == "hidden-vowels") Check(!reference[29].SequenceEqual(reference[30]) && !reference[35].SequenceEqual(reference[40]),
+            "PSD no-speech visibility or vowel mouth never changed");
+        foreach (int frame in frames)
+        {
+            // Hidden native sources have no normalized state yet: render those frames normally.
+            bool ready = PsdTachieDependencies.SafeSource(test.Source, test.Fixture.Scene, frame);
+            if (name == "hidden-vowels" && !ready) { TimelineFrameCache.Enabled = true; test.Update(frame); }
+            else test.Warm(frame);
+            Check(test.Pixels().SequenceEqual(reference[frame]), "PSD cached pixels differ at " + frame);
+        }
+        using var idleTracker = new KeyDependencyTracker(test.Fixture.Scene); int rendered = 0;
+        var result = IdleFramePreRenderer.PrimeLiveFrame(idleTracker, test.Fixture.Scene, test.Source, _ => rendered++,
+            30, test.View, () => true, CancellationToken.None);
+        Check(result == IdleFramePreRenderer.IdleFrameResult.Normal && rendered == 0, "Idle PSD started a competing envelope");
+    }
+    private static void CheckTimeout(Case test, Assembly host)
+    {
+        var type = host.GetType("YukkuriMovieMaker.Player.Video.Items.TachieSource", true)!;
+        var gate = (SemaphoreSlim)type.GetField("envelopeCalculationGate", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+        Check(gate.Wait(TimeSpan.FromSeconds(2)), "First calculation slot remained busy");
+        bool second = false;
+        var shortWait = new Harmony("ymm.tests.animation-short-wait");
+        try
+        {
+            Check(second = gate.Wait(TimeSpan.FromSeconds(2)), "Second calculation slot remained busy");
+            shortWait.Patch(type.GetMethod("ReadVolumeAfterRequiredWait", BindingFlags.Static | BindingFlags.NonPublic)!,
+                prefix: new(typeof(PsdTachieChecks), nameof(ShortWait)));
+            TimelineFrameCache.Enabled = true;
+            using var tracker = new KeyDependencyTracker(test.Fixture.Scene);
+            Check(SpinWait.SpinUntil(() =>
+            {
+                if (!tracker.TryCapture(30, out var capture, out _)) return false;
+                capture!.Dispose(); return true;
+            }, TimeSpan.FromSeconds(5)), "Timeout frame never finished keying");
+            test.Update(30); TimelineFrameCache.CompletePendingStore(test.Source);
+            Check(!FrameRenderReadiness.WasLastUpdateReady(test.Source, test.Fixture.Timeline.VideoInfo.GetTimeFrom(30))
+                && test.Store.RamBytes == 0, "The real host's timed-out zero was saved");
+        }
+        finally { shortWait.UnpatchAll(shortWait.Id); if (second) gate.Release(); gate.Release(); }
+        test.Warm(30);
+        var core = CoreSource(test.Source, test.Fixture.Tachies[0]);
+        var sessionField = type.GetField("volumeEnvelopeSession", Instance)!;
+        var taskField = type.GetField("envelopeTask", Instance)!;
+        var originalSession = sessionField.GetValue(core); var originalTask = taskField.GetValue(core);
+        try
+        {
+            var sessionType = host.GetType("YukkuriMovieMaker.Player.Audio.LipSyncEnvelopeSession", true)!;
+            foreach (string terminal in new[] { "Fail", "Cancel" })
+            {
+                var session = Activator.CreateInstance(sessionType, Instance, null, [30], null)!;
+                sessionType.GetMethod("Publish", Instance)!.Invoke(session, [0, 0.0]);
+                sessionType.GetMethod(terminal, Instance)!.Invoke(session, null);
+                var completedTask = Task.CompletedTask;
+                sessionField.SetValue(core, session); taskField.SetValue(core, completedTask);
+                Check((int)sessionType.GetProperty("PublishedFrameCount")!.GetValue(session)! == 1 && completedTask.IsCompletedSuccessfully, "Partial-session control was not published successfully");
+                object[] args = [TimelineSourceUsage.Playing, 0, 30, session, completedTask, TimeSpan.Zero, null!, null!];
+                Check(!NativeTachieReadiness.ValueReady(core, 4, args, 0), "Partially published " + terminal + " was accepted as completed zero");
+            }
+        }
+        finally { sessionField.SetValue(core, originalSession); taskField.SetValue(core, originalTask); }
+    }
+    private static bool FailComposite(ref Vortice.Direct2D1.ID2D1Bitmap? __result) { __result = null; return false; }
+    private static void ShortWait(object[] __args) => __args[5] = TimeSpan.Zero;
+    private static object CoreSource(object source, TachieItem item)
+    {
+        var resources = (IDictionary)source.GetType().GetField("timelineResources", Instance)!.GetValue(source)!;
+        return resources[item]!.GetType().GetProperty("Source", Instance)!.GetValue(resources[item])!;
+    }
+    private static bool SkipLoader() => false;
+    private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
+
+    private sealed class Case : IDisposable
+    {
+        internal readonly PsdTachieFixture Fixture;
+        internal readonly GraphicsDevices Devices = new();
+        internal readonly IGraphicsDevicesAndContext Context;
+        internal readonly ITimelineSource Source;
+        internal readonly FrameCacheStore Store;
+        internal readonly TimelineFrameCache.PreviewViewport View;
+        private readonly Harmony harmony = new("ymm.tests.psd-checks");
+        private readonly bool oldPreview = TimelineFrameCache.PreviewEnabled, oldExport = TimelineFrameCache.ExportEnabled, oldGpu = TimelineFrameCache.GpuRetentionEnabled;
+        private readonly Func<object, TimelineFrameCache.PreviewViewport?>? oldViewport = TimelineFrameCache.TestViewport;
+        private readonly FrameCacheStore? oldStore = TimelineFrameCache.StoreIfCreated;
+        internal Case(Assembly host, bool vowels)
+        {
+            harmony.Patch(typeof(PluginAssemblyLoader).TypeInitializer!, prefix: new(typeof(PsdTachieChecks), nameof(SkipLoader)));
+            ProbeLoader.Stub(ProbeLoader.Assemblies(host).Append(Assembly.LoadFrom(Path.Combine(Path.GetDirectoryName(host.Location)!, PsdTachieDependencies.AssemblyName + ".dll"))));
+            Fixture = new(vowels);
+            var voices = Fixture.Timeline.Items.OfType<VoiceItem>().Take(2).ToArray();
+            voices[0].Frame = 30; voices[0].Length = 30; voices[1].Frame = 90; voices[1].Length = 30;
+            if (vowels)
+            {
+                foreach (var character in Fixture.Characters)
+                {
+                    object settings = PsdTachieDependencies.Settings(character);
+                    var vowelType = character.TachieType.Assembly.GetType(PsdTachieDependencies.AssemblyName + ".PsdVowelMouthAnimation", true)!;
+                    object vowel = Activator.CreateInstance(vowelType)!;
+                    foreach (var (name, layer) in new[] { ("Key", "i4"), ("A", "i4"), ("I", "i5"), ("U", "i6"), ("E", "i5"), ("O", "i6"), ("Silence", "i4") })
+                        vowelType.GetProperty(name)!.SetValue(vowel, layer);
+                    var list = settings.GetType().GetProperty("MouthVowelAnimations")!.GetValue(settings)!;
+                    settings.GetType().GetProperty("MouthVowelAnimations")!.SetValue(settings, list.GetType().GetMethod("Add")!.Invoke(list, [vowel]));
+                }
+                var shapes = new[] { MouthShape.A, MouthShape.I, MouthShape.U, MouthShape.E, MouthShape.O };
+                foreach (var voice in voices)
+                    voice.LipSyncFrames = shapes.Select((shape, i) => new LipSyncFrame(TimeSpan.FromSeconds(i / 3.0), shape)).ToArray();
+            }
+            Fixture.Timeline.Items = Fixture.Timeline.Items.Where(item => item is TachieItem).ToImmutableList().AddRange(voices);
+            Fixture.Timeline.RefreshTimelineLengthAndMaxLayer();
+            Context = Devices.CreateContext();
+            Source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!, Instance, null, [Context, Fixture.Scene, null], null)!;
+            var dc = Context.DeviceContext;
+            View = new(321, 181, Matrix3x2.Identity, new Vector2(160.5f, 90.5f), 96, 96,
+                new Vortice.DCommon.PixelFormat(Vortice.DXGI.Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),
+                dc.AntialiasMode, dc.TextAntialiasMode, dc.PrimitiveBlend, dc.UnitMode, Fixture.Scene.ID, Fixture.Timeline.ID, Stopwatch.GetTimestamp(), false);
+            Store = new(Path.Combine(Fixture.Root, "store"), 64L << 20, 0);
+            TimelineFrameCache.Enabled = false; TimelineFrameCache.GpuRetentionEnabled = false;
+            Check(TimelineFrameCache.TryInstall(host, harmony, out var reason), reason);
+            TimelineFrameCache.UseStore(Store); TimelineFrameCache.TestViewport = value => ReferenceEquals(value, Source) ? View : null;
+        }
+        internal void Update(int frame) => Source.Update(Fixture.Timeline.VideoInfo.GetTimeFrom(frame), TimelineSourceUsage.Playing);
+        internal byte[] Pixels() => TimelineFrameCache.CapturePreview(Context.DeviceContext, Source.Output, View)!;
+        internal void Warm(int frame)
+        {
+            TimelineFrameCache.Enabled = true;
+            Check(SpinWait.SpinUntil(() =>
+            {
+                Update(frame); TimelineFrameCache.CompletePendingStore(Source);
+                long hits = TimelineFrameCache.Hits; Update(frame);
+                return TimelineFrameCache.Hits > hits;
+            }, TimeSpan.FromSeconds(5)), "PSD frame did not become reusable: " + frame + "; " + TimelineFrameCache.Status);
+        }
+        public void Dispose()
+        {
+            TimelineFrameCache.Enabled = false; TimelineFrameCache.TestViewport = oldViewport;
+            Source.Dispose(); Context.CacheProvider.Clear(); Context.Dispose(); Devices.Dispose();
+            FrameRenderReadiness.Uninstall(harmony); harmony.UnpatchAll(harmony.Id);
+            if (oldStore is not null) TimelineFrameCache.UseStore(oldStore);
+            Store.Dispose(); Fixture.Dispose();
+            TimelineFrameCache.GpuRetentionEnabled = oldGpu; TimelineFrameCache.SetEnabled(oldPreview, oldExport);
+        }
+    }
+}

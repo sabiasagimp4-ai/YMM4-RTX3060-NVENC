@@ -90,6 +90,7 @@ internal static class FrameCacheKey
             if (items.Length > 100_000) return Bypass("プロジェクトがキャッシュ検査の上限を超えています。", out reason);
             var voiceInputs = FrameVoiceCloneState.Capture(timelines);
             var characters = items.Select(GetCharacter).OfType<Character>().Distinct().OrderBy(c => c.Name, StringComparer.Ordinal).ToArray();
+            var psdInputs = PsdTachieDependencies.Capture(characters);
             var paths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             var resources = new SortedSet<string>(StringComparer.Ordinal);
             var nestedPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -163,7 +164,11 @@ internal static class FrameCacheKey
                     string[] animationFiles = [];
                     if (root && item is TachieItem animationItem)
                         animation = AnimationTachieDependencies.TryFiles(animationItem, timeline, out animationFiles);
-                    bool supportedTachie = simple || animation;
+                    bool psd = false;
+                    string[] psdFiles = [];
+                    if (root && item is TachieItem psdItem)
+                        psd = PsdTachieDependencies.TryFiles(psdItem, timeline, out psdFiles);
+                    bool supportedTachie = simple || animation || psd;
                     bool animationCharacter = AnimationTachieDependencies.Character(GetCharacter(item));
                     bool simpleCharacter = SimpleTachieDependencies.Character(GetCharacter(item));
                     // Code this plugin did not read renders a plugin's item type, a plugin's shape, and (below) a
@@ -174,7 +179,8 @@ internal static class FrameCacheKey
                         || item is ShapeItem shape && !code.Knows(shape.ShapeType2)
                         || item is TransitionItem transition && transition.TransitionType is { } transitionType && !code.Knows(transitionType)
                         || GetCharacter(item) is { } character && foreignCharacters.Contains(character);
-                    bool session = animation, culture = false;
+                    bool session = animation || psd, culture = false;
+                    if (psd) { itemResources.Add(PsdTachieDependencies.Resource(psdInputs.Single(input => ReferenceEquals(input.Character, GetCharacter(item))))); itemResources.Add(PsdTachieDependencies.SessionResource + "/" + RuntimeHelpers.GetHashCode(item)); }
                     if (animation) itemResources.Add(AnimationTachieDependencies.SessionResource + "/" + RuntimeHelpers.GetHashCode(item));
                     string[]? frameFiles = null;
                     try
@@ -203,6 +209,7 @@ internal static class FrameCacheKey
                             foreach (var effect in supportedItem.VideoEffects.OfType<IFileItem>())
                                 foreach (var file in effect.GetFiles()) AddPath(file, itemPaths);
                             if (animation) foreach (string file in animationFiles) AddPath(file, itemPaths);
+                            if (psd) foreach (string file in psdFiles) AddPath(file, itemPaths);
                             if (simple) paths.UnionWith(fileRanges!.SelectMany(range => range.Files));
                             if (!root && simple) itemPaths.UnionWith(fileRanges!.SelectMany(range => range.Files));
                         }
@@ -298,6 +305,7 @@ internal static class FrameCacheKey
                 voiceInputs.Where(input => FrameVoiceCloneState.CanShare(input.Live)).Select(input =>
                     $"Timelines[{input.TimelineIndex}].Items[{input.ItemIndex}].VoiceCache").ToHashSet(StringComparer.Ordinal));
             FrameVoiceCloneState.Bind(model, voiceInputs);
+            PsdTachieDependencies.Bind(model, psdInputs);
             if (model.Length > MaximumModelCharacters)
                 return Bypass($"プロジェクトの描画状態がキャッシュ検査の上限を超えています（埋め込みデータ {FrameDescriptionJson.EmbeddedBytesCount(model) / 1024:N0} KiB、うちボイス {items.OfType<VoiceItem>().Sum(voice => (long)(voice.VoiceCache?.Length ?? 0)) / 1024:N0} KiB）。", out reason);
             // Runtime types in polymorphic parameters and effects are checked while the model is split (strings stay

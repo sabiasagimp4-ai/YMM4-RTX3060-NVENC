@@ -33,3 +33,14 @@ dotnet run --project tests/ReadinessChecks/ReadinessChecks.csproj -c Release
 ```
 
 試験の条件・結果は [開発方針](../../docs/AE_CACHE_DEVELOPMENT.md)、計測の意味は [診断](../../docs/CACHE_DIAGNOSTICS.md)、ホスト更新は [契約](../../docs/HOST_CONTRACTS.md) を参照。
+
+### PSD立ち絵（計画2c）
+
+```powershell
+dotnet run --project tests/HostCacheProbe -c Release "-p:YMM4DirPath=D:\YMM4\" -- D:\YMM4 --psd-tachie-check
+dotnet run --project tests/HostCacheProbe -c Release "-p:YMM4DirPath=D:\YMM4\" -- D:\YMM4 --psd-tachie-measure
+```
+
+自作7layer PSDの画素、非表示／母音、設定通知、非通知Offset／Layersの実画素反例、共有sidecar、PSD上書き、時間切れ・部分失敗／取消、設定上限、CPU合成失敗と回復、最初の指紋より前のPSD上書きを独立STA／デバイス・各30秒以内で検査する。計測は2体・20voice・60秒15fps900frame。`SPEEDUP2C` の `cache_hits`／`ms_per_frame` と `SPEEDUP2C_PIXELS` を出す。referenceとcacheの全900frameを全byte比較し、readbackは時間に含めない。WARPの値をRTX3060の速度としない。
+
+アニメーション立ち絵の `--animation-tachie-check` は、120 frameでキャッシュのオン・オフを切り替える `output-lifetime` も検査する。通常描画と全byte一致し、元のhost command listが更新ごとに管理リストへ蓄積しないことを確認する。

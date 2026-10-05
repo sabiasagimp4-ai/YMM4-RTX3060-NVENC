@@ -7,6 +7,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../NVEncVideoWriterPlugin/PsdTachieDependencies.cs" Link="PsdTachieDependencies.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/AnimationTachieDependencies.cs" Link="AnimationTachieDependencies.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/NativeTachieReadiness.cs" Link="NativeTachieReadiness.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameRenderModelComparison.cs" Link="FrameRenderModelComparison.cs" />

@@ -88,3 +88,15 @@ PNGのみ・付属INIなしを対象とし、全候補部品と番号付き／�
 停止中の先読みは、AnimationTachieを含むroot sceneで追加の音量計算を開始せず見送る。動画部品、付属INI、差分合成、group、同一layerの表情競合、入れ子sceneは今回の対象外。再生／一時停止／出力でホストが完成させたフレームを再利用する範囲で検査する。
 
 AnimationTachieの一覧は同期列挙をフォルダー単位でまとめるが、参照前と採用直前の検証は残す。初期一覧の内容は16MiB、4,096件に制限し、上限超過はbypassする。大文字小文字だけが異なるファイル名が同時にあるフォルダーも、依存の別名を取り違えないため対象外。
+
+## PSD立ち絵の共有設定と保持状態（2c）
+
+`psd-tachie` は `lip-sync-readiness` に依存し、同梱Tachie.Psd、FileSource.Psd、PsdParserの全型、TachieItem／FaceItem／IFaceItemを照合する。口パクのHarmony対象は2bの2メソッドを共有し、新しいhookは追加しない。全記録済み版（現在4.56.1.0のみ）の基準をemitで再生成した。実行時にも3つの読込moduleのMVIDと同梱配置を確認し、契約キャッシュの識別にPsdParser.dllも含める。
+
+PSDファイルをlease／指紋／HostContentの依存にする。`PsdFileSettings.LoadFromPsdFilePath` が返す共有オブジェクトの実JSONをキーのresourceに含め、PropertyChangedを購読する。通知されない子要素の変更も、記述時と同じJSONの弱いmodel witnessを参照前・採用前に照合し、古いcaptureを無効にする。キーとwitnessは同じ設定snapshotを使う。設定検査は4,096node、深さ5、1list 1,024要素、文字合計65,536・各4,096、JSON262,144文字に制限し、未知の型や非有限数は対象外。
+
+さらに、実ソースのPSD／root／共有設定の同一性と、正規化済み設定を共有設定のreadonly `ResolveAgainst(root)` の結果と比較する。子要素を直接書き換えたときにホストが古いnormalized設定を保持する場合は、通常描画に戻し保存しない。CPU合成失敗時の空bitmapも、PSDのcanvas寸法との不一致から拒否する。未読込・非表示でrootを解放したソースも保守的に通常描画。正規化確認のroot参照はweakであり、非表示後のPSD画像データを保持しない。通知付きlist置換でホストが正規化を更新した後に再利用できる。
+
+sidecarの再読込を追加しない。ホストは起動中の同一パスで共有設定を保持するため、sidecarの外部上書きだけでは通常の新規sourceでも設定は変わらない。キーはsidecarの生bytesではなく、ホストが実際に使う共有設定に従う。既定まばたきにはSessionキーを用い、PSDを含むroot sceneの停止中先読みは追加の音量計算を始めず見送る。group、表情の同一layer競合、入れ子scene、外部立ち絵は対象外。
+
+PSDをキャッシュ有効化前に読み込んでいた場合も、parserが保持するreadonly bytesのSHA-256（parsed fileごとに一度）とcaptureのlease指紋を比較する。不一致ならHostContentを再起動まで対象外にし、古い画素を新しいファイルのキーへ保存しない。元のstreamや配列の所有権は変更しない。

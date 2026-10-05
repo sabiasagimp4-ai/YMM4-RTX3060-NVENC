@@ -21,6 +21,7 @@ internal static partial class HostContracts
     internal const string SimpleTachie = "simple-tachie";
     internal const string LipSync = "lip-sync-readiness";
     internal const string AnimationTachie = "animation-tachie";
+    internal const string PsdTachie = "psd-tachie";
     internal const string DecoderPrefix = "decoder:";
     internal const string Missing = "missing";
 
@@ -149,6 +150,11 @@ internal static partial class HostContracts
                 "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.TachieFaceItem",
                 "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.IFaceItem",
             ], ["YukkuriMovieMaker.Plugin.Tachie.AnimationTachie"], []),
+        new(PsdTachie, [LipSync],
+            ["YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.TachieItem",
+             "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.TachieFaceItem",
+             "YukkuriMovieMaker|YukkuriMovieMaker.Project.Items.IFaceItem"],
+            ["YukkuriMovieMaker.Plugin.Tachie.Psd", "YukkuriMovieMaker.Plugin.FileSource.Psd", "PsdParser"], []),
         // Whether a decoder holds the requested frame (FrameRenderReadiness) depends on its whole assembly.
         .. decoderAssemblies.Select(assembly => new Rule(DecoderPrefix + assembly, [Core], [], [assembly], [])),
     ];
@@ -296,7 +302,8 @@ internal static partial class HostContracts
     internal static string VerdictKey(string hostDirectory, string pluginIdentity)
     {
         return pluginIdentity + ";" + string.Join(";", Directory.GetFiles(hostDirectory, "YukkuriMovieMaker*.dll")
-            .Order(StringComparer.OrdinalIgnoreCase).Select(path => $"{Path.GetFileName(path)}={Identity(path)}"));
+            .Concat(Rules.SelectMany(rule => rule.Assemblies).Select(name => Path.Combine(hostDirectory, name + ".dll")).Where(File.Exists))
+            .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).Select(path => $"{Path.GetFileName(path)}={Identity(path)}"));
 
         static string Identity(string path)
         {

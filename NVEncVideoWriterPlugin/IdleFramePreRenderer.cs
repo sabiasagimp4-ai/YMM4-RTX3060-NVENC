@@ -359,7 +359,7 @@ internal static partial class IdleFramePreRenderer
         Scene cloneScene, object source, Action<TimeSpan> render, int frame, TimelineFrameCache.PreviewViewport viewport,
         Func<bool> canContinue, CancellationToken token, out string reason)
     {
-        if (AnimationTachieDependencies.ContainsNative(liveScene))
+        if ((AnimationTachieDependencies.ContainsNative(liveScene) || PsdTachieDependencies.ContainsNative(liveScene)))
         { reason = "口パクの計算枠を再生に残すため、立ち絵の先読みを見送ります。"; return IdleFrameResult.Normal; }
         if (!TryCapturePair(liveTracker, cloneTracker, frame, out var liveCapture, out var cloneCapture, out reason))
             return liveTracker.RendersNormally(frame) || cloneTracker.RendersNormally(frame) ? IdleFrameResult.Normal : IdleFrameResult.NotKeyed;
@@ -386,7 +386,7 @@ internal static partial class IdleFramePreRenderer
         TimelineFrameCache.PreviewViewport viewport, Func<bool> canContinue, CancellationToken token, out string reason, bool allowLive = true)
     {
         reason = string.Empty;
-        if (AnimationTachieDependencies.ContainsNative(liveScene)) return IdleFrameResult.Normal;
+        if ((AnimationTachieDependencies.ContainsNative(liveScene) || PsdTachieDependencies.ContainsNative(liveScene))) return IdleFrameResult.Normal;
         if (liveTracker.IsSessionKeyed(frame))
         {
             if (!allowLive) return IdleFrameResult.Unavailable;
@@ -406,7 +406,7 @@ internal static partial class IdleFramePreRenderer
     internal static IdleFrameResult PrimeLiveFrame(KeyDependencyTracker liveTracker, Scene liveScene, object source, Action<TimeSpan> render,
         int frame, TimelineFrameCache.PreviewViewport viewport, Func<bool> canContinue, CancellationToken token)
     {
-        if (AnimationTachieDependencies.ContainsNative(liveScene)) return IdleFrameResult.Normal;
+        if ((AnimationTachieDependencies.ContainsNative(liveScene) || PsdTachieDependencies.ContainsNative(liveScene))) return IdleFrameResult.Normal;
         if (!liveTracker.TryCapture(frame, out var capture, out _))
             return liveTracker.RendersNormally(frame) && !liveTracker.IsSessionKeyed(frame) ? IdleFrameResult.Normal : IdleFrameResult.Unavailable;
         using (capture)
