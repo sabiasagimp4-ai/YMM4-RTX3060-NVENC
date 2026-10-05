@@ -81,6 +81,8 @@ internal static class ApiCheck
                 var field = module.Reader.GetFieldDefinition(handle);
                 if (module.Reader.StringComparer.Equals(field.Name, name) && module.MemberSignature(field.Signature) == signature) return true;
             }
+            // System.Object and interfaces have no base type (a nil handle that still reads as a TypeDefinition).
+            if (definition.BaseType.IsNil) return false;
             var (baseAssembly, baseName) = definition.BaseType.Kind switch
             {
                 HandleKind.TypeDefinition => (module.Assembly, module.Name((TypeDefinitionHandle)definition.BaseType)),
