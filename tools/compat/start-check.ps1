@@ -41,8 +41,6 @@ public static class StartWin
     public static string Class(IntPtr h) { var s = new StringBuilder(256); GetClassName(h, s, 256); return s.ToString(); }
 }
 '@
-# Windows PowerShell reads this file in the system code page: non-ASCII text is written as escapes.
-$aboutTitle = [regex]::Unescape('^About|\u30D0\u30FC\u30B8\u30E7\u30F3\u60C5\u5831')
 
 # Install the plugin (every file of the package) and answer YMM4's first-start questions in its settings.
 $target = Join-Path $HostDir 'user\plugin\YMM4Rtx3060Nvenc'
@@ -60,6 +58,7 @@ $env:YMM4_RTX3060_NVENC_STATUS_FILE = $statusFile
 $result = [ordered]@{ fileVersion = $version; started = $false; mainWindow = $false; status = $null; exitCode = $null
     windows = New-Object System.Collections.Generic.List[string]; dialogs = New-Object System.Collections.Generic.List[string] }
 $seen = @{}
+$closed = @{}
 $process = Start-Process (Join-Path $HostDir 'YukkuriMovieMaker.exe') -PassThru
 $result.started = $true
 try {
@@ -78,7 +77,11 @@ try {
                 # a box needs is not known here, and answering one can end YMM4 or start its updater.
                 $text = [StartWin]::Describe($handle)
                 if ($text -and -not $result.dialogs.Contains($text)) { $result.dialogs.Add($text); Write-Output "dialog: $text" }
-            } elseif ($class -like 'HwndWrapper*' -and $title -match $aboutTitle) {
+            } elseif ($class -like 'HwndWrapper*' -and $title -and $title -notmatch '^YukkuriMovieMaker v' -and -not $closed.ContainsKey([string]$handle)) {
+                # A window of YMM4's own before the main one (the update check, the first-start "about" window): close
+                # it once, as a user would. Closing the update check does not update.
+                $closed[[string]$handle] = $true
+                Write-Output "closing: $title"
                 [StartWin]::PostMessage($handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
             }
         }
