@@ -44,6 +44,9 @@ public sealed class FrameCacheToolSettings : SettingsBase<FrameCacheToolSettings
     // at the limit. Zero keeps none.
     private bool automaticGpuBudget = true;
     private int gpuLimitMiB = -1;
+    private int gpuBudgetMigrationVersion;
+    public int GpuBudgetMigrationVersion { get => gpuBudgetMigrationVersion; set => Set(ref gpuBudgetMigrationVersion, value); }
+    internal bool GpuBudgetMigrationPending { get; set; }
     public bool AutomaticGpuBudget
     {
         get => automaticGpuBudget;
@@ -139,9 +142,17 @@ public sealed class FrameCacheToolSettings : SettingsBase<FrameCacheToolSettings
     public override object? SettingView => new PluginSettingsPanel();
     public override void Initialize()
     {
-        if (SettingsVersion >= 1) return;
-        PreviewCache = ExportCache = Enabled;
-        SettingsVersion = 1;
+        if (SettingsVersion < 1)
+        {
+            PreviewCache = ExportCache = Enabled;
+            SettingsVersion = 1;
+        }
+        // Only the old automatic default is lifted; manual and other limits remain user choices.
+        // Persist a separate marker, so selecting Auto + 2048 later is never migrated again.
+        if (GpuBudgetMigrationVersion >= 1) return;
+        if (AutomaticGpuBudget && GpuLimitMiB == 2048) GpuLimitMiB = -1;
+        GpuBudgetMigrationVersion = 1;
+        GpuBudgetMigrationPending = true;
     }
 }
 
