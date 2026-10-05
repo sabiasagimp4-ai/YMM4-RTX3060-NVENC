@@ -111,18 +111,22 @@ internal static class HostIntegration
                 }
                 installed = true;
                 string features = string.Empty;
-                if (!verified)
+                if (host.ManifestModule.ModuleVersionId != HostFeatures.ReadBuild)
                 {
-                    // A build that was not read: the cache only where its code is that of a read build.
-                    version = HostVersion(host);
-                    if (!TryMatchReadBuild(host, out var matched, out var detail))
+                    // A build that was not read: the cache only where its code is that of a read build or of a build
+                    // whose differences from it were reviewed (a known build keeps its own features otherwise).
+                    if (!verified) version = HostVersion(host);
+                    if (TryMatchReadBuild(host, out var matched, out var detail))
+                    {
+                        HostFeatures.Decide(host, matched);
+                        features = $"キャッシュが前提とする本体のコードが確認済みの版（{matched.Basis}）と同じため使います。{detail}";
+                    }
+                    else if (!verified)
                     {
                         cacheAvailable = false;
                         status = $"YMM4 {version}（未確認の版）: {ExportStatus()}自動キャッシュは使いません: {detail}";
                         return true;
                     }
-                    HostFeatures.Decide(host, matched);
-                    features = $"キャッシュが前提とする本体のコードが検証済みの {matched.Basis} と同じため使います。{detail}";
                 }
                 cacheAvailable = TimelineFrameCache.TryInstall(host, cacheHarmony, out reason);
                 if (!cacheAvailable) cacheHarmony.UnpatchAll(cacheHarmony.Id);
@@ -242,8 +246,24 @@ internal static class HostIntegration
                 return false;
             }
             features = FeaturesFrom(evaluation);
-            detail = evaluation.Problems.Count == 0 ? string.Empty
-                : "使わない機能: " + string.Join(" / ", evaluation.Problems.Select(p => $"{p.Key}（{p.Value}）"));
+            // The tachie gates also require the bundled tachie assembly that was read (its MVID), whatever the contracts.
+            var problems = new SortedDictionary<string, string>(evaluation.Problems.ToDictionary(p => p.Key, p => p.Value), StringComparer.Ordinal);
+            bool Bundled(bool enabled, string feature, string assembly, Guid read)
+            {
+                if (!enabled) return false;
+                try { if (HostFingerprint.ReadMvid(Path.Combine(directory, assembly + ".dll")) == read) return true; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or BadImageFormatException or InvalidOperationException) { }
+                problems[feature] = "同梱の立ち絵が確かめたものと異なります";
+                return false;
+            }
+            features = features with
+            {
+                SimpleTachie = Bundled(features.SimpleTachie, HostContracts.SimpleTachie, SimpleTachieDependencies.AssemblyName, SimpleTachieDependencies.ReadBuild),
+                AnimationTachie = Bundled(features.AnimationTachie, HostContracts.AnimationTachie, AnimationTachieDependencies.AssemblyName, AnimationTachieDependencies.ReadBuild),
+                PsdTachie = Bundled(features.PsdTachie, HostContracts.PsdTachie, PsdTachieDependencies.AssemblyName, PsdTachieDependencies.ReadBuild),
+            };
+            detail = problems.Count == 0 ? string.Empty
+                : "使わない機能: " + string.Join(" / ", problems.Select(p => $"{p.Key}（{p.Value}）"));
             return true;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)

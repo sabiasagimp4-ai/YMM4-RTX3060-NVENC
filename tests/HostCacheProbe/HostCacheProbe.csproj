@@ -12,6 +12,7 @@
     <Compile Include="../../NVEncVideoWriterPlugin/NativeTachieReadiness.cs" Link="NativeTachieReadiness.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameRenderModelComparison.cs" Link="FrameRenderModelComparison.cs" />
     <Compile Include="../CacheChecks/VoiceDescriptionMeasurements.cs" Link="VoiceDescriptionMeasurements.cs" />
+    <Compile Include="../CacheChecks/HostCompat.cs" Link="HostCompat.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameAdmissionHistory.cs" Link="FrameAdmissionHistory.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameCacheEconomics.cs" Link="FrameCacheEconomics.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/ProcessingTraceHooks.cs" Link="ProcessingTraceHooks.cs" />
@@ -35,6 +36,7 @@
     <Compile Include="..\..\NVEncVideoWriterPlugin\HostFeatures.cs" Link="HostFeatures.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\HostContracts.cs" Link="HostContracts.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\HostBaselines.cs" Link="HostBaselines.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\HostReviewedBuilds.cs" Link="HostReviewedBuilds.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\HostFingerprint.cs" Link="HostFingerprint.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameTimeKey.cs" Link="FrameTimeKey.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\PreviewRects.cs" Link="PreviewRects.cs" />
@@ -70,4 +72,6 @@
     <Reference Include="SharpGen.Runtime"><HintPath>$(YMM4DirPath)SharpGen.Runtime.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="SharpGen.Runtime.COM"><HintPath>$(YMM4DirPath)SharpGen.Runtime.COM.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
+  <!-- Like the plugin: also runs on the older YMM4 builds the plugin supports (ymm4-compat builds it against the read build). -->
+  <Import Project="..\..\NVEncVideoWriterPlugin\HostReferenceVersion.targets" />
 </Project>

@@ -39,7 +39,7 @@ internal static class IdleFramePreRendererChecks
             var timeline = new Timeline();
             timeline.Items = timeline.Items.Add(new ImageItem { FilePath = Path.Combine(link, "linked.png"), Frame = 0, Length = 10, Layer = 1 });
             timeline.RefreshTimelineLengthAndMaxLayer();
-            var scenes = new Scenes(false);
+            var scenes = HostCompat.NewScenes();
             scenes.AddScene(timeline);
             var live = new Scene(timeline, scenes, []);
             Check(FrameCacheKey.TryDescribe(live, out var model, out _, out var reason), reason);
@@ -79,7 +79,7 @@ internal static class IdleFramePreRendererChecks
         shaking.X.AnimationType = YukkuriMovieMaker.Commons.AnimationType.ランダム移動;
         timeline.Items = timeline.Items.Add(still).Add(shaking);
         timeline.RefreshTimelineLengthAndMaxLayer();
-        var scenes = new Scenes(false);
+        var scenes = HostCompat.NewScenes();
         scenes.AddScene(timeline);
         var live = new Scene(timeline, scenes, []);
         Check(FrameCacheKey.TryDescribe(live, out var model, out _, out var reason), reason);
@@ -116,7 +116,7 @@ internal static class IdleFramePreRendererChecks
 
             primeCalls = 0;
             result = IdleFramePreRenderer.PrimeLiveFrame(liveTracker, live, new object(),
-                _ => shaking.X.SetFirstValue(shaking.X.GetValue(0, 100, 30) + 1), 70, viewport, () => true, CancellationToken.None);
+                _ => shaking.X.SetFirst(shaking.X.GetValue(0, 100, 30) + 1), 70, viewport, () => true, CancellationToken.None);
             Check(result == IdleFramePreRenderer.IdleFrameResult.Unavailable && Volatile.Read(ref primeCalls) == 0,
                 $"A frame edited during its live render was stored ({result})");
         }
@@ -140,12 +140,12 @@ internal static class IdleFramePreRendererChecks
         timeline.VideoInfo.Width = 321;
         timeline.VideoInfo.Height = 181;
         var shape = new ShapeItem { Frame = 4, Length = 90 };
-        shape.X.SetFirstValue(-12.25);
+        shape.X.SetFirst(-12.25);
         timeline.Items = timeline.Items.Add(shape);
         // As YMM4 does on load and after edits; setting Items alone leaves Length at 1.
         timeline.RefreshTimelineLengthAndMaxLayer();
         Check(timeline.Length == 94, "Test timeline length: " + timeline.Length);
-        var scenes = new Scenes(false);
+        var scenes = HostCompat.NewScenes();
         scenes.AddScene(timeline);
         var live = new Scene(timeline, scenes, []);
         var pluginAssembly = typeof(FrameCacheToolPlugin).Assembly;
@@ -176,7 +176,7 @@ internal static class IdleFramePreRendererChecks
         var renderer = assembly.GetType("NVEncVideoWriterPlugin.IdleFramePreRenderer", true)!;
         var method = renderer.GetMethod("TryPrimeIfCurrent", BindingFlags.Static | BindingFlags.NonPublic)!;
         var timeline = new Timeline();
-        var scenes = new Scenes(false);
+        var scenes = HostCompat.NewScenes();
         scenes.AddScene(timeline);
         var liveScene = new Scene(timeline, scenes, []);
         string model = DescribePluginScene(assembly, liveScene, out _);

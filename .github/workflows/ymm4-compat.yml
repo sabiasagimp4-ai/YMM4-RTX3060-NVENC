@@ -15,7 +15,8 @@ name: ymm4-compat
 #               (tools/HostFingerprint scan).
 #  4. check:    on Windows, the versions the files allow: YMM4 started with the plugin installed, where the plugin
 #               itself reports what it enabled (tools/compat/start-check.ps1).
-#  5. tests:    for a new YMM4 version (or on request), the plugin and the cache checks built against that version.
+#  5. tests:    for a new YMM4 version (or on request), the plugin and the cache checks built like a release (against
+#               the read build, with the lowered reference) and run on that version as an unread build.
 #  6. publish:  tools/compat/ymm4_compat.py merges and renders; the result is committed to the default branch, and a
 #               newly published YMM4 version gets an issue with its result.
 # YMM4 is downloaded from its own update server the way its updater does, and kept only in the Actions cache; it is
@@ -251,7 +252,7 @@ jobs:
           path: results
 
   tests:
-    needs: [plan, files]
+    needs: [plan, files, reference]
     if: needs.files.outputs.loadable != '[]' && needs.files.outputs.loadable != '' && (inputs.tests || (github.event_name == 'schedule' && contains(fromJSON(needs.files.outputs.loadable), needs.plan.outputs.newest)))
     runs-on: windows-2022
     timeout-minutes: 45
@@ -262,12 +263,17 @@ jobs:
         version: ${{ fromJSON(inputs.tests && needs.files.outputs.loadable || format('["{0}"]', needs.plan.outputs.newest)) }}
     env:
       YMM4_DIR: '${{ github.workspace }}\app\'
+      REFERENCE_DIR: '${{ github.workspace }}\host\'
       PROBE_VIDEO: '${{ github.workspace }}\probe-video.mp4'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - uses: actions/download-artifact@v4
+        with:
+          name: reference-host
+          path: host
       - uses: actions/cache@v4
         with:
           path: app
@@ -286,18 +292,18 @@ jobs:
           if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress | Select-Object -Last 1 }
           $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
           ffmpeg -v error -f lavfi -i testsrc=size=320x180:rate=30 -t 2 -c:v libx264 -pix_fmt yuv420p -y $env:PROBE_VIDEO
-      - name: Build the plugin against this YMM4
+      - name: Build the plugin like a release
         id: build
         continue-on-error: true
         run: |
-          dotnet build NVEncVideoWriterPlugin\NVEncVideoWriterPlugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --nologo
+          dotnet build NVEncVideoWriterPlugin\NVEncVideoWriterPlugin.csproj -c Release "-p:YMM4DirPath=$env:REFERENCE_DIR" --nologo
           if ($LASTEXITCODE -ne 0) { throw 'Plugin build failed' }
       - name: Cache key checks (real host)
         id: keys
         if: steps.build.outcome == 'success'
         continue-on-error: true
         run: |
-          dotnet run --project tests\CacheChecks\CacheChecks.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR
+          dotnet run --project tests\CacheChecks\CacheChecks.csproj -c Release "-p:YMM4DirPath=$env:REFERENCE_DIR" --no-launch-profile -- $env:YMM4_DIR
           if ($LASTEXITCODE -ne 0) { throw 'CacheChecks failed' }
       - name: Export hook and cache checks as an unread build (real host, WARP)
         id: probe
@@ -306,7 +312,7 @@ jobs:
         run: |
           $video = @()
           if (Test-Path $env:PROBE_VIDEO) { $video = @('--video', $env:PROBE_VIDEO) }
-          dotnet run --project tests\HostCacheProbe\HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR --unread --gpu @video
+          dotnet run --project tests\HostCacheProbe\HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:REFERENCE_DIR" --no-launch-profile -- $env:YMM4_DIR --unread --gpu @video
           if ($LASTEXITCODE -ne 0) { throw 'HostCacheProbe --unread failed' }
       - name: Record
         if: always()

@@ -245,6 +245,13 @@ internal static partial class HostContracts
 
     internal sealed record Baseline(string Version, IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Features);
 
+    // A build whose code was read as the differences from a read build (docs/HOST_CONTRACTS.md, "古い版"): for each
+    // feature found to hold there, the digest of its parts. Builds with equal digests share one record.
+    internal sealed record ReviewedBuild(string Versions, IReadOnlyDictionary<string, string> Digests);
+
+    internal static string Digest(IReadOnlyDictionary<string, string> parts) =>
+        HostFingerprint.HashText(string.Join("\n", parts.OrderBy(part => part.Key, StringComparer.Ordinal).Select(part => part.Key + "=" + part.Value)));
+
     // Baseline: the read build this one matches (null when even Core differs from every read build).
     // Features: the features whose parts are unchanged (and whose required features are). Problems: per
     // feature that is off, what differs from that build.
@@ -254,30 +261,55 @@ internal static partial class HostContracts
     }
 
     internal static Evaluation Evaluate(IReadOnlyDictionary<string, SortedDictionary<string, string>> current) =>
-        Evaluate(current, Baselines);
+        Evaluate(current, Baselines, Reviewed);
 
-    internal static Evaluation Evaluate(IReadOnlyDictionary<string, SortedDictionary<string, string>> current, IEnumerable<Baseline> baselines)
+    // The features whose parts are those of a read or reviewed build whose core is this build's core (with that core,
+    // each feature depends on its own parts and the features it requires only). Baseline names the builds they come
+    // from, the one with the most features first (read builds before reviewed ones among equals). With no such
+    // build, the first read build's verdict says what differs.
+    internal static Evaluation Evaluate(IReadOnlyDictionary<string, SortedDictionary<string, string>> current, IEnumerable<Baseline> baselines,
+        IEnumerable<ReviewedBuild>? reviewed = null)
     {
-        Evaluation? best = null;
-        foreach (var baseline in baselines)
-        {
-            var features = new HashSet<string>(StringComparer.Ordinal);
-            var problems = new SortedDictionary<string, string>(StringComparer.Ordinal);
-            foreach (var rule in Rules)
+        var candidates = baselines.Select(baseline => Evaluate(current, baseline.Version, feature =>
+                !baseline.Features.TryGetValue(feature, out var expected) ? $"{baseline.Version} の記録がありません"
+                : !current.TryGetValue(feature, out var actual) ? "検査できませんでした"
+                : Difference(expected, actual)))
+            .Concat((reviewed ?? []).Select(build => Evaluate(current, build.Versions, feature =>
+                !build.Digests.TryGetValue(feature, out var expected) ? $"{build.Versions} では確かめていない機能です"
+                : !current.TryGetValue(feature, out var actual) ? "検査できませんでした"
+                : Digest(actual) == expected ? null : $"{build.Versions} で確かめたコードと異なります")))
+            .ToArray();
+        var matching = candidates.Where(evaluation => evaluation.Baseline is not null)
+            .OrderByDescending(evaluation => evaluation.Features.Count).ToArray(); // stable: the given order among equals
+        if (matching.Length == 0)
+            return candidates.FirstOrDefault() ?? new Evaluation(null, new HashSet<string>(), new Dictionary<string, string> { [Core] = "検証済みの版の記録がありません" });
+        var features = new HashSet<string>(StringComparer.Ordinal);
+        var sources = new List<string>();
+        foreach (var evaluation in matching)
+            if (!evaluation.Features.IsSubsetOf(features))
             {
-                string? problem = rule.Requires.FirstOrDefault(required => !features.Contains(required)) is { } missing
-                    ? $"{missing} が使えないため"
-                    : !baseline.Features.TryGetValue(rule.Feature, out var expected) ? $"{baseline.Version} の記録がありません"
-                    : !current.TryGetValue(rule.Feature, out var actual) ? "検査できませんでした"
-                    : Difference(expected, actual);
-                if (problem is null) features.Add(rule.Feature);
-                else problems[rule.Feature] = problem;
+                features.UnionWith(evaluation.Features);
+                sources.Add(evaluation.Baseline!);
             }
-            var evaluation = new Evaluation(features.Contains(Core) ? baseline.Version : null, features, problems);
-            if (evaluation.Baseline is not null) return evaluation;
-            best ??= evaluation;
+        var problems = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (feature, problem) in matching[0].Problems)
+            if (!features.Contains(feature)) problems[feature] = problem;
+        return new Evaluation(string.Join(" / ", sources), features, problems);
+    }
+
+    // problem(feature): null when that feature's parts are those of the build compared with.
+    private static Evaluation Evaluate(IReadOnlyDictionary<string, SortedDictionary<string, string>> current, string version, Func<string, string?> problem)
+    {
+        var features = new HashSet<string>(StringComparer.Ordinal);
+        var problems = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var rule in Rules)
+        {
+            string? found = rule.Requires.FirstOrDefault(required => !features.Contains(required)) is { } missing
+                ? $"{missing} が使えないため" : problem(rule.Feature);
+            if (found is null) features.Add(rule.Feature);
+            else problems[rule.Feature] = found;
         }
-        return best ?? new Evaluation(null, new HashSet<string>(), new Dictionary<string, string> { [Core] = "検証済みの版の記録がありません" });
+        return new Evaluation(features.Contains(Core) ? version : null, features, problems);
     }
 
     private sealed record CachedVerdict(string Key, string? Baseline, string[] Features, Dictionary<string, string> Problems);

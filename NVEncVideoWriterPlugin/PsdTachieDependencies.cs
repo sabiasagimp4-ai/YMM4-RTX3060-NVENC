@@ -20,7 +20,7 @@ internal static class PsdTachieDependencies
     internal const string PluginName = AssemblyName + ".PsdTachiePlugin";
     internal static readonly string SessionResource = "psd-blink-session://" + Guid.NewGuid().ToString("N");
     internal static Func<bool>? ReadinessInstalled { get; set; }
-    private static readonly Guid ReadBuild = new("7dc41b6b-858d-4af0-949f-c8c4e7f9dede");
+    internal static readonly Guid ReadBuild = new("7dc41b6b-858d-4af0-949f-c8c4e7f9dede");
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     internal sealed record Input(Character Character, string Path, object Settings, string Json);
     private sealed record Witness(Input[] Inputs);

@@ -116,7 +116,7 @@ internal static class OperationSequenceChecks
         var timeline = new Timeline();
         timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, Frames).Select(frame => new ShapeItem { Frame = frame, Length = 1 }));
         Configure(timeline, project, config);
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         return (timeline, new Scene(timeline, scenes, []));
     }
     private static void Configure(Timeline timeline, int project, Configuration config)
@@ -125,9 +125,9 @@ internal static class OperationSequenceChecks
         timeline.VideoInfo.BackgroundColor = project == 0 ? System.Windows.Media.Colors.DarkRed : System.Windows.Media.Colors.DarkBlue;
         foreach (var shape in timeline.Items.OfType<ShapeItem>())
         {
-            shape.X.SetFirstValue(-65 + shape.Frame * 8 + (config.Edited ? 5 : 0));
-            shape.Y.SetFirstValue(project * 12 - 9);
-            shape.Opacity.SetFirstValue(37 + shape.Frame * 3);
+            shape.X.SetFirst(-65 + shape.Frame * 8 + (config.Edited ? 5 : 0));
+            shape.Y.SetFirst(project * 12 - 9);
+            shape.Opacity.SetFirst(37 + shape.Frame * 3);
         }
     }
     private static ITimelineSource Source(Assembly host, IGraphicsDevicesAndContext context, Scene scene) =>

@@ -88,8 +88,8 @@ internal static class IdleParallelMeasurements
         timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, Shapes).Select(index =>
         {
             var item = new ShapeItem { Frame = 0, Length = Frames, Layer = index };
-            item.X.SetFirstValue(index % 20 * 14.25 - 145); item.Y.SetFirstValue(index / 20 * 14.5 - 65);
-            item.Opacity.SetFirstValue(15 + index % 50);
+            item.X.SetFirst(index % 20 * 14.25 - 145); item.Y.SetFirst(index / 20 * 14.5 - 65);
+            item.Opacity.SetFirst(15 + index % 50);
             return item;
         })).AddRange(Enumerable.Range(0, Texts).Select(index => new TextItem
         { Frame = index, Length = Frames - index, Layer = 200 + index, Text = "idle worker " + index, Font = "Arial" }));
@@ -106,7 +106,7 @@ internal static class IdleParallelMeasurements
             timeline = YukkuriMovieMaker.Json.Json.LoadFromText<Timeline>(json.ToJsonString())!;
         }
         timeline.RefreshTimelineLengthAndMaxLayer();
-        var scenes = new Scenes(false); scenes.AddScene(timeline); var scene = new Scene(timeline, scenes, []);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline); var scene = new Scene(timeline, scenes, []);
         using var player = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [context, scene, null], null)!;
         string root = Path.Combine(Path.GetTempPath(), "ymm-idle-parallel-" + Guid.NewGuid().ToString("N"));

@@ -46,12 +46,12 @@ internal static class PreviewPerformanceChecks
         TimelineFrameCache.UseStore(store);
         var timeline = new Timeline();
         timeline.VideoInfo.Width = Width; timeline.VideoInfo.Height = Height; timeline.VideoInfo.FPS = 30;
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, Frames).Select(frame =>
         {
             var item = new ShapeItem { Frame = frame, Length = 1 };
-            item.X.SetFirstValue(-600 + frame * 12.25); item.Y.SetFirstValue(frame % 7 * 20 - 70);
-            item.Opacity.SetFirstValue(43);
+            item.X.SetFirst(-600 + frame * 12.25); item.Y.SetFirst(frame % 7 * 20 - 70);
+            item.Opacity.SetFirst(43);
             return item;
         }));
         timeline.Items = timeline.Items.Add(new TextItem { Frame = 0, Length = Frames, Layer = 1, Text = "Preview cache measurement", Font = "Arial" });
@@ -209,7 +209,7 @@ internal static class PreviewPerformanceChecks
                 TimelineFrameCache.SetEnabled(true, false);
                 Update(0); Update(1); Update(0);
                 priorGpuHits = TimelineFrameCache.GpuHits;
-                timeline.Items.OfType<ShapeItem>().First().X.SetFirstValue(-350);
+                timeline.Items.OfType<ShapeItem>().First().X.SetFirst(-350);
                 Update(0);
                 Check(TimelineFrameCache.GpuHits == priorGpuHits, "Model edit reused stale GPU output");
                 var edited = TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!;
@@ -474,13 +474,13 @@ internal static class PreviewPerformanceChecks
     {
         var timeline = new Timeline();
         timeline.VideoInfo.Width = Width; timeline.VideoInfo.Height = Height; timeline.VideoInfo.FPS = 30;
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, Frames).SelectMany(frame => Enumerable.Range(0, 3).Select(layer =>
         {
             var item = new ShapeItem { Frame = frame, Length = 1, Layer = layer };
-            item.X.SetFirstValue(-500 + frame * 10 + layer * 160); item.Y.SetFirstValue(layer * 120 - 120);
-            item.Zoom.SetFirstValue(600);
-            item.Opacity.SetFirstValue(70);
+            item.X.SetFirst(-500 + frame * 10 + layer * 160); item.Y.SetFirst(layer * 120 - 120);
+            item.Zoom.SetFirst(600);
+            item.Opacity.SetFirst(70);
             item.VideoEffects = item.VideoEffects.Add(new YukkuriMovieMaker.Project.Effects.GaussianBlurEffect());
             return (IItem)item;
         })));
@@ -536,18 +536,18 @@ internal static class PreviewPerformanceChecks
         Directory.CreateDirectory(folder);
         var timeline = new Timeline();
         timeline.VideoInfo.Width = Width; timeline.VideoInfo.Height = Height; timeline.VideoInfo.FPS = 30;
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, Frames).Select(frame =>
         {
             var item = new ShapeItem { Frame = frame, Length = 1 };
-            item.X.SetFirstValue(-600 + frame * 12.25); item.Y.SetFirstValue(frame % 7 * 20 - 70);
-            item.Opacity.SetFirstValue(43);
+            item.X.SetFirst(-600 + frame * 12.25); item.Y.SetFirst(frame % 7 * 20 - 70);
+            item.Opacity.SetFirst(43);
             return (IItem)item;
         }));
         var extraShapes = Enumerable.Range(0, ExtraShapes).Select(i =>
         {
             var item = new ShapeItem { Frame = i % Frames, Length = 1, Layer = 2 };
-            item.Y.SetFirstValue(200 + i % 5 * 10);
+            item.Y.SetFirst(200 + i % 5 * 10);
             return item;
         }).ToArray();
         timeline.Items = timeline.Items.AddRange(extraShapes);

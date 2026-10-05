@@ -31,12 +31,12 @@ internal static class PreviewDeliveryChecks
         var dc = context.DeviceContext;
         var timeline = new Timeline();
         timeline.VideoInfo.Width = Width; timeline.VideoInfo.Height = Height; timeline.VideoInfo.FPS = 30;
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         // One item per frame: every frame has other pixels and its own per-frame key.
         var shapes = Enumerable.Range(0, Frames).Select(frame =>
         {
             var shape = new ShapeItem { Frame = frame, Length = 1 };
-            shape.X.SetFirstValue(-120 + frame * 8.25); shape.Y.SetFirstValue(frame % 7 * 5 - 15);
+            shape.X.SetFirst(-120 + frame * 8.25); shape.Y.SetFirst(frame % 7 * 5 - 15);
             return shape;
         }).ToArray();
         timeline.Items = timeline.Items.AddRange(shapes);
@@ -226,7 +226,7 @@ internal static class PreviewDeliveryChecks
         Vortice.Direct2D1.ID2D1DeviceContext dc, byte[][] baseline, FrameCacheStore store, ShapeItem edited)
     {
         double x = -120 + edited.Frame * 8.25; // as created in Run
-        edited.X.SetFirstValue(x + 40);
+        edited.X.SetFirst(x + 40);
         Thread.Sleep(300); // the render path waits for edits to settle
         var before = Counters.Read(store);
         Update(source, timeline, edited.Frame, TimelineSourceUsage.Paused);
@@ -237,7 +237,7 @@ internal static class PreviewDeliveryChecks
         var other = Counters.Read(store) - before;
         Check(other.Renders == 0, $"an edit of frame {edited.Frame} re-rendered frame 20: {other}");
         Check(TimelineFrameCache.CapturePreview(dc, source.Output, viewport)!.SequenceEqual(baseline[20]), "frame 20 pixels after an unrelated edit");
-        edited.X.SetFirstValue(x);
+        edited.X.SetFirst(x);
         Thread.Sleep(300);
         before = Counters.Read(store);
         Update(source, timeline, edited.Frame, TimelineSourceUsage.Paused);

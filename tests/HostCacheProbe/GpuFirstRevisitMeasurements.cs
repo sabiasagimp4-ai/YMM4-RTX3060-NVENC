@@ -46,11 +46,11 @@ internal static class GpuFirstRevisitMeasurements
         timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, Frames).Select(frame =>
         {
             var item = new ShapeItem { Frame = frame, Length = 1, Layer = 0 };
-            item.X.SetFirstValue(-550 + 137.25 * frame); item.Opacity.SetFirstValue(47);
+            item.X.SetFirst(-550 + 137.25 * frame); item.Opacity.SetFirst(47);
             return item;
         })).Add(new TextItem { Frame = 0, Length = Frames, Layer = 1, Text = "GPU first revisit", Font = "Arial" });
         timeline.RefreshTimelineLengthAndMaxLayer();
-        var scenes = new Scenes(false); scenes.AddScene(timeline); var scene = new Scene(timeline, scenes, []);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline); var scene = new Scene(timeline, scenes, []);
         using var source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
             BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [context, scene, null], null)!;
         string root = Path.Combine(Path.GetTempPath(), "ymm-first-revisit-" + Guid.NewGuid().ToString("N"));

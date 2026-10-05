@@ -26,7 +26,7 @@ internal static class VoiceDescriptionMeasurements
         foreach (int count in new[] { 50, 200, 500 })
         {
             var timeline = new Timeline();
-            var scenes = new Scenes(false); scenes.AddScene(timeline);
+            var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
             var character = Character("voice-description");
             timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, count).Select(index => new VoiceItem(character)
             {

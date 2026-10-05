@@ -105,7 +105,51 @@ internal static class HostContractChecks
 
         Check(HostContracts.Difference(new Dictionary<string, string> { ["A|T"] = "1" }, new Dictionary<string, string> { ["A|T"] = "1" }) is null,
             "Equal parts must have no difference");
-        Console.WriteLine($"Host contracts: fingerprints (determinism, bodies, branches, lambdas, references), verdicts ({HostContracts.Rules.Length} rules) OK");
+
+        // Reviewed builds: only the features recorded for them, with exactly the recorded code.
+        Check(HostContracts.Digest(new Dictionary<string, string> { ["A|T"] = "1", ["B|U"] = "2" })
+            == HostContracts.Digest(new SortedDictionary<string, string>(StringComparer.Ordinal) { ["B|U"] = "2", ["A|T"] = "1" })
+            && HostContracts.Digest(new Dictionary<string, string> { ["A|T"] = "1" }) != HostContracts.Digest(new Dictionary<string, string> { ["A|T"] = "2" }),
+            "A digest must depend on the parts only, not on their order");
+        HostContracts.ReviewedBuild Reviewed(string versions, params string[] features) =>
+            new(versions, features.ToDictionary(feature => feature, feature => HostContracts.Digest(baseline[feature])));
+        var otherCore = Parts();
+        otherCore[HostContracts.Core]["X|Core"] = "other";
+        verdict = HostContracts.Evaluate(Parts(), [new("2.0", Frozen(otherCore))],
+            [Reviewed("0.9", HostContracts.Core, HostContracts.Preview, decoder)]);
+        Check(verdict.Baseline == "0.9" && verdict.Features.SetEquals([HostContracts.Core, HostContracts.Preview, decoder])
+            && verdict.Problems[HostContracts.RulerBars].Contains("確かめていない", StringComparison.Ordinal),
+            "A reviewed build must enable only the features recorded for it");
+        verdict = HostContracts.Evaluate(changedPreview, [new("2.0", Frozen(otherCore))], [Reviewed("0.9", HostContracts.Core, HostContracts.Preview)]);
+        Check(verdict.Baseline == "0.9" && verdict.Has(HostContracts.Core) && !verdict.Has(HostContracts.Preview)
+            && verdict.Problems[HostContracts.Preview].Contains("確かめたコードと異なります", StringComparison.Ordinal),
+            "Code that differs from what was reviewed must turn the feature off");
+        verdict = HostContracts.Evaluate(newWitness, [new("2.0", Frozen(otherCore))], [Reviewed("0.9", HostContracts.Core)]);
+        Check(verdict.Baseline is null && verdict.Features.Count == 0, "A reviewed build whose core differs must not enable anything");
+        verdict = HostContracts.Evaluate(Parts(), [new("2.0", Frozen(otherCore))],
+            [Reviewed("0.9", HostContracts.Core), Reviewed("0.8", HostContracts.Core, HostContracts.RulerBars), Reviewed("0.7", HostContracts.Core)]);
+        Check(verdict.Baseline == "0.8" && verdict.Has(HostContracts.RulerBars), "The matching build that enables the most features must be used");
+        verdict = HostContracts.Evaluate(Parts(), [new("1.0", Frozen(baseline))], [Reviewed("0.9", [.. all])]);
+        Check(verdict.Baseline == "1.0" && verdict.Features.SetEquals(all), "A read build must win over an equal reviewed one");
+        var readWithoutRuler = Frozen(baseline).ToDictionary(p => p.Key, p => p.Value);
+        readWithoutRuler.Remove(HostContracts.RulerBars);
+        verdict = HostContracts.Evaluate(changedPreview, [new("1.0", readWithoutRuler)], [Reviewed("0.9", HostContracts.Core, HostContracts.RulerBars)]);
+        Check(verdict.Baseline == "1.0 / 0.9" && verdict.Has(HostContracts.RulerBars) && verdict.Has(HostContracts.WrappedSources)
+            && !verdict.Has(HostContracts.Preview) && !verdict.Problems.ContainsKey(HostContracts.RulerBars) && verdict.Problems.ContainsKey(HostContracts.Preview),
+            "Builds with the same core must add up their features");
+
+        // The records themselves: known features, each with the features it requires, and the core always.
+        var labels = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var build in HostContracts.Reviewed)
+        {
+            Check(labels.Add(build.Versions) && build.Digests.ContainsKey(HostContracts.Core), $"{build.Versions}: a record needs a unique label and the core");
+            foreach (var feature in build.Digests.Keys)
+            {
+                var rule = HostContracts.Rules.SingleOrDefault(rule => rule.Feature == feature);
+                Check(rule is not null && rule.Requires.All(build.Digests.ContainsKey), $"{build.Versions}: {feature} is unknown or lacks a feature it requires");
+            }
+        }
+        Console.WriteLine($"Host contracts: fingerprints (determinism, bodies, branches, lambdas, references), verdicts ({HostContracts.Rules.Length} rules, {HostContracts.Reviewed.Length} reviewed records) OK");
     }
 
     private static Dictionary<string, SortedDictionary<string, string>> Parts() =>

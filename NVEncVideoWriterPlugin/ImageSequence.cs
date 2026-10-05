@@ -76,6 +76,9 @@ internal static partial class ImageSequence
         return shown;
     }
 
+    // False on YMM4 builds without VideoSource.CalculateSourceTime (4.55 and older): no image sequence is keyed there.
+    internal static bool TimeMappingAvailable => Mapping.Value is not null;
+
     private sealed record HostMapping(PropertyInfo RateMap,
         Func<object, TimeSpan, int, int, TimeSpan, TimeSpan, bool, TimeSpan?, TimeSpan> SourceTime);
 

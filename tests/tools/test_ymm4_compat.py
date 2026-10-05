@@ -95,6 +95,13 @@ class VerdictChecks(unittest.TestCase):
         self.assertEqual('off', compat.judge({'scan': scan(), 'start': started(cache=False)})['cache'])
         self.assertEqual('no', compat.judge({'scan': scan(), 'start': started(export=False)})['nvenc'])
 
+    def test_basis_names_the_builds_whose_code_was_read(self):
+        self.assertEqual('コードを読んだ版', compat.basis_note('4.56.1.0', '4.56.1.0'))
+        self.assertEqual('コードを読んだ版', compat.basis_note('4.47.0.0〜4.47.0.5', '4.47.0.3'))
+        self.assertEqual('コードを読んだ版（4.56.1.0 と同じ部分も使用）', compat.basis_note('4.56.1.0 / 4.56.0.0〜4.56.0.1', '4.56.0.1'))
+        self.assertEqual('キャッシュは 4.56.1.0 と一致した部分を使用', compat.basis_note('4.56.1.0', '4.56.0.1'))
+        self.assertEqual('キャッシュは ? と一致した部分を使用', compat.basis_note('?', '4.56.0.1'))
+
     def test_main_window_without_report_means_not_loaded(self):
         verdict = compat.judge({'scan': scan(), 'start': {'mainWindow': True, 'dialogs': ['Error :: load failed'], 'status': None}})
         self.assertEqual('no', verdict['load'])

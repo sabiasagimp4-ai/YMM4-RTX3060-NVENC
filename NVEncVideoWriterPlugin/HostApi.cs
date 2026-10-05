@@ -34,6 +34,8 @@ internal static class HostApi
 
     // ControlTagParser.Parse with the signature of 4.52 (the type itself is 4.51, with another signature there).
     private static int controlTagParser; // 0: not tried, 1: available, -1: missing
+    // Before 4.51 YMM4 had no control tags: a text was drawn with its own decorations only.
+    private static readonly bool ControlTagsExist = PluginApi.GetType("YukkuriMovieMaker.Commons.ControlTagParser") is not null;
 
     internal static void InvalidateIfSourceSettingsChanged(CacheProvider provider)
     {
@@ -62,6 +64,7 @@ internal static class HostApi
     // the way the plugin was built for (the text is then not cached).
     internal static ImmutableList<TextDecoration> ControlTagDecorations(string text, string font)
     {
+        if (!ControlTagsExist) return ImmutableList<TextDecoration>.Empty;
         if (Volatile.Read(ref controlTagParser) >= 0)
         {
             try
@@ -75,8 +78,16 @@ internal static class HostApi
                 Volatile.Write(ref controlTagParser, -1);
             }
         }
+        // 4.51: the same parser without the letter spacing parameter, which does not change the decorations' fonts.
+        if (ParseWithoutLetterSpacing?.Invoke(null, [text, ImmutableList<TextDecoration>.Empty, 1.0, font, false, false, false]) is { } result
+            && result.GetType().GetField("Item2")?.GetValue(result) is ImmutableList<TextDecoration> parsed)
+            return parsed;
         throw new NotSupportedException("このYMM4では文字の制御タグを解析できません。");
     }
+
+    private static readonly MethodInfo? ParseWithoutLetterSpacing = PluginApi.GetType("YukkuriMovieMaker.Commons.ControlTagParser")
+        ?.GetMethod("Parse", BindingFlags.Public | BindingFlags.Static,
+            [typeof(string), typeof(ImmutableList<TextDecoration>), typeof(double), typeof(string), typeof(bool), typeof(bool), typeof(bool)]);
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static ImmutableList<TextDecoration> ParseControlTags(string text, string font) =>

@@ -23,12 +23,12 @@ internal static class VoiceCachePixelChecks
         }).ToArray();
         foreach (var voice in voices)
         {
-            voice.JimakuX.SetFirstValue(-12.25); voice.JimakuY.SetFirstValue(8.75);
+            voice.JimakuX.SetFirst(-12.25); voice.JimakuY.SetFirst(8.75);
             voice.FontColor = System.Windows.Media.Colors.White;
         }
         timeline.Items = timeline.Items.AddRange(voices);
         timeline.RefreshTimelineLengthAndMaxLayer();
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         var scene = new Scene(timeline, scenes, []);
         var dc = context.DeviceContext;
         var view = new TimelineFrameCache.PreviewViewport(321, 181, Matrix3x2.Identity, new Vector2(160.5f, 90.5f), 96, 96,

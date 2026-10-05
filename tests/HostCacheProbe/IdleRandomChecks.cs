@@ -25,7 +25,7 @@ internal static class IdleRandomChecks
         TimelineFrameCache.UseStore(store);
         var dc = context.DeviceContext;
         var timeline = RandomTimeline();
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         var scene = new Scene(timeline, scenes, []);
         var player = Create(host, context, scene);
         ITimelineSource? second = null, copy = null;
@@ -46,7 +46,7 @@ internal static class IdleRandomChecks
             int sameSecond = Same(Render(second, timeline, dc, viewport), baseline);
             Check(sameSecond == Frames, $"Another renderer of the same scene drew other random values ({Frames - sameSecond} of {Frames} frames differ)");
             var copyTimeline = YukkuriMovieMaker.Json.Json.LoadFromText<Timeline>(YukkuriMovieMaker.Json.Json.GetJsonText(timeline))!;
-            var copyScenes = new Scenes(false); copyScenes.AddScene(copyTimeline);
+            var copyScenes = HostCompat.NewScenes(); copyScenes.AddScene(copyTimeline);
             copy = Create(host, context, new Scene(copyTimeline, copyScenes, []));
             int sameCopy = Same(Render(copy, copyTimeline, dc, viewport), baseline);
             Check(sameCopy < Frames, "A copy of the project drew the same random values (the clone could have rendered them)");
@@ -111,11 +111,11 @@ internal static class IdleRandomChecks
         var timeline = new Timeline();
         timeline.VideoInfo.Width = Width; timeline.VideoInfo.Height = Height; timeline.VideoInfo.FPS = 30;
         var still = new ShapeItem { Frame = 0, Length = Frames, Layer = 0 };
-        still.Y.SetFirstValue(60);
+        still.Y.SetFirst(60);
         var shaking = new ShapeItem { Frame = 0, Length = Frames, Layer = 1 };
         shaking.X.AnimationType = AnimationType.ランダム移動;
         var shaken = new ShapeItem { Frame = 0, Length = Frames, Layer = 2 };
-        shaken.Y.SetFirstValue(-50);
+        shaken.Y.SetFirst(-50);
         var randomMove = (YukkuriMovieMaker.Plugin.Effects.IVideoEffect)Activator.CreateInstance(
             typeof(Scene).Assembly.GetType("YukkuriMovieMaker.Project.Effects.RandomMoveEffect", true)!, nonPublic: true)!;
         shaken.VideoEffects = shaken.VideoEffects.Add(randomMove);

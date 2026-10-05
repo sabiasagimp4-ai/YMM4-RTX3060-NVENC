@@ -10,13 +10,43 @@
 
 その版にないメンバーは `HostApi` を通してだけ使う。存在を確かめてから、そのメンバーだけを名指す別のメソッドで呼ぶ（名指すメソッドはJITのときに失敗するため）。YMM4はプラグインの全部の型を読み込むので、その版にないinterfaceを実装する型は置かない。`IVideoFileWriter3`（4.54）は `GpuWriterProxy`（DispatchProxy）が実行時に実装し、それより前の版にはGPUフレームを受ける `IVideoFileWriter2` として書き込みクラスを渡す。CI（cache-development）は、最も古い版に対してプラグインの全型が読み込めること（HostLoadChecks）と、足りないメンバーが `tools/compat/guarded-host-apis.txt` に挙げたものだけであること（`HostFingerprint api`）を確かめる。新しいメンバーを使うときは `HostApi` に加え、この一覧へ足す。
 
-`HostIntegration` の既知ビルドは配置・MVID・SHA-256を確認する。4.56.1.0が全機能の基準で、4.55.1.1は一部機能のみ。NVENC出力は `HostExportScope` のメソッド／field構造が一致する版で接続し、出力フックの失敗はキャッシュ全体を停止しない。
+`HostIntegration` の既知ビルドは配置・MVID・SHA-256を確認する。4.56.1.0が全機能の基準。NVENC出力は `HostExportScope` のメソッド／field構造が一致する版で接続し、出力フックの失敗はキャッシュ全体を停止しない。
 
-未知版のキャッシュは `HostContracts`／`HostFingerprint` が前提コードを機能ごとに照合する。`core`、`preview`、`selection-rects`、`wrapped-sources`、`ruler-bars`、`decoder:<assembly>` に依存関係があり、不一致の機能を通常描画へ落とす。照合成功は記録した前提との一致であり、新版全体の実使用保証ではない。
+4.56.1.0以外のキャッシュは `HostContracts`／`HostFingerprint` が前提コードを機能ごとに照合する。`core`、`preview`、`selection-rects`、`wrapped-sources`、`ruler-bars`、`decoder:<assembly>` に依存関係があり、不一致の機能を通常描画へ落とす。照合の相手は、コードを読んだ版（`HostBaselines.cs`）と、読んだ版との違いを読んだ版（`HostReviewedBuilds.cs`、次の節）。coreが一致する記録の機能を合わせて使う（coreが同じなら、各機能は自分の部品と前提の機能だけで決まる）。照合成功は記録した前提との一致であり、新版全体の実使用保証ではない。
 
 fingerprintは型・基底・interface・field・属性・正規化IL・生成型を対象とする。witnessはusage、他シーン、item picker、素材列挙、描画設定、controller、動画ソース生成等の前提を参照するコードも収集する。対象の変更を小さく見せるためにwitnessを削らない。
 
 結果は `%LOCALAPPDATA%\YMM4-RTX3060-NVENC\host-contracts.json` に、本体DLL群とプラグインのMVIDをキーとして保存する。
+
+## 古い版（4.47.0.0〜4.56.0.1）
+
+更新サーバーにある4.47.0.0〜4.56.0.1の54版は、4.56.1.0との違いを読んで、機能ごとに確かめた（2026-10-05）。版ごとに、契約の部品、危険なAPI（乱数・時計・ファイル・設定・他シーン・usage等）を使う型、古い版にだけある描画の型のうち4.56.1.0と異なるものを並べ、隣り合う版の逆コンパイルの差分を読んだ。確かめた機能の部品のdigestを `HostReviewedBuilds.cs` に記録し、同じdigestが続く版は1つの記録にまとめる。記録した版でもコードが記録と1か所でも違えば、その機能は使わない。フレームのキーは本体のMVIDを含むので、版の違うYMM4のフレームを使い回すことはない。
+
+| 版 | 使う機能 |
+| --- | --- |
+| 4.55.0.0〜4.56.0.1 | core、preview、selection-rects、wrapped-sources、ruler-bars、MF・WIC・FFmpegの完成判定 |
+| 4.54.0.1 | 上からselection-rectsを除く |
+| 4.47.0.0〜4.54.0.0 | 上からFFmpegを除く |
+
+読んだ違いと、その扱い:
+
+- プレビュー: 4.54.0.1以前のプレイヤーにはズーム・パンがなく（`PreviewDisplayZoom`、`PreviewViewCenter`、`GetVisibleVideoSize`、`CreatePreviewViewTransform` がない）、Drawはcontextの変換のまま出力を (幅/2, 高さ/2) に描く。`TimelineFrameCache` はこの4つがすべてない版では、viewの変換をcontextの変換だけにする（一部だけある版は契約違反として使わない）。
+- 選択枠: 4.54以前は `TimelineItemRects` の要素の型が違い、型の確認で自動的に使わない。
+- FFmpeg: 4.54.0.0以前には、シークした位置が要求時刻より後だったときに戻ってシークし直す処理（`SeekAndDecode`）がない。後のフレームが要求時刻の区間として残り、どのフレームになるかがシークの履歴で変わるため、完成判定に使わない。4.52以前は `streamStartTime` もなく、形の確認で未確認になる。
+- 旧MF: 4.53.0.0から `streamStartTime` がある（4.52以前は形の確認で未確認）。4.54.0.1以前は同期の読み込みでtimeoutと作り直しがなく、エラー・終端でdurationを0にするのは同じ。4.54.0.0以前は断片化MP4の長さの解析がなく、4.53.0.1以前は長さから `streamStartTime` を引かない（範囲が長くなるだけで、終端の先は読めずdurationが0）。
+- MF2: 4.48から（4.47にはない）。完成判定の条件は4.48から同じ。
+- WIC: 4.51以前は連番の読み込みプラグインの名前の翻訳だけが違う。
+- 番号付き画像: `VideoSource.CalculateSourceTime` は4.56.0.0から。それより前は、ルートのアイテムの連番はキーにしない（通常描画）。
+- 文字の制御タグ: 4.50以前にはない（アイテム自身の装飾だけで描く）。4.51の `ControlTagParser.Parse` は字間の引数がなく、`HostApi` がreflectionで呼ぶ。
+- 停止中の先読み: 複製に使う `Scenes(bool)` は4.49から。4.48以前は先読みしない。`VideoInfo.BackgroundColor`（4.52から）は、ある版だけ複製へ写す。
+- フレーム時刻の丸めは4.52.0.8以前で違うが、キーも描画もその版の `VideoInfo` の変換を使うので一致する。
+- 立ち絵: 同梱の立ち絵のMVIDが4.56.1.0と違うため、どの古い版でも使わない（4.55.0.1以前は `LipSyncEnvelopeSession` もない）。起動時の報告も、同梱の立ち絵が読んだものでなければ立ち絵を使わない機能に数える。
+
+記録を作り直すときは、確かめた版をすべて渡す（`HostContracts.Rules` を変えたときも同じ）。
+
+```powershell
+dotnet run --project tools/HostFingerprint -- reviewed NVEncVideoWriterPlugin/HostReviewedBuilds.cs '4.56.0.1=D:\YMM4\4.56.0.1@core,preview,...' ...
+```
 
 ## デコード完成判定
 
@@ -68,7 +98,7 @@ ShuffleText／ShuffleTextInOutは、フレーム番号（と入力の番号）�
 
 ## ホスト更新の手順
 
-`ymm4-compat` はmainで毎日06:17 JSTに更新サーバーを確認する。まだこのプラグインの版で確かめていないYMM4の版（新しい版、またはプラグインのリリース後は全版）を、manifestのサイズ・ハッシュを照合して取得し、ファイルの照合（.NETの版・参照するDLLの版・contracts）、Windowsでの起動（プラグイン自身が使う機能を報告）、新しい版ではWindowsビルド・キー検査・probeを実行する。結果はREADMEの「YMM4 の版ごとの対応」と [YMM4_VERSIONS.md](YMM4_VERSIONS.md) へ自動でcommitし、新しく公開された版にはissueを作る。古い版をまとめて確かめるときは、手動実行で `versions` に `all` を指定する。実行時間はActionsのスケジュール遅延に影響される。
+`ymm4-compat` はmainで毎日06:17 JSTに更新サーバーを確認する。まだこのプラグインの版で確かめていないYMM4の版（新しい版、またはプラグインのリリース後は全版）を、manifestのサイズ・ハッシュを照合して取得し、ファイルの照合（.NETの版・参照するDLLの版・contracts）、Windowsでの起動（プラグイン自身が使う機能を報告）、新しい版では、読んだ版でビルドしたプラグインと検査（キー検査・probe）をその版で実行する。結果はREADMEの「YMM4 の版ごとの対応」と [YMM4_VERSIONS.md](YMM4_VERSIONS.md) へ自動でcommitし、新しく公開された版にはissueを作る。古い版をまとめて確かめるときは、手動実行で `versions` に `all` を指定する。実行時間はActionsのスケジュール遅延に影響される。
 
 1. issueと型／method差分を読み、公式取得したDLLを調査する。逆コンパイルした実装は製品へコピーしない。
 2. 前提が変わった場合は規則・キー・witnessを修正する。一致していない版をHostKnownBuildsへ追加するだけで有効にしない。

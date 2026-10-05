@@ -1,5 +1,6 @@
 using System.IO;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using HarmonyLib;
 using NVEncVideoWriterPlugin;
@@ -41,7 +42,7 @@ internal static class Program
         FileLookupMeasurements.Run();
         VoiceDescriptionChecks.Run();
         var timeline = new Timeline();
-        var scenes = new Scenes(false);
+        var scenes = HostCompat.NewScenes();
         scenes.AddScene(timeline);
         var scene = new Scene(timeline, scenes, []);
         Check(FrameCacheKey.IsBuiltInSourceReader(typeof(Scene)), "Host source reader assembly was not trusted");
@@ -103,16 +104,16 @@ internal static class Program
         var shape = new ShapeItem();
         timeline.Items = timeline.Items.Add(shape);
         Check(FrameCacheKey.TryCreate(scene, out _, out string shapeReason), "Built-in shape bypassed: " + shapeReason);
-        shape.X.SetFirstValue(0.0004);
+        shape.X.SetFirst(0.0004);
         string preciseShapeKey = Key(scene);
-        shape.X.SetFirstValue(0.00049);
+        shape.X.SetFirst(0.00049);
         Check(Key(scene) != preciseShapeKey, "Small parameter changes collided after decimal rounding");
-        shape.X.SetFirstValue(0.0004);
+        shape.X.SetFirst(0.0004);
         Check(Key(scene) == preciseShapeKey, "Exact parameter restore did not recover the drawing key");
         timeline.Items = timeline.Items.Remove(shape);
 
         var noFiles = new Timeline();
-        var noFileScenes = new Scenes(true);
+        var noFileScenes = HostCompat.NewScenes(undo: true);
         noFileScenes.AddScene(noFiles);
         var noFileScene = new Scene(noFiles, noFileScenes, []);
         using var noFileTracker = new KeyDependencyTracker(noFileScene);
@@ -218,7 +219,7 @@ internal static class Program
         })
         {
             var timeline = new Timeline();
-            var scenes = new Scenes(false);
+            var scenes = HostCompat.NewScenes();
             scenes.AddScene(timeline);
             timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, count).Select(make));
             var scene = new Scene(timeline, scenes, []);
@@ -234,7 +235,7 @@ internal static class Program
         // Where the time goes, for 1000 shapes (each phase as TryDescribe does it).
         {
             var timeline = new Timeline();
-            var scenes = new Scenes(false);
+            var scenes = HostCompat.NewScenes();
             scenes.AddScene(timeline);
             timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, 1000).Select(i => Shape(i, blur: false)));
             var items = timeline.Items.ToArray();
@@ -265,7 +266,7 @@ internal static class Program
         static IItem Shape(int i, bool blur)
         {
             var shape = new ShapeItem { Frame = i * 3, Length = 30, Layer = i % 10 };
-            shape.X.SetFirstValue(i);
+            shape.X.SetFirst(i);
             if (blur) shape.VideoEffects = shape.VideoEffects.Add(new YukkuriMovieMaker.Project.Effects.GaussianBlurEffect());
             return shape;
         }
@@ -277,12 +278,12 @@ internal static class Program
     private static void CheckBackgroundDescribe()
     {
         var timeline = new Timeline();
-        var scenes = new Scenes(false);
+        var scenes = HostCompat.NewScenes();
         scenes.AddScene(timeline);
         var shapes = Enumerable.Range(0, 1000).Select(i =>
         {
             var shape = new ShapeItem { Frame = i * 3, Length = 30, Layer = i % 10 };
-            shape.X.SetFirstValue(i);
+            shape.X.SetFirst(i);
             return shape;
         }).ToArray();
         timeline.Items = timeline.Items.AddRange(shapes);
@@ -309,7 +310,7 @@ internal static class Program
         Check(!keyed && tracker.Describing && reason.Contains("背景"), "A large project was described on the render thread: " + reason);
         Check(first < TimeSpan.FromMilliseconds(250), $"Starting the background description took {first.TotalMilliseconds:F0} ms");
         string before = Ready(out var ready);
-        shapes[5].X.SetFirstValue(-1);
+        shapes[5].X.SetFirst(-1);
         Thread.Sleep(300); // settle
         var edit = Returned(out keyed, out reason);
         // Inline only if the last description was short; either way the render thread must not wait long.
@@ -325,7 +326,7 @@ internal static class Program
     {
         const int count = 200;
         var timeline = new Timeline();
-        var scenes = new Scenes(false);
+        var scenes = HostCompat.NewScenes();
         scenes.AddScene(timeline);
         var scene = new Scene(timeline, scenes, []);
         string folder = Path.Combine(Path.GetTempPath(), "ymm-capture-cost-" + Guid.NewGuid().ToString("N"));
@@ -484,11 +485,11 @@ internal static class Program
         string at10 = WaitForFrameKey(tracker, 10), at45 = WaitForFrameKey(tracker, 45), at70 = WaitForFrameKey(tracker, 70);
         Check(at10 != at45 && at10 != at70 && at45 != at70, "Frames with different items shared a key");
         Check(WaitForFrameKey(tracker, 29) == at10 && WaitForFrameKey(tracker, 30) == at45, "Item boundaries were not respected");
-        late.X.SetFirstValue(5);
+        late.X.SetFirst(5);
         Check(WaitForFrameKey(tracker, 10) == at10 && WaitForFrameKey(tracker, 45) == at45, "Editing one item invalidated unrelated frames");
         string edited70 = WaitForFrameKey(tracker, 70);
         Check(edited70 != at70, "Editing an item did not invalidate its frames");
-        late.X.SetFirstValue(0);
+        late.X.SetFirst(0);
         Check(WaitForFrameKey(tracker, 70) == at70, "Restoring an item did not restore its frame keys");
         timeline.VideoInfo.Width++;
         Check(WaitForFrameKey(tracker, 45) != at45, "A timeline setting did not invalidate every frame");
@@ -524,7 +525,7 @@ internal static class Program
             var barsTimeline = new Timeline();
             barsTimeline.Items = barsTimeline.Items.Add(new ShapeItem { Frame = 0, Length = 30 })
                 .Add(new ImageItem { FilePath = imageFile, Frame = 100, Length = 10, Layer = 1 });
-            var barsScenes = new Scenes(false);
+            var barsScenes = HostCompat.NewScenes();
             barsScenes.AddScene(barsTimeline);
             var barsScene = new Scene(barsTimeline, barsScenes, []);
             using (var stored = new KeyDependencyTracker(barsScene))
@@ -734,7 +735,7 @@ internal static class Program
     private static void CheckIdentitySeeds()
     {
         var timeline = new Timeline();
-        var scenes = new Scenes(false);
+        var scenes = HostCompat.NewScenes();
         scenes.AddScene(timeline);
         var still = new ShapeItem { Frame = 0, Length = 30, Layer = 0 };
         var shaking = new ShapeItem { Frame = 60, Length = 30, Layer = 1 };
@@ -754,7 +755,7 @@ internal static class Program
         Check(!tracker.TryCapture(190, out _, out _), "Text revealed in random order was cached");
         Check(WaitForFrameKey(tracker, 70) == shakingKey && WaitForFrameKey(tracker, 130) == shakenKey, "The same objects changed their keys");
         var copyTimeline = YukkuriMovieMaker.Json.Json.LoadFromText<Timeline>(YukkuriMovieMaker.Json.Json.GetJsonText(timeline))!;
-        var copyScenes = new Scenes(false);
+        var copyScenes = HostCompat.NewScenes();
         copyScenes.AddScene(copyTimeline);
         using var copy = new KeyDependencyTracker(new Scene(copyTimeline, copyScenes, []));
         Check(WaitForFrameKey(copy, 10) == stillKey, "A copy of the project changed a frame without randomness");
@@ -790,7 +791,7 @@ internal static class Program
         var lensType = community.GetType("YukkuriMovieMaker.Plugin.Community.Shape.LensFlare.LensFlareShapePlugin", true)!;
         var lens = (YukkuriMovieMaker.Plugin.Shape.IShapePlugin)Activator.CreateInstance(lensType, nonPublic: true)!;
         var timeline = new Timeline();
-        var scenes = new Scenes(false);
+        var scenes = HostCompat.NewScenes();
         scenes.AddScene(timeline);
         timeline.Items = timeline.Items.Add(With(0, Effect("Bloom.BloomEffect"))).Add(With(60, Effect("MotionBlur.MotionBlurEffect")))
             .Add(With(120, Effect("CameraShake.CameraShakeEffect")))
@@ -856,7 +857,7 @@ internal static class Program
 
             var timeline = new Timeline();
             timeline.VideoInfo.FPS = 30;
-            var scenes = new Scenes(false);
+            var scenes = HostCompat.NewScenes();
             scenes.AddScene(timeline);
             var video = new VideoItem { FilePath = Image(0), Frame = 0, Length = 12, Layer = 0 };
             timeline.Items = timeline.Items.Add(video);
@@ -877,13 +878,23 @@ internal static class Program
                         $"{setting}: frame {frame} must depend on {Path.GetFileName(expected)} only, not {string.Join(", ", files.Select(Path.GetFileName))}");
                 }
             }
+            if (!ImageSequence.TimeMappingAvailable)
+            {
+                // Older YMM4 (no VideoSource.CalculateSourceTime): the frames are rendered normally, never keyed.
+                Check(Enumerable.Range(0, video.Length).All(frame => !Describe().For(frame).Cacheable), "A sequence was keyed without the host's time mapping");
+                Console.WriteLine("Image sequences: not keyed on this build (no time mapping) OK");
+                return;
+            }
             Expect("30 fps", frame => Math.Min(2 * frame, 11));
             video.IsLooped = true;
             Expect("30 fps, looped", frame => 2 * frame % 12);
             video.IsLooped = false;
-            video.PlaybackRate2.SetFirstValue(50);
+            // VideoItem.PlaybackRate2 is YMM4 4.55 and later, as is the time mapping checked here.
+            [MethodImpl(MethodImplOptions.NoInlining)]
+            static void SetRate(VideoItem item, double percent) => item.PlaybackRate2.SetFirst(percent);
+            SetRate(video, 50);
             Expect("30 fps, 50 %", frame => frame);
-            video.PlaybackRate2.SetFirstValue(100);
+            SetRate(video, 100);
             timeline.VideoInfo.FPS = 60;
             Expect("60 fps", frame => frame);
             timeline.VideoInfo.FPS = 30;
@@ -936,7 +947,7 @@ internal static class Program
         try
         {
             var effect = new DynamicBlurEffect();
-            var timeline = new Timeline(); var scenes = new Scenes(false); scenes.AddScene(timeline);
+            var timeline = new Timeline(); var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
             var item = new ShapeItem { Frame = 0, Length = 20 }; item.VideoEffects = [effect]; timeline.Items = timeline.Items.Add(item);
             var scene = new Scene(timeline, scenes, []);
             Check(FrameCacheKey.CaptureDynamicProviders(scene).Contains(effect), "Dynamic provider not found in host animatable tree");
@@ -987,7 +998,7 @@ internal static class Program
     private static void MeasureValidation()
     {
         var timeline = new Timeline();
-        var scenes = new Scenes(false);
+        var scenes = HostCompat.NewScenes();
         scenes.AddScene(timeline);
         var shape = new ShapeItem { Frame = 0, Length = 30, Layer = 1 };
         timeline.Items = timeline.Items.Add(shape);
@@ -1026,7 +1037,7 @@ internal static class Program
 
     private static void CheckAmbiguousDrawingOrder()
     {
-        var timeline = new Timeline(); var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var timeline = new Timeline(); var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         var first = new ShapeItem { Frame = 0, Length = 20, Layer = 1 };
         var second = new ShapeItem { Frame = 10, Length = 20, Layer = 1 };
         timeline.Items = timeline.Items.Add(first).Add(second);
@@ -1059,7 +1070,7 @@ internal static class Program
         var character = new YukkuriMovieMaker.Project.Character { Name = "cache-check-tachie" };
         character.TachieCharacterParameter = (YukkuriMovieMaker.Plugin.Tachie.ITachieCharacterParameter)Activator.CreateInstance(parameterType)!;
         var timeline = new Timeline();
-        var scenes = new Scenes(false);
+        var scenes = HostCompat.NewScenes();
         scenes.AddScene(timeline);
         timeline.Items = timeline.Items.Add(new ShapeItem { Frame = 0, Length = 30 }).Add(new TachieItem(character) { Frame = 50, Length = 10, Layer = 1 });
         var scene = new Scene(timeline, scenes, []);
@@ -1094,7 +1105,7 @@ internal static class Program
                 .Add(new ImageItem { FilePath = Path.Combine(real, "plain.png"), Frame = 0, Length = 10, Layer = 1 })
                 .Add(new ImageItem { FilePath = Path.Combine(link, "linked.png"), Frame = 10, Length = 10, Layer = 1 })
                 .Add(new ImageItem { FilePath = Path.Combine(real, "plain.png"), Frame = 20, Length = 10, Layer = 1 });
-            var scenes = new Scenes(false);
+            var scenes = HostCompat.NewScenes();
             scenes.AddScene(timeline);
             KeyDependencyTracker.UnverifiableRetry = TimeSpan.FromMilliseconds(200);
             using var tracker = new KeyDependencyTracker(new Scene(timeline, scenes, []));
@@ -1137,7 +1148,7 @@ internal static class Program
         var timeline = new Timeline();
         for (int i = 0; i < 40; i++)
             timeline.Items = timeline.Items.Add(new ShapeItem { Frame = i * 7, Length = 11 + i % 5, Layer = i % 3 + 1 });
-        var scenes = new Scenes(false);
+        var scenes = HostCompat.NewScenes();
         scenes.AddScene(timeline);
         using var tracker = new KeyDependencyTracker(new Scene(timeline, scenes, []));
         int[] frames = [.. Enumerable.Range(0, 320), .. Enumerable.Range(0, 320).Reverse(), 5, 300, 5, 17, 17, 400];
@@ -1154,7 +1165,7 @@ internal static class Program
         }
         Check(expected[5] != expected[300] && expected[17] != expected[5], "Frames of different items shared a key");
         long before = tracker.KeyStamp;
-        ((ShapeItem)timeline.Items[3]).X.SetFirstValue(5); // frames 21-34
+        ((ShapeItem)timeline.Items[3]).X.SetFirst(5); // frames 21-34
         Check(tracker.KeyStamp != before, "An edit did not change the key stamp");
         Check(WaitForFrameKey(tracker, 25) != expected[25] && WaitForFrameKey(tracker, 300) == expected[300], "The edit changed the wrong frames");
         Check(tracker.TryPeekFrameKeys([25, 300], peeked, out _) && peeked[0] == WaitForFrameKey(tracker, 25) && peeked[1] == expected[300],
@@ -1187,7 +1198,7 @@ internal static class Program
         try
         {
             var timeline = new Timeline();
-            var scenes = new Scenes(false);
+            var scenes = HostCompat.NewScenes();
             scenes.AddScene(timeline);
             var content = new byte[2 * 1024 * 1024];
             Random.Shared.NextBytes(content);

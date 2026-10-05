@@ -59,6 +59,25 @@ def major(version):
     return int(match.group(1)) if match else None
 
 
+def basis_note(basis, version):
+    """What the cache of a version is based on. basis (HostFeatures.Basis) names the builds whose code it shares, as
+    "a / b": a build whose code was read, or a range "oldest〜newest" of builds whose differences were read."""
+    parts = basis.split(' / ')
+
+    def covers(part):
+        oldest, _, newest = part.partition('〜')
+        try:
+            return version_key(oldest) <= version_key(version) <= version_key(newest or oldest)
+        except ValueError:
+            return False
+
+    own = [part for part in parts if covers(part)]
+    if not own:
+        return f'キャッシュは {basis} と一致した部分を使用'
+    others = [part for part in parts if part not in own]
+    return 'コードを読んだ版' + (f"（{' / '.join(others)} と同じ部分も使用）" if others else '')
+
+
 def plugin_label(plugin):
     """A build of a commit that is not its release tag carries "+<commit>" (the workflow's plan step): such a build
     is not the release of that version, which may not behave the same on older YMM4 versions."""
@@ -262,7 +281,7 @@ def cells(verdict):
     if loaded and verdict['cache'] == 'partial':
         notes.append('キャッシュで使わない機能: ' + '、'.join(verdict['missing']))
     if loaded and verdict.get('basis') and verdict['cache'] in ('full', 'partial'):
-        notes.append('コードを読んだ版' if verdict['basis'] == verdict.get('version') else f"キャッシュは {verdict['basis']} と一致した部分を使用")
+        notes.append(basis_note(verdict['basis'], verdict.get('version') or ''))
     if verdict['note']:
         notes.append(verdict['note'])
     return load, nvenc, cache, '。'.join(notes)

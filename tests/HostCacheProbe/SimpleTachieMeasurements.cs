@@ -57,7 +57,7 @@ internal sealed class SimpleTachieFixture : IDisposable
         Tachies = Characters.Select((character, i) =>
         {
             var item = new TachieItem(character) { Frame = 0, Length = Frames, Layer = i };
-            item.X.SetFirstValue(i == 0 ? -55.25 : 55.25); item.Y.SetFirstValue(0);
+            item.X.SetFirst(i == 0 ? -55.25 : 55.25); item.Y.SetFirst(0);
             return item;
         }).ToArray();
         Timeline.VideoInfo.Width = Width; Timeline.VideoInfo.Height = Height; Timeline.VideoInfo.FPS = Fps;
@@ -74,7 +74,7 @@ internal sealed class SimpleTachieFixture : IDisposable
             Timeline.Items = Timeline.Items.Add(voice);
         }
         Timeline.RefreshTimelineLengthAndMaxLayer();
-        var scenes = new Scenes(false); scenes.AddScene(Timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(Timeline);
         Scene = new(Timeline, scenes, []);
     }
     internal static void Set(object parameter, string property, object value) => parameter.GetType().GetProperty(property)!.SetValue(parameter, value);

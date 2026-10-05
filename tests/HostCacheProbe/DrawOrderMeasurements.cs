@@ -67,12 +67,12 @@ internal static class DrawOrderMeasurements
     {
         var timeline = new Timeline();
         timeline.VideoInfo.Width = Width; timeline.VideoInfo.Height = Height; timeline.VideoInfo.FPS = 30;
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         TextItem Square(int frame, int layer, double x, System.Windows.Media.Color color)
         {
             var item = new TextItem { Frame = frame, Length = 60 - frame, Layer = layer, Text = "\u25A0", Font = "Arial", FontColor = color };
-            item.FontSize.SetFirstValue(60);
-            item.X.SetFirstValue(x);
+            item.FontSize.SetFirst(60);
+            item.X.SetFirst(x);
             return item;
         }
         var red = Square(0, 1, -12, System.Windows.Media.Colors.Red);

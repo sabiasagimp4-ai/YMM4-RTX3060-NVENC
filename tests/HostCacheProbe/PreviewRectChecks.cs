@@ -52,7 +52,7 @@ internal static class PreviewRectChecks
             Check(TimelineFrameCache.Hits == hits + 4 && rects.Count == 1 && SameRect(rects[0]!, hostRect),
                 "Playback with the pointer over the preview lost the rects of a cached frame");
 
-            shape.X.SetFirstValue(40);
+            shape.X.SetFirst(40);
             Thread.Sleep(300); // the render path waits for edits to settle
             hits = TimelineFrameCache.Hits;
             Update(source, TimeSpan.Zero, TimelineSourceUsage.Paused, needRects: true);
@@ -175,9 +175,9 @@ internal static class PreviewRectChecks
     {
         var timeline = new Timeline();
         timeline.VideoInfo.Width = 321; timeline.VideoInfo.Height = 181; timeline.VideoInfo.FPS = 30;
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         var shape = new ShapeItem { Frame = 0, Length = 100 };
-        shape.X.SetFirstValue(-12.25); shape.Y.SetFirstValue(8.75);
+        shape.X.SetFirst(-12.25); shape.Y.SetFirst(8.75);
         if (effect is not null) shape.VideoEffects = shape.VideoEffects.Add(effect);
         timeline.Items = timeline.Items.Add(shape);
         var scene = new Scene(timeline, scenes, []);

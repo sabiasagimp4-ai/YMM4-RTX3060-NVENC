@@ -7,7 +7,7 @@ internal static class VoiceDescriptionChecks
     internal static void Run()
     {
         var timeline = new Timeline();
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         byte[] cache = VoiceDescriptionMeasurements.VoiceCache();
         var character = VoiceDescriptionMeasurements.Character("voice-hash-checks");
         var voices = Enumerable.Range(0, 200).Select(i => new VoiceItem(character)
@@ -70,7 +70,7 @@ internal static class VoiceDescriptionChecks
         File.WriteAllBytes(a, [1, 2, 3, 4]); File.WriteAllBytes(b, [1, 2, 3, 4]);
         var path = typeof(VoiceItem).GetField("customVoiceFilePath", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         var timeline = new Timeline();
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         var voice = new VoiceItem(VoiceDescriptionMeasurements.Character("path-witness"))
             { Frame = 0, Length = 90, VoiceCache = cache, Serif = "path", JimakuVisibility = JimakuVisibility.Custom, Font = "Arial" };
         timeline.Items = timeline.Items.Add(voice);

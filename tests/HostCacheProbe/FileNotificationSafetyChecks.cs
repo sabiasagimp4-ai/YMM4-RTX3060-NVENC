@@ -33,7 +33,7 @@ internal static class FileNotificationSafetyChecks
         var timeline = new Timeline();
         timeline.VideoInfo.Width = 160; timeline.VideoInfo.Height = 90;
         timeline.Items = timeline.Items.Add(new ImageItem { FilePath = path, Frame = 0, Length = 30 });
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         var scene = new Scene(timeline, scenes, []);
         byte[] RenderFresh()
         {

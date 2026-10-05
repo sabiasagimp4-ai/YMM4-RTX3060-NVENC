@@ -30,7 +30,7 @@ internal static class SimpleTachieKeyChecks
         Set(face.TachieFaceParameter, "Face", files[1]);
         var timeline = new Timeline(); timeline.Items = timeline.Items.Add(tachie).Add(voice).Add(face);
         timeline.RefreshTimelineLengthAndMaxLayer();
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         var scene = new Scene(timeline, scenes, []);
         FrameDependencyIndex Describe()
         {

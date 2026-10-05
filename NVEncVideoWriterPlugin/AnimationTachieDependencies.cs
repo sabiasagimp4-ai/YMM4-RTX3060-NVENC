@@ -17,7 +17,7 @@ internal static class AnimationTachieDependencies
     internal const string PluginName = AssemblyName + ".AnimationTachiePlugin";
     internal static readonly string SessionResource = "animation-blink-session://" + Guid.NewGuid().ToString("N");
     internal static Func<bool>? ReadinessInstalled { get; set; }
-    private static readonly Guid ReadBuild = new("8e5a1d93-983b-40cd-94f9-d3160cc7ea12");
+    internal static readonly Guid ReadBuild = new("8e5a1d93-983b-40cd-94f9-d3160cc7ea12");
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     private static readonly string[] Parts = ["Body", "Eye", "Mouth", "Hair", "Eyebrow", "Complexion", "Back1", "Back2", "Back3", "Etc1", "Etc2", "Etc3"];
     private sealed record Witness(string[] Paths);

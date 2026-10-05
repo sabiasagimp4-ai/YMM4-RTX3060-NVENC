@@ -13,7 +13,7 @@ internal static class SimpleTachieDependencies
 {
     internal const string AssemblyName = "YukkuriMovieMaker.Plugin.Tachie.SimpleTachie";
     internal const string PluginName = AssemblyName + ".SimpleTachiePlugin";
-    private static readonly Guid ReadBuild = new("be62ee72-e935-4cca-9bba-eb9de4a27cde");
+    internal static readonly Guid ReadBuild = new("be62ee72-e935-4cca-9bba-eb9de4a27cde");
 
     internal static bool Verified(Type? plugin) => plugin?.FullName == PluginName
         && plugin.Assembly.GetName().Name == AssemblyName

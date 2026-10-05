@@ -142,7 +142,8 @@ internal static class Program
         try
         {
             ExportScopeChecks.Run(host, harmony);
-            if (features is { Preview: true }) IdleFramePreRendererChecks.Run();
+            // The idle pre-renderer clones the project with Scenes(bool) (YMM4 4.49 and later); without it, it is off.
+            if (features is { Preview: true } && HostCompat.ScenesTakeUndoFlag) IdleFramePreRendererChecks.Run();
             harmony.Patch(update, new HarmonyMethod(typeof(Program), nameof(UpdatePrefix)), new HarmonyMethod(typeof(Program), nameof(UpdatePostfix)));
             harmony.Patch(dispose, new HarmonyMethod(typeof(Program), nameof(DisposePrefix)));
             var uninitialized = RuntimeHelpers.GetUninitializedObject(sourceType);
@@ -186,7 +187,7 @@ internal static class Program
         var timeline = Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Project.Timeline", true)!)!;
         var scenesType = host.GetType("YukkuriMovieMaker.Project.Scenes", true)!;
         Console.WriteLine("Scenes constructors: " + string.Join("; ", scenesType.GetConstructors().Select(x => x.ToString())));
-        var scenes = Activator.CreateInstance(scenesType, [false])!;
+        var scenes = HostCompat.NewScenes();
         var scene = Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Project.Scene", true)!, [timeline, scenes, Array.Empty<Guid>()])!;
         using var source = (IDisposable)Activator.CreateInstance(sourceType, All, null, [context, scene, null], null)!;
         skip = false;

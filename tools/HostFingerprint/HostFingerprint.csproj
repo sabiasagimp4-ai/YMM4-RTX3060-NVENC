@@ -11,5 +11,6 @@
     <Compile Include="../../NVEncVideoWriterPlugin/HostContracts.cs" Link="HostContracts.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/HostKnownBuilds.cs" Link="HostKnownBuilds.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/HostBaselines.cs" Link="HostBaselines.cs" Condition="Exists('../../NVEncVideoWriterPlugin/HostBaselines.cs')" />
+    <Compile Include="../../NVEncVideoWriterPlugin/HostReviewedBuilds.cs" Link="HostReviewedBuilds.cs" />
   </ItemGroup>
 </Project>

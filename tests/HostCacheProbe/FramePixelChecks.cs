@@ -65,9 +65,9 @@ internal static class FramePixelChecks
             var timeline = new Timeline();
             timeline.VideoInfo.Width = 321; timeline.VideoInfo.Height = 181;
             timeline.VideoInfo.BackgroundColor = System.Windows.Media.Color.FromArgb(137, 123, 76, 231);
-            var scenes = new Scenes(false); scenes.AddScene(timeline);
+            var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
             var shape = new ShapeItem { Frame = 0, Length = 100 };
-            shape.X.SetFirstValue(-12.25); shape.Y.SetFirstValue(8.75); shape.Opacity.SetFirstValue(43);
+            shape.X.SetFirst(-12.25); shape.Y.SetFirst(8.75); shape.Opacity.SetFirst(43);
             timeline.Items = timeline.Items.Add(shape);
             var scene = new Scene(timeline, scenes, []);
             var source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
@@ -129,7 +129,8 @@ internal static class FramePixelChecks
             DrawOrderMeasurements.Run(host, context);
             if (features.DecoderVerified("YukkuriMovieMaker.Plugin.FileSource.WIC"))
             {
-                CheckImageSequence(host, context, harmony);
+                if (ImageSequence.TimeMappingAvailable) CheckImageSequence(host, context, harmony);
+                else Console.WriteLine("Image sequence check skipped: this build has no time mapping the key can use (sequences are not cached)");
                 FileNotificationSafetyChecks.Run(host, context);
                 if (features.SimpleTachie) SimpleTachiePixelChecks.Run(host);
                 Check(TimelineFrameCache.GpuBytes == 0, "File notification checks leaked global GPU reservation");
@@ -241,11 +242,11 @@ internal static class FramePixelChecks
         var timeline = new Timeline();
         timeline.VideoInfo.Width = Width; timeline.VideoInfo.Height = Height; timeline.VideoInfo.FPS = 30;
         timeline.VideoInfo.BackgroundColor = System.Windows.Media.Color.FromArgb(200, 10, 120, 60);
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         for (int i = 0; i < Frames; i++)
         {
             var shape = new ShapeItem { Frame = i, Length = 1 };
-            shape.X.SetFirstValue(-140 + i * 31.5); shape.Y.SetFirstValue(-60 + i * 9.25); shape.Opacity.SetFirstValue(40 + i * 6);
+            shape.X.SetFirst(-140 + i * 31.5); shape.Y.SetFirst(-60 + i * 9.25); shape.Opacity.SetFirst(40 + i * 6);
             timeline.Items = timeline.Items.Add(shape);
         }
         var scene = new Scene(timeline, scenes, []);
@@ -302,7 +303,7 @@ internal static class FramePixelChecks
                     ((byte)(i * 21), (byte)(255 - i * 19), (byte)((x * 5 + y * 3 + i * 40) % 256), (byte)(x < 8 + i * 3 ? 255 : 160))));
             var timeline = new Timeline();
             timeline.VideoInfo.Width = Width; timeline.VideoInfo.Height = Height; timeline.VideoInfo.FPS = 30;
-            var scenes = new Scenes(false); scenes.AddScene(timeline);
+            var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
             timeline.Items = timeline.Items.Add(new VideoItem { FilePath = System.IO.Path.Combine(directory, "shot0.png"), Frame = 0, Length = Frames });
             var scene = new Scene(timeline, scenes, []);
             var dc = context.DeviceContext;
@@ -466,7 +467,7 @@ internal static class FramePixelChecks
 
         var timeline = new Timeline();
         timeline.VideoInfo.Width = 320; timeline.VideoInfo.Height = 180; timeline.VideoInfo.FPS = 30;
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         timeline.Items = timeline.Items.Add(new VideoItem { FilePath = videoPath, Frame = 0, Length = 30 });
         var scene = new Scene(timeline, scenes, []);
         var source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
@@ -519,7 +520,7 @@ internal static class FramePixelChecks
         }
         var timeline = new Timeline();
         timeline.VideoInfo.Width = 320; timeline.VideoInfo.Height = 180; timeline.VideoInfo.FPS = 30;
-        var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         timeline.Items = timeline.Items.Add(new VideoItem { FilePath = videoPath, Frame = 0, Length = 60 });
         var scene = new Scene(timeline, scenes, []);
         var source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,

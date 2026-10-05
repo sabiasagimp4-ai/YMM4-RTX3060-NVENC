@@ -64,8 +64,8 @@ internal sealed class PsdTachieFixture : IDisposable
         Tachies = Characters.Select((character, i) =>
         {
             var item = new TachieItem(character) { Frame = 0, Length = Frames, Layer = i };
-            if (large) item.Zoom.SetFirstValue(100.0 * 80 / 1920);
-            item.X.SetFirstValue(i == 0 ? -55.25 : 55.25); item.Y.SetFirstValue(0);
+            if (large) item.Zoom.SetFirst(100.0 * 80 / 1920);
+            item.X.SetFirst(i == 0 ? -55.25 : 55.25); item.Y.SetFirst(0);
             return item;
         }).ToArray();
         Timeline.VideoInfo.Width = Width; Timeline.VideoInfo.Height = Height; Timeline.VideoInfo.FPS = Fps;
@@ -78,7 +78,7 @@ internal sealed class PsdTachieFixture : IDisposable
             pathField.SetValue(voice, audioPath); Timeline.Items = Timeline.Items.Add(voice);
         }
         Timeline.RefreshTimelineLengthAndMaxLayer();
-        var scenes = new Scenes(false); scenes.AddScene(Timeline); Scene = new(Timeline, scenes, []);
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(Timeline); Scene = new(Timeline, scenes, []);
     }
     internal static void Set(object parameter, string property, object value) => parameter.GetType().GetProperty(property)!.SetValue(parameter, value);
 

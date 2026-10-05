@@ -37,4 +37,6 @@
     <Reference Include="SharpGen.Runtime"><HintPath>$(YMM4DirPath)SharpGen.Runtime.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="SharpGen.Runtime.COM"><HintPath>$(YMM4DirPath)SharpGen.Runtime.COM.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
+  <!-- Like the plugin: also runs on the older YMM4 builds the plugin supports (ymm4-compat builds it against the read build). -->
+  <Import Project="..\..\NVEncVideoWriterPlugin\HostReferenceVersion.targets" />
 </Project>

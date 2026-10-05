@@ -40,7 +40,7 @@ internal static class EditDescriptionMeasurements
                 text ? (IItem)new TextItem { Frame = 0, Length = 60, Layer = index, Text = "description " + index, Font = "Arial" }
                     : new ShapeItem { Frame = 0, Length = 60, Layer = index }));
             timeline.RefreshTimelineLengthAndMaxLayer();
-            var scenes = new Scenes(false); scenes.AddScene(timeline); var scene = new Scene(timeline, scenes, []);
+            var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline); var scene = new Scene(timeline, scenes, []);
             using var tracker = new KeyDependencyTracker(scene);
             ItemDescriptionFragments? fragments = null;
             using var trial = incremental ? fragments = new ItemDescriptionFragments(sender => fragments!.Invalidate(sender)) : null;
@@ -56,7 +56,7 @@ internal static class EditDescriptionMeasurements
             {
                 long revision = tracker.Revision;
                 var clock = Stopwatch.StartNew();
-                target.X.SetFirstValue(12.345 + repeat);
+                target.X.SetFirst(12.345 + repeat);
                 Check(tracker.Revision != revision, "The edited animation did not invalidate the description");
                 KeyCapture? capture;
                 using (trial?.Enter(scene)) Check(tracker.TryCapture(0, out capture, out reason), reason);

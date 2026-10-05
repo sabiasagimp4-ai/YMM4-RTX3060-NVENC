@@ -43,7 +43,7 @@ internal static class EditDescriptionChecks
         {
             var random = new Random(seed);
             var timeline = new Timeline();
-            var scenes = new Scenes(false); scenes.AddScene(timeline);
+            var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
             var nested = new Timeline(); scenes.AddScene(nested);
             var scene = new Scene(timeline, scenes, []);
             var character = VoiceDescriptionMeasurements.Character("edit oracle " + seed);
@@ -94,7 +94,7 @@ internal static class EditDescriptionChecks
                         if (shape.VideoEffects.Count > 1) shape.VideoEffects = shape.VideoEffects.Reverse().ToImmutableList();
                         break;
                     case 6:
-                        character.Name = "changed " + random.Next(10000); character.X.SetFirstValue(random.NextDouble());
+                        character.Name = "changed " + random.Next(10000); character.X.SetFirst(random.NextDouble());
                         break;
                     case 7:
                         timeline.VideoInfo.Width = 320 + random.Next(8); nested.VideoInfo.FPS = 24 + random.Next(8);
@@ -114,7 +114,7 @@ internal static class EditDescriptionChecks
                         text.VideoEffects = [external]; external.Unannounced++;
                         break;
                     case 11:
-                        shape.X.SetFirstValue(edit % 2 == 0 ? 0.0004 : 0.00049);
+                        shape.X.SetFirst(edit % 2 == 0 ? 0.0004 : 0.00049);
                         shape.X.Bezier.Points[0].Point = new System.Numerics.Vector2((float)random.NextDouble(), (float)random.NextDouble());
                         break;
                 }

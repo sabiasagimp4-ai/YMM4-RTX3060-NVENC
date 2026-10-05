@@ -51,8 +51,10 @@ internal static partial class TimelineFrameCache
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YMM4-RTX3060-NVENC", "cache")));
     private static FieldInfo sceneField = null!, devicesField = null!, outputField = null!, collectorField = null!, pickerField = null!;
     private static FieldInfo playerSourceField = null!, playerContextField = null!, playerTargetField = null!;
-    private static PropertyInfo needRects = null!, itemRects = null!, previewZoom = null!, previewCenter = null!, backBuffer = null!, playerIsPlaying = null!;
-    private static MethodInfo visibleVideoSize = null!, previewTransform = null!;
+    private static PropertyInfo needRects = null!, itemRects = null!, backBuffer = null!, playerIsPlaying = null!;
+    // Null on players without zoom and pan (YMM4 4.54 and older), which draw the output with the context's transform.
+    private static PropertyInfo? previewZoom, previewCenter;
+    private static MethodInfo? visibleVideoSize, previewTransform;
     private static FieldInfo? timelineChangedField, pointerOverPreviewField;
     private static Type pickerType = null!;
     private static long hits, misses, gpuBytes, generation;
@@ -209,20 +211,22 @@ internal static partial class TimelineFrameCache
                 playerSourceField = playerType.GetField("timelineVideo", Instance)!;
                 playerContextField = playerType.GetField("devicesAndContext", Instance)!;
                 playerTargetField = playerType.GetField("renderTarget", Instance)!;
-                previewZoom = playerType.GetProperty("PreviewDisplayZoom")!;
-                previewCenter = playerType.GetProperty("PreviewViewCenter")!;
+                previewZoom = playerType.GetProperty("PreviewDisplayZoom");
+                previewCenter = playerType.GetProperty("PreviewViewCenter");
                 playerIsPlaying = playerType.GetProperty("IsPlaying", Instance)!;
-                visibleVideoSize = playerType.GetMethod("GetVisibleVideoSize", Instance)!;
-                previewTransform = playerType.GetMethod("CreatePreviewViewTransform", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)!;
+                visibleVideoSize = playerType.GetMethod("GetVisibleVideoSize", Instance);
+                previewTransform = playerType.GetMethod("CreatePreviewViewTransform", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                 backBuffer = playerTargetField.FieldType.GetProperty("BackBuffer")!;
                 draw = playerType.GetMethods(Instance).Single(m => m.Name == "Draw" && m.GetParameters().Length == 0);
                 edit = playerType.GetMethod("Edit", Instance, Type.EmptyTypes);
+                // The players of 4.54 and older have none of the zoom and pan members (all four or none).
+                bool zoomable = previewZoom is not null || previewCenter is not null || visibleVideoSize is not null || previewTransform is not null;
                 if (playerSourceField.FieldType != type || playerContextField.FieldType != typeof(IGraphicsDevicesAndContext)
-                    || previewZoom.PropertyType != typeof(float) || previewCenter.PropertyType != typeof(Vector2)
+                    || zoomable && (previewZoom?.PropertyType != typeof(float) || previewCenter?.PropertyType != typeof(Vector2)
+                        || visibleVideoSize is null || visibleVideoSize.GetParameters().Length != 1 || visibleVideoSize.GetParameters()[0].ParameterType != typeof(float)
+                        || previewTransform is null || !previewTransform.GetParameters().Select(p => p.ParameterType)
+                            .SequenceEqual([typeof(Vector2), typeof(Vector2), typeof(float), typeof(float)]))
                     || playerIsPlaying.PropertyType != typeof(bool) || backBuffer.PropertyType != typeof(ID2D1Bitmap1)
-                    || visibleVideoSize.GetParameters().Length != 1 || visibleVideoSize.GetParameters()[0].ParameterType != typeof(float)
-                    || !previewTransform.GetParameters().Select(p => p.ParameterType)
-                        .SequenceEqual([typeof(Vector2), typeof(Vector2), typeof(float), typeof(float)])
                     || draw.ReturnType != typeof(void))
                     throw new NotSupportedException("TimelineVideoPlayer preview contract changed");
 

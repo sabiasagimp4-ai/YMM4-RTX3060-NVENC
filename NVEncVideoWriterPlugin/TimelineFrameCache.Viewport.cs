@@ -161,9 +161,15 @@ internal static partial class TimelineFrameCache
         if (targetResources is null || backBuffer.GetValue(targetResources) is not ID2D1Bitmap1 target) return false;
         var devices = (IGraphicsDevicesAndContext)playerContextField.GetValue(player)!;
         var context = devices.DeviceContext;
-        var visible = (Vector2)visibleVideoSize.Invoke(player, [previewZoom.GetValue(player)])!;
-        var transform = (Matrix3x2)previewTransform.Invoke(null,
-            [visible, previewCenter.GetValue(player)!, (float)scene.Width, (float)scene.Height])! * context.Transform;
+        // The player draws the output at the scene's center under the view's zoom and pan (4.55 and later), or under
+        // the context's transform alone (4.54 and older: Draw sets no transform).
+        var transform = context.Transform;
+        if (previewTransform is not null)
+        {
+            var visible = (Vector2)visibleVideoSize!.Invoke(player, [previewZoom!.GetValue(player)])!;
+            transform = (Matrix3x2)previewTransform.Invoke(null,
+                [visible, previewCenter!.GetValue(player)!, (float)scene.Width, (float)scene.Height])! * transform;
+        }
         var pixelSize = target.PixelSize;
         viewport = new PreviewViewport(pixelSize.Width, pixelSize.Height, transform,
             new Vector2(scene.Width / 2f, scene.Height / 2f), target.Dpi.Width, target.Dpi.Height, target.PixelFormat,
