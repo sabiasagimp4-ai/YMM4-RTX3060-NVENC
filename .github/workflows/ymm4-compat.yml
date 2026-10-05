@@ -6,12 +6,14 @@ name: ymm4-compat
 #               default only those not checked yet (a new YMM4 version). "stale" also re-checks the versions checked
 #               with an older plugin version (after a release), "all" every version.
 #  2. package:  the plugin built like a release (against the read YMM4 4.56.1.0, build.ps1).
-#  3. runtime:  on Linux, each version's runtime configuration only (a few hundred bytes): YMM4 carries its own .NET,
-#               and a YMM4 on an older .NET than the plugin's cannot load it.
-#  4. check:    on Windows, the other versions one after another in one folder, downloading only the files that
-#               changed (as YMM4's updater does): the host assemblies the plugin references, every YMM4 API it calls,
-#               the HostContracts verdict (tools/HostFingerprint scan), then YMM4 started with the plugin installed,
-#               where the plugin itself reports what it enabled (tools/compat/start-check.ps1).
+#  3. files:    on Linux, from the files only. Each version's runtime configuration (a few hundred bytes): YMM4 carries
+#               its own .NET, and a YMM4 on an older .NET than the plugin's cannot load it. For the others, YMM4's own
+#               assemblies, one version after another in one folder, downloading only the files that changed (as
+#               YMM4's updater does): the host assemblies the plugin references and their versions (YMM4 does not
+#               load a plugin built against a newer YMM4), every YMM4 API it calls, and the HostContracts verdict
+#               (tools/HostFingerprint scan).
+#  4. check:    on Windows, the versions the files allow: YMM4 started with the plugin installed, where the plugin
+#               itself reports what it enabled (tools/compat/start-check.ps1).
 #  5. tests:    for a new YMM4 version (or on request), the plugin and the cache checks built against that version.
 #  6. publish:  tools/compat/ymm4_compat.py merges and renders; the result is committed to the default branch, and a
 #               newly published YMM4 version gets an issue with its result.
@@ -127,10 +129,10 @@ jobs:
           path: plugin
           retention-days: 3
 
-  runtime:
+  files:
     needs: [plan, package]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     outputs:
       groups: ${{ steps.groups.outputs.groups }}
       loadable: ${{ steps.groups.outputs.loadable }}
@@ -143,46 +145,67 @@ jobs:
         with:
           name: plugin
           path: plugin
-      - name: Runtime of each version
+      - uses: actions/cache@v4
+        with:
+          path: assemblies
+          key: ymm4-scan-${{ github.run_id }}
+          restore-keys: ymm4-scan-
+      - name: Files of each version
         env:
           TARGETS: ${{ needs.plan.outputs.targets }}
+          YMM4_FETCH_PRUNE: '1'
         run: |
           dotnet build tools/HostFingerprint -c Release --nologo -v q
+          tool=tools/HostFingerprint/bin/Release/net10.0/HostFingerprintTool.dll
           mkdir -p results
-          : > loadable.txt
-          for v in $TARGETS; do
-            if tools/ci/fetch-ymm4.sh "$v" "rc/$v" --match '^YukkuriMovieMaker\.runtimeconfig\.json$' > /dev/null; then
-              dotnet tools/HostFingerprint/bin/Release/net10.0/HostFingerprintTool.dll scan "rc/$v" plugin > "results/$v.scan.json" \
-                || echo '{"error":"scan failed"}' > "results/$v.scan.json"
-            else
+          scan() { dotnet "$tool" scan "$1" plugin > "results/$v.scan.json" || echo '{"error":"scan failed"}' > "results/$v.scan.json"; }
+          # Oldest first: each version then downloads only what changed since the one before.
+          for v in $(printf '%s\n' $TARGETS | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n); do
+            if ! tools/ci/fetch-ymm4.sh "$v" "rc/$v" --match '^YukkuriMovieMaker\.runtimeconfig\.json$' > /dev/null; then
               echo '{"error":"download failed"}' > "results/$v.scan.json"
+            else
+              scan "rc/$v"
+              if python3 tools/compat/ymm4_compat.py runtime-ok "results/$v.scan.json"; then
+                if tools/ci/fetch-ymm4.sh "$v" assemblies --scan > /dev/null; then
+                  scan assemblies
+                else
+                  echo '{"error":"download failed"}' > "results/$v.scan.json"
+                fi
+              fi
             fi
-            if python3 tools/compat/ymm4_compat.py runtime-ok "results/$v.scan.json"; then echo "$v" >> loadable.txt; fi
-            echo "$v $(cat "results/$v.scan.json")"
+            python3 - "$v" "results/$v.scan.json" <<'PY'
+          import json, sys
+          s = json.load(open(sys.argv[2]))
+          p = s.get('plugin') or {}
+          old = [f"{r['name']} {r['host']}<{r['required']}" for r in p.get('references') or [] if r.get('host') and tuple(map(int, r['host'].split('.'))) < tuple(map(int, r['required'].split('.')))]
+          print(sys.argv[1], s.get('error') or '', (s.get('runtime') or {}).get('tfm'), 'read:', s.get('knownBuild'),
+                'basis:', (s.get('contracts') or {}).get('baseline'), 'older refs:', old, 'missing APIs:', len(p.get('apiMissing') or []))
+          PY
           done
+          python3 tools/compat/ymm4_compat.py loadable results > loadable.txt
       - id: groups
         run: |
-          # Oldest first, in up to two groups, each checked in one folder.
+          # Oldest first, in up to two groups, each started in one folder.
           sort -t. -k1,1n -k2,2n -k3,3n -k4,4n loadable.txt > ascending.txt
-          cat ascending.txt
+          echo 'Versions to start:'; cat ascending.txt
           echo "loadable=$(jq -Rsc 'split("\n") | map(select(length > 0))' ascending.txt)" >> "$GITHUB_OUTPUT"
           echo "groups=$(jq -Rsc 'split("\n") | map(select(length > 0)) as $v | ($v | length) as $n
             | if $n == 0 then [] else (($n + 1) / 2 | floor) as $size | [range(0; $n; $size) as $i | $v[$i:$i + $size] | join(" ")] end' ascending.txt)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
-          name: results-runtime
+          name: results-files
           path: results
 
   check:
-    needs: [runtime, package]
-    if: needs.runtime.outputs.groups != '[]' && needs.runtime.outputs.groups != ''
+    needs: [files, package]
+    if: needs.files.outputs.groups != '[]' && needs.files.outputs.groups != ''
     runs-on: windows-2022
     timeout-minutes: 150
     strategy:
       fail-fast: false
       max-parallel: 2 # the update server is one person's: keep the load near that of two updating users
       matrix:
-        group: ${{ fromJSON(needs.runtime.outputs.groups) }}
+        group: ${{ fromJSON(needs.files.outputs.groups) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -197,35 +220,21 @@ jobs:
           path: app
           key: ymm4-app-${{ github.run_id }}-${{ strategy.job-index }}
           restore-keys: ymm4-app-
-      - name: Check each version
+      - name: Start each version
+        if: github.event_name != 'workflow_dispatch' || inputs.start
         shell: pwsh
         env:
           GROUP: ${{ matrix.group }}
-          START: ${{ github.event_name != 'workflow_dispatch' || inputs.start }}
           YMM4_FETCH_PRUNE: '1'
         run: |
-          dotnet build tools/HostFingerprint -c Release --nologo -v q
-          $tool = 'tools\HostFingerprint\bin\Release\net10.0\HostFingerprintTool.dll'
           $bash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
           New-Item -ItemType Directory -Path results -Force | Out-Null
           foreach ($v in -split $env:GROUP) {
             Write-Output "::group::YMM4 $v"
             & $bash tools/ci/fetch-ymm4.sh $v app --app
             if ($LASTEXITCODE -ne 0) {
-              [IO.File]::WriteAllText("$PWD\results\$v.scan.json", '{"error":"download failed"}')
-              Write-Output '::endgroup::'
-              continue
-            }
-            $scan = (dotnet $tool scan app plugin) -join "`n"
-            if ($LASTEXITCODE -ne 0 -or -not $scan) { $scan = '{"error":"scan failed"}' }
-            [IO.File]::WriteAllText("$PWD\results\$v.scan.json", $scan)
-            try {
-              $j = $scan | ConvertFrom-Json
-              Write-Output ("read build: {0}; cache basis: {1}; cache features off: {2}; missing host APIs: {3}" -f $j.knownBuild, $j.contracts.baseline,
-                (@($j.contracts.off.PSObject.Properties.Name) -join ', '), @($j.plugin.apiMissing).Count)
-              @($j.plugin.apiMissing) | Select-Object -First 20 | ForEach-Object { Write-Output "  missing: $_" }
-            } catch { Write-Output $scan.Substring(0, [Math]::Min(1500, $scan.Length)) }
-            if ($env:START -eq 'true') {
+              [IO.File]::WriteAllText("$PWD\results\$v.start.json", '{"error":"download failed"}')
+            } else {
               powershell -NoProfile -ExecutionPolicy Bypass -File tools\compat\start-check.ps1 -HostDir "$PWD\app" -PluginDir "$PWD\plugin" -Out "$PWD\results\$v.start.json"
             }
             Write-Output '::endgroup::'
@@ -238,15 +247,15 @@ jobs:
           path: results
 
   tests:
-    needs: [plan, runtime]
-    if: needs.runtime.outputs.loadable != '[]' && needs.runtime.outputs.loadable != '' && (inputs.tests || (github.event_name == 'schedule' && contains(fromJSON(needs.runtime.outputs.loadable), needs.plan.outputs.newest)))
+    needs: [plan, files]
+    if: needs.files.outputs.loadable != '[]' && needs.files.outputs.loadable != '' && (inputs.tests || (github.event_name == 'schedule' && contains(fromJSON(needs.files.outputs.loadable), needs.plan.outputs.newest)))
     runs-on: windows-2022
     timeout-minutes: 45
     strategy:
       fail-fast: false
       max-parallel: 2
       matrix:
-        version: ${{ fromJSON(inputs.tests && needs.runtime.outputs.loadable || format('["{0}"]', needs.plan.outputs.newest)) }}
+        version: ${{ fromJSON(inputs.tests && needs.files.outputs.loadable || format('["{0}"]', needs.plan.outputs.newest)) }}
     env:
       YMM4_DIR: '${{ github.workspace }}\app\'
       PROBE_VIDEO: '${{ github.workspace }}\probe-video.mp4'
@@ -308,15 +317,15 @@ jobs:
           path: results
 
   publish:
-    needs: [plan, runtime, check, tests]
-    if: always() && needs.plan.outputs.any == 'true' && needs.runtime.result == 'success'
+    needs: [plan, files, check, tests]
+    if: always() && needs.plan.outputs.any == 'true' && needs.files.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: results-runtime
+          name: results-files
           path: results
       - uses: actions/download-artifact@v4
         with:

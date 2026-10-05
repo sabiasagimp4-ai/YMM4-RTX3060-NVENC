@@ -11,7 +11,7 @@ Usage:
   ymm4_compat.py render <data.json> <README.md> <docs/YMM4_VERSIONS.md>
   ymm4_compat.py plan <data.json> <server versions file> --plugin <version> [--mode new|stale|all|<v> <v>...]
   ymm4_compat.py runtime-ok <version.scan.json>   (exit 0 when the .NET runtime of that YMM4 can load the plugin)
-  ymm4_compat.py loadable <results dir>     (versions whose scan allows a start check, one per line)
+  ymm4_compat.py loadable <results dir>     (versions whose files allow the plugin to load: started on Windows)
   ymm4_compat.py issue <data.json> <version>  (a Markdown report for one version)
 """
 import argparse
@@ -76,13 +76,28 @@ def runtime_check(scan):
 
 
 def reference_problems(scan):
+    """The host assemblies the plugin references that this YMM4 lacks or has in an older version. YMM4 does not load
+    such a plugin: it shows "the required files for YMM4 could not be loaded" with the referenced assembly (seen on
+    4.47.0.0, 4.50.0.0 and 4.56.0.1 with a plugin built against 4.56.1.0, 2026-10-05)."""
     problems = []
     for reference in (scan.get('plugin') or {}).get('references') or []:
         if reference.get('host') is None:
             problems.append(f"{reference['name']} がありません")
         elif version_key(reference['host']) < version_key(reference['required']):
-            problems.append(f"{reference['name']} {reference['host']}（プラグインは {reference['required']} を参照）")
+            problems.append(f"{reference['name']} {reference['required']}")
     return problems
+
+
+def reference_note(problems):
+    return ('プラグインが参照する ' + '、'.join(problems) + ' より古いため、YMM4 がプラグインを読み込みません'
+            '（「必要なファイルを読み込めませんでした」と表示）')
+
+
+def static_load_ok(scan):
+    """Whether the files alone allow the plugin to load (then YMM4 is started to see what it enables)."""
+    plugin = scan.get('plugin') or {}
+    return (not scan.get('error') and runtime_check(scan)[0] is not False
+            and plugin.get('references') is not None and not reference_problems(scan))
 
 
 def api_note(missing):
@@ -128,13 +143,23 @@ def judge(entry):
                 verdict['note'] = verdict['note'] or '描画キャッシュが前提とする YMM4 のコードが、確かめた版と異なります'
     elif runtime_ok is False:
         verdict.update(load='no', nvenc='no', cache='off', note=runtime_reason)
+    elif reference_problems(scan):
+        verdict.update(load='no', nvenc='no', cache='off', note=reference_note(reference_problems(scan)))
+        if api:
+            verdict['referenceApi'] = len(api)
+    elif start and any('Version=' in dialog for dialog in start.get('dialogs') or []):
+        dialog = next(d for d in start['dialogs'] if 'Version=' in d)
+        verdict.update(load='no', nvenc='no', cache='off',
+                       note='YMM4 がプラグインの読み込みを拒否しました（' + dialog.split('|')[-1].strip().splitlines()[-1] + '）')
     elif start and start.get('mainWindow'):
         dialogs = ' / '.join(start.get('dialogs') or [])
         verdict.update(load='no', nvenc='no', cache='off',
                        note='YMM4 は起動しましたが、プラグインが読み込まれませんでした' + (f'（{dialogs}）' if dialogs else ''))
     else:
         problems = reference_problems(scan)
-        if start:
+        if start and start.get('error'):
+            verdict['note'] = f"起動して確かめる準備に失敗しました（{start['error']}）"
+        elif start:
             verdict['note'] = 'CI で YMM4 が起動しなかったため確かめられませんでした'
         elif runtime_ok is None:
             verdict['note'] = runtime_reason
@@ -250,6 +275,9 @@ def detail_table(data):
         entry = versions[version]
         steps = '・'.join(name for name, key in (('照合', 'scan'), ('起動', 'start'), ('検査', 'tests')) if entry.get(key))
         checked = f"{entry.get('checked', '?')}、{entry.get('plugin', '?')}、{steps}" + (f"（[記録]({entry['run']})）" if entry.get('run') else '')
+        api = (entry.get('verdict') or {}).get('referenceApi')
+        if api:
+            note += f'（参考: プラグインが使う YMM4 の API のうち {api} 個がこの版にありません）'
         lines.append(f'| {version} | {load} | {nvenc} | {cache} | {note} | {checked} |')
     return '\n'.join(lines)
 
@@ -334,7 +362,7 @@ def loadable(results):
             continue
         with open(os.path.join(results, name), encoding='utf-8-sig') as stream:
             scan = json.load(stream)
-        if runtime_check(scan)[0] is not False:
+        if static_load_ok(scan):
             print(match.group(1))
 
 

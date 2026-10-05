@@ -65,6 +65,7 @@ try {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $settleUntil = $null
     $mainSince = $null
+    $refused = $false
     while ((Get-Date) -lt $deadline -and -not $process.HasExited) {
         Start-Sleep -Seconds 2
         foreach ($handle in [StartWin]::Windows([uint32]$process.Id)) {
@@ -77,6 +78,8 @@ try {
                 # a box needs is not known here, and answering one can end YMM4 or start its updater.
                 $text = [StartWin]::Describe($handle)
                 if ($text -and -not $result.dialogs.Contains($text)) { $result.dialogs.Add($text); Write-Output "dialog: $text" }
+                # YMM4 could not load an assembly (it names it, "Name, Version=..."): the plugin will not load.
+                if ($text -match 'Version=') { $refused = $true }
             } elseif ($class -like 'HwndWrapper*' -and $title -and $title -notmatch '^YukkuriMovieMaker v' -and -not $closed.ContainsKey([string]$handle)) {
                 # A window of YMM4's own before the main one (the update check, the first-start "about" window): close
                 # it once, as a user would. Closing the update check does not update.
@@ -85,6 +88,7 @@ try {
                 [StartWin]::PostMessage($handle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
             }
         }
+        if ($refused) { break }
         if ((Test-Path $statusFile) -and -not $settleUntil) { $settleUntil = (Get-Date).AddSeconds(5) }
         # After the status, wait a little for the main window and for message boxes that follow the plugin load.
         if ($settleUntil -and ((Get-Date) -gt $settleUntil -or $result.mainWindow)) { break }

@@ -49,6 +49,25 @@ class VerdictChecks(unittest.TestCase):
         self.assertEqual('△', load)
         self.assertIn('`Y.Api::New`', note)
 
+    def test_older_referenced_host_assembly_is_not_loadable(self):
+        s = scan()
+        s['plugin'] = dict(PLUGIN, references=[{'name': 'YukkuriMovieMaker', 'required': '4.56.1.0', 'host': '4.56.0.1'}],
+                           apiMissing=['YukkuriMovieMaker: Y.Api::New instance Void <0>(String)'])
+        verdict = compat.judge({'scan': s})
+        self.assertEqual(('no', 'off'), (verdict['load'], verdict['cache']))
+        self.assertIn('YukkuriMovieMaker 4.56.1.0 より古い', verdict['note'])
+        self.assertEqual(1, verdict['referenceApi'])
+        self.assertFalse(compat.static_load_ok(s))
+        self.assertTrue(compat.static_load_ok(scan()))
+        self.assertFalse(compat.static_load_ok({'error': 'download failed'}))
+
+    def test_load_refusal_dialog_is_not_loadable(self):
+        start = {'mainWindow': False, 'status': None, 'dialogs': [
+            ' | Button: OK | Static: The required files for YMM4 could not be loaded.\r\n---\r\nYukkuriMovieMaker, Version=4.56.1.0, Culture=neutral, PublicKeyToken=null']}
+        verdict = compat.judge({'scan': scan(), 'start': start})
+        self.assertEqual('no', verdict['load'])
+        self.assertIn('YukkuriMovieMaker, Version=4.56.1.0', verdict['note'])
+
     def test_failed_scan_is_unknown(self):
         self.assertEqual('unknown', compat.judge({'scan': {'error': 'download failed'}})['load'])
 
