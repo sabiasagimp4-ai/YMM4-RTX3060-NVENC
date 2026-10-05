@@ -17,7 +17,7 @@ internal static class AnimationTachieChecks
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     internal static void Run(Assembly host)
     {
-        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback", "metadata-budget", "idle-inactive" })
+        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback", "metadata-budget", "idle-inactive", "preserved-directory-time" })
         {
             Exception? failure = null;
             using var finished = new ManualResetEventSlim();
@@ -102,14 +102,20 @@ internal static class AnimationTachieChecks
                 "Available metadata did not admit the new listing");
             return;
         }
-        if (name is "changed-list" or "overwrite")
+        if (name is "changed-list" or "overwrite" or "preserved-directory-time")
         {
             test.Warm(30);
             long hits = TimelineFrameCache.Hits;
-            if (name == "changed-list")
+            if (name is "changed-list" or "preserved-directory-time")
             {
                 string added = Path.Combine(test.Fixture.Root, "eye.2.png");
+                DateTime directoryTime = Directory.GetLastWriteTimeUtc(test.Fixture.Root);
                 File.Copy(test.Fixture.Images[0], added);
+                if (name == "preserved-directory-time")
+                {
+                    Directory.SetLastWriteTimeUtc(test.Fixture.Root, directoryTime);
+                    Check(Directory.GetLastWriteTimeUtc(test.Fixture.Root) == directoryTime, "Directory time counterexample was not prepared");
+                }
                 Check(!AnimationTachieDependencies.SafeSource(test.Source, test.Fixture.Scene, 30), "New numbered eye was not rejected synchronously");
                 File.Delete(added);
                 Check(!AnimationTachieDependencies.SafeSource(test.Source, test.Fixture.Scene, 30), "Changed list recovered before restart");

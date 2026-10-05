@@ -26,6 +26,7 @@ internal static class AnimationTachieDependencies
     private static readonly ConcurrentDictionary<string, string> firstListings = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object listingGate = new();
     private static long listingCharacters;
+    private static readonly ConcurrentDictionary<Type, (PropertyInfo Blend, PropertyInfo Opacity, PropertyInfo PlaceOn)> configAccess = new();
     private const long MaximumListingCharacters = 8L << 20; // 16 MiB of UTF-16 listing content, besides bounded table metadata.
 
     internal static bool Verified(Type? plugin) => plugin?.FullName == PluginName
@@ -80,9 +81,9 @@ internal static class AnimationTachieDependencies
 
     // Image lists and INI existence are read synchronously. Watcher delivery can lag a host file read.
     // The first list is never replaced: an already-created native source can retain its old parts count.
-    internal static bool Listing(string path, out string[] files, out int count) => Listing(path, out files, out count, null);
+    internal static bool Listing(string path, out string[] files, out int count) => ListingCore(path, out files, out count);
 
-    private static bool Listing(string path, out string[] files, out int count, IReadOnlyDictionary<string, string[]>? inventories)
+    private static bool ListingCore(string path, out string[] files, out int count)
     {
         files = []; count = 0;
         if (!Path.IsPathFullyQualified(path) || !Path.GetExtension(path).Equals(".png", StringComparison.OrdinalIgnoreCase)
@@ -91,15 +92,17 @@ internal static class AnimationTachieDependencies
         if (changedListings.ContainsKey(path)) return false;
         if (!File.Exists(path)) { if (firstListings.ContainsKey(path)) changedListings.TryAdd(path, 0); return false; }
         string directory = Path.GetDirectoryName(path)!, stem = Path.GetFileNameWithoutExtension(path);
-        IEnumerable<string> candidates = inventories?.TryGetValue(directory, out var inventory) == true
-            ? inventory : Directory.EnumerateFiles(directory, stem + "*");
+        // Query only this native part's possible names, synchronously on every validation.
+        // A directory timestamp can be restored or delayed; it never authorizes reuse.
+        string[] candidates = Directory.EnumerateFiles(directory, stem + "*").Take(16385).ToArray();
+        if (candidates.Length > 16384) return false;
         var list = candidates.Where(file =>
         {
             string name = Path.GetFileNameWithoutExtension(file), suffix = name.StartsWith(stem + ".", StringComparison.OrdinalIgnoreCase) ? name[(stem.Length + 1)..].ToLowerInvariant() : "";
             return name.Equals(stem, StringComparison.OrdinalIgnoreCase) || suffix is "a" or "i" or "u" or "e" or "o"
                 || suffix.Length != 0 && suffix.All(char.IsAsciiDigit);
         }).Take(1025).Select(Path.GetFullPath).Order(StringComparer.OrdinalIgnoreCase).ToArray();
-        if (list.Length > 1024 || list.Any(file => !Path.GetExtension(file).Equals(".png", StringComparison.OrdinalIgnoreCase)))
+        if (list.Length > 1024 || list.Distinct(StringComparer.OrdinalIgnoreCase).Count() != list.Length || list.Any(file => !Path.GetExtension(file).Equals(".png", StringComparison.OrdinalIgnoreCase)))
         { if (firstListings.ContainsKey(path)) changedListings.TryAdd(path, 0); return false; }
         string listing = string.Join("\n", list);
         if (!firstListings.TryGetValue(path, out string? first))
@@ -136,22 +139,16 @@ internal static class AnimationTachieDependencies
             if (!(ReadinessInstalled?.Invoke() == true) || timelineSource.GetType().FullName != "YukkuriMovieMaker.Player.Video.TimelineSource") return false;
             var resources = timelineSource.GetType().GetField("timelineResources", Instance)?.GetValue(timelineSource) as IDictionary;
             if (resources is null) return false;
-            var inventories = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
-            // One fresh directory enumeration serves parts that share a folder, without deferring validation.
-            foreach (var item in active)
+            var verifiedCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            bool CheckListing(string path, out int count)
             {
-                if (!witnesses.TryGetValue(item, out var witness)) return false;
-                foreach (string directory in witness.Paths.Select(Path.GetDirectoryName).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase))
-                {
-                    if (inventories.ContainsKey(directory)) continue;
-                    string[] inventory = Directory.EnumerateFiles(directory).Take(16385).Select(Path.GetFullPath).ToArray();
-                    if (inventory.Length > 16384 || inventory.Distinct(StringComparer.OrdinalIgnoreCase).Count() != inventory.Length) return false;
-                    inventories.Add(directory, inventory);
-                }
+                if (verifiedCounts.TryGetValue(path, out count)) return true;
+                if (!Listing(path, out _, out count)) return false;
+                verifiedCounts.Add(path, count); return true;
             }
             foreach (var item in active)
             {
-                if (!witnesses.TryGetValue(item, out var witness) || witness.Paths.Any(path => !Listing(path, out _, out _, inventories))
+                if (!witnesses.TryGetValue(item, out var witness) || witness.Paths.Any(path => !CheckListing(path, out _))
                     || resources[item] is not { } effected) return false;
                 var coreSource = effected.GetType().GetProperty("Source", Instance)?.GetValue(effected);
                 if (coreSource?.GetType().FullName != "YukkuriMovieMaker.Player.Video.Items.TachieSource"
@@ -165,15 +162,17 @@ internal static class AnimationTachieDependencies
                 {
                     total++;
                     var config = layer.GetType().GetProperty("Config")!.GetValue(layer)!;
-                    if ((int)config.GetType().GetProperty("blend")!.GetValue(config)! != 0
-                        || (double)config.GetType().GetProperty("opacity")!.GetValue(config)! != 100
-                        || !string.IsNullOrWhiteSpace((string?)config.GetType().GetProperty("placeon")!.GetValue(config))) return false;
+                    var access = configAccess.GetOrAdd(config.GetType(), static type =>
+                        (type.GetProperty("blend")!, type.GetProperty("opacity")!, type.GetProperty("placeon")!));
+                    if ((int)access.Blend.GetValue(config)! != 0
+                        || (double)access.Opacity.GetValue(config)! != 100
+                        || !string.IsNullOrWhiteSpace((string?)access.PlaceOn.GetValue(config))) return false;
                 }
                 if (total != 13) return false;
                 foreach (string part in new[] { "eye", "mouth" })
                 {
                     if (native.GetType().GetField(part + "File", Instance)!.GetValue(native) is string path && !string.IsNullOrEmpty(path)
-                        && (!Listing(path, out _, out int count, inventories) || (int)native.GetType().GetField(part + "PartsCount", Instance)!.GetValue(native)! != count)) return false;
+                        && (!CheckListing(path, out int count) || (int)native.GetType().GetField(part + "PartsCount", Instance)!.GetValue(native)! != count)) return false;
                 }
             }
             return true;
