@@ -5,6 +5,14 @@ internal static class RenderModelComparisonChecks
 {
     internal static void Run()
     {
+        foreach (int version in new[] { 2, 3 })
+        {
+            string a = $"{{\"Format\":{version},\"Resources\":[\"identity://live\"],\"Number\":1.0}}";
+            string b = a.Replace("identity://live", "identity://clone");
+            Check(FrameRenderModelComparison.Matches(a, b), "Audited main/speedup model version rejected: " + version);
+            Check(!FrameRenderModelComparison.Matches(a, b.Replace($"\"Format\":{version}", $"\"Format\":{5 - version}")),
+                "The model's actual version was ignored");
+        }
         for (int index = 0; index < 100; index++)
         {
             string text = JsonSerializer.Serialize("日本語／😀 identity://" + index);
