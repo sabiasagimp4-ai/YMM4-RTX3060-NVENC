@@ -24,7 +24,7 @@ dest=${2:?destination directory}
 filter='.'
 [ "${3:-}" = --dlls ] && filter='^YukkuriMovieMaker[^\\\\]*\.dll$'
 [ "${3:-}" = --top ] && filter='^[^\\\\]+$'
-[ "${3:-}" = --scan ] && filter='^YukkuriMovieMaker[^\\\\]*\.(dll|runtimeconfig\.json)$'
+[ "${3:-}" = --scan ] && filter='^((YukkuriMovieMaker|Vortice\.|SharpGen\.)[^\\\\]*\.dll|Newtonsoft\.Json\.dll|YukkuriMovieMaker\.runtimeconfig\.json)$'
 [ "${3:-}" = --match ] && filter=${4:?regex}
 [ "$version" = latest ] && version=$(versions | head -1)
 [[ "$version" =~ ^[0-9]+(\.[0-9]+){3}$ ]] || { echo "bad version: $version" >&2; exit 1; }
@@ -32,7 +32,8 @@ folder="$BASE/Application%20Files/YukkuriMovieMaker_${version//./_}"
 mkdir -p "$dest"
 manifest=$(mktemp)
 manifest_ "$version" > "$manifest"
-algorithm=$(jq -r '.HashAlgorithm // "SHA256"' "$manifest" | tr '[:upper:]' '[:lower:]')
+# tr -d '\r': jq on Windows (Git Bash on a CI runner) ends its lines with CRLF.
+algorithm=$(jq -r '.HashAlgorithm // "SHA256"' "$manifest" | tr -d '\r' | tr '[:upper:]' '[:lower:]')
 # Two downloads at a time, as YMM4's updater does.
 fetch_one() {
   local file=$1 hash=$2 size=$3 path url
@@ -48,7 +49,7 @@ fetch_one() {
 }
 export -f fetch_one curl_
 export dest folder algorithm
-jq -r --arg f "$filter" '.Files[] | select(.File | test($f)) | [.File, .Hash, (.Size|tostring)] | @tsv' "$manifest" > "$manifest.list"
+jq -r --arg f "$filter" '.Files[] | select(.File | test($f)) | [.File, .Hash, (.Size|tostring)] | @tsv' "$manifest" | tr -d '\r' > "$manifest.list"
 count=$(wc -l < "$manifest.list")
 tr '\t' '\n' < "$manifest.list" | xargs -d '\n' -n 3 -P 2 bash -c 'fetch_one "$@"' _
 rm -f "$manifest.list"

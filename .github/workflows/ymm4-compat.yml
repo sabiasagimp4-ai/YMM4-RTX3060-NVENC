@@ -1,37 +1,344 @@
 name: ymm4-compat
 
-# Temporary reconnaissance: which YMM4 Lite versions does the update server publish, how large are they, and which
-# .NET runtime does each one run on.
+# Which YMM4 Lite versions can this plugin run on, and with which features? Writes the answer into the README
+# (between the ymm4-versions markers), docs/YMM4_VERSIONS.md and docs/compat/ymm4-versions.json.
+#  1. plan:    the versions YMM4's update server publishes (tools/ci/fetch-ymm4.sh list); by default those not yet
+#              checked with this plugin version (new YMM4 versions, or all of them after a plugin release).
+#  2. package: the plugin built like a release (against the read YMM4 4.56.1.0, build.ps1).
+#  3. scan:    every version on Linux, from its files only: the .NET runtime it starts, the host assemblies the plugin
+#              references, and the HostContracts verdict (tools/HostFingerprint scan).
+#  4. start:   on Windows, each version whose .NET can load the plugin is started with the plugin installed; the
+#              plugin itself reports what it enabled there (tools/compat/start-check.ps1).
+#  5. tests:   for new YMM4 versions (or on request), the plugin and the cache checks built against that version.
+#  6. publish: tools/compat/ymm4_compat.py merges and renders; the result is committed to the default branch, and a
+#              newly published YMM4 version gets an issue with its result.
+# YMM4 is downloaded from its own update server the way its updater does, two files at a time, and kept only in the
+# Actions cache; it is never committed. No NVIDIA GPU on the runners: NVENC itself is not run.
 on:
-  push:
-    branches: ['claude/ymm4-nvenc-perf-analysis-5h1aik']
-    paths: ['.github/workflows/ymm4-compat.yml', 'tools/compat/**', 'tools/ci/fetch-ymm4.sh']
+  schedule:
+    - cron: '17 21 * * *' # 06:17 JST
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: 'new (not yet checked with this plugin version), all, or versions separated by spaces'
+        default: 'new'
+      start:
+        description: 'Start YMM4 with the plugin on Windows (versions whose .NET can load it)'
+        type: boolean
+        default: true
+      tests:
+        description: 'Also build and run the cache checks against each started version (about 20 minutes each)'
+        type: boolean
+        default: false
+      publish:
+        description: 'Commit the results to the default branch'
+        type: boolean
+        default: true
 
 permissions:
-  contents: read
+  contents: write
+  issues: write
+
+concurrency:
+  group: ymm4-compat
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DATA: docs/compat/ymm4-versions.json
 
 jobs:
-  recon:
+  plan:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      any: ${{ steps.plan.outputs.any }}
+      chunks: ${{ steps.plan.outputs.chunks }}
+      plugin: ${{ steps.plan.outputs.plugin }}
+      newest: ${{ steps.plan.outputs.newest }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        env:
+          MODE: ${{ inputs.versions || 'new' }}
+        run: |
+          tools/ci/fetch-ymm4.sh list > server.txt
+          echo "$(wc -l < server.txt) versions on the update server"
+          plugin=$(sed -n 's:.*<InformationalVersion>\(.*\)</InformationalVersion>.*:\1:p' NVEncVideoWriterPlugin/NVEncVideoWriterPlugin.csproj)
+          python3 tools/compat/ymm4_compat.py plan "$DATA" server.txt --plugin "$plugin" --mode $MODE > targets.txt
+          echo "$(wc -l < targets.txt) to check with plugin $plugin:"; cat targets.txt
+          echo "plugin=$plugin" >> "$GITHUB_OUTPUT"
+          echo "newest=$(head -1 server.txt)" >> "$GITHUB_OUTPUT"
+          echo "any=$([ -s targets.txt ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          # Scan jobs of up to 20 versions each.
+          echo "chunks=$(jq -Rsc 'split("\n") | map(select(length > 0)) | [range(0; length; 20) as $i | .[$i:$i+20] | join(" ")]' targets.txt)" >> "$GITHUB_OUTPUT"
+
+  reference:
+    needs: plan
+    if: needs.plan.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: host
+          key: cache-dev-ymm4-4.56.1.0-top
+      - if: steps.cache.outputs.cache-hit != 'true'
+        run: bash tools/ci/fetch-ymm4.sh 4.56.1.0 host --top
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reference-host
+          path: host
+          retention-days: 1
+
+  package:
+    needs: reference
+    runs-on: windows-2022
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - run: |
-          tools/ci/fetch-ymm4.sh list | tee versions.txt
-          echo "count: $(wc -l < versions.txt)"
-          printf 'version\tfiles\ttotal_MB\ttop_MB\tdlls_MB\truntime\n' > recon.tsv
-          while read -r v; do
-            m=$(tools/ci/fetch-ymm4.sh manifest "$v" 2>/dev/null) || { printf '%s\tno-manifest\n' "$v" >> recon.tsv; continue; }
-            files=$(jq '.Files|length' <<<"$m")
-            total=$(jq '[.Files[].Size]|add/1048576|floor' <<<"$m")
-            top=$(jq '[.Files[]|select(.File|test("^[^\\\\]+$"))|.Size]|add/1048576|floor' <<<"$m")
-            dlls=$(jq '[.Files[]|select(.File|test("^YukkuriMovieMaker[^\\\\]*\\.dll$"))|.Size]|add/1048576|floor' <<<"$m")
-            rt=$(jq -r '[.Files[].File|select(test("runtimeconfig"))]|join(",")' <<<"$m")
-            runtime=-
-            if [ -n "$rt" ]; then
-              rm -rf rc; tools/ci/fetch-ymm4.sh "$v" rc --match '^YukkuriMovieMaker\.runtimeconfig\.json$' >/dev/null 2>&1 || true
-              [ -f rc/YukkuriMovieMaker.runtimeconfig.json ] && runtime=$(jq -c '[.runtimeOptions.tfm] + [(.runtimeOptions.frameworks // [.runtimeOptions.framework])[] | "\(.name) \(.version)"]' rc/YukkuriMovieMaker.runtimeconfig.json)
+      - uses: actions/download-artifact@v4
+        with:
+          name: reference-host
+          path: host
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build like a release
+        run: |
+          ./build.ps1 -Ymm4DirPath "$env:GITHUB_WORKSPACE\host"
+          if (-not (Test-Path dist/YMM4-RTX3060-NVENC.ymme)) { throw 'No package was built' }
+          Copy-Item dist/YMM4-RTX3060-NVENC.ymme plugin.zip
+          Expand-Archive plugin.zip -DestinationPath plugin
+          Get-ChildItem plugin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin
+          path: plugin
+          retention-days: 3
+
+  scan:
+    needs: [plan, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 2 # the update server is one person's: keep the load near that of two updating users
+      matrix:
+        chunk: ${{ fromJSON(needs.plan.outputs.chunks) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/download-artifact@v4
+        with:
+          name: plugin
+          path: plugin
+      - id: key
+        run: echo "key=$(echo '${{ matrix.chunk }}' | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: hosts
+          key: ymm4-scan-${{ steps.key.outputs.key }}
+          restore-keys: ymm4-scan-
+      - name: Scan
+        env:
+          CHUNK: ${{ matrix.chunk }}
+        run: |
+          dotnet build tools/HostFingerprint -c Release --nologo -v q
+          mkdir -p results
+          for v in $CHUNK; do
+            echo "::group::$v"
+            if tools/ci/fetch-ymm4.sh "$v" "hosts/$v" --scan >/dev/null; then
+              dotnet tools/HostFingerprint/bin/Release/net10.0/HostFingerprintTool.dll scan "hosts/$v" plugin > "results/$v.scan.json" \
+                || echo "{\"error\":\"scan failed\"}" > "results/$v.scan.json"
+            else
+              echo "{\"error\":\"download failed\"}" > "results/$v.scan.json"
             fi
-            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$v" "$files" "$total" "$top" "$dlls" "$runtime" >> recon.tsv
-          done < versions.txt
-          column -t -s $'\t' recon.tsv
+            cat "results/$v.scan.json" | head -c 600; echo
+            echo "::endgroup::"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: results-scan-${{ strategy.job-index }}
+          path: results
+
+  loadable:
+    needs: scan
+    if: always() && needs.scan.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      versions: ${{ steps.list.outputs.versions }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: results-scan-*
+          merge-multiple: true
+          path: results
+      - id: list
+        run: |
+          python3 tools/compat/ymm4_compat.py loadable results | tee loadable.txt
+          echo "versions=$(jq -Rsc 'split("\n") | map(select(length > 0))' loadable.txt)" >> "$GITHUB_OUTPUT"
+
+  start:
+    needs: [loadable, package]
+    if: always() && needs.package.result == 'success' && needs.loadable.outputs.versions != '[]' && needs.loadable.outputs.versions != '' && (github.event_name != 'workflow_dispatch' || inputs.start)
+    runs-on: windows-2022
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        version: ${{ fromJSON(needs.loadable.outputs.versions) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/download-artifact@v4
+        with:
+          name: plugin
+          path: plugin
+      - uses: actions/cache@v4
+        with:
+          path: app
+          key: ymm4-app-${{ matrix.version }}
+      - name: YMM4 ${{ matrix.version }} (its own update protocol)
+        shell: bash
+        run: tools/ci/fetch-ymm4.sh "${{ matrix.version }}" app --top
+      - name: Start YMM4 with the plugin
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path results -Force | Out-Null
+          & .\tools\compat\start-check.ps1 -HostDir "$env:GITHUB_WORKSPACE\app" -PluginDir "$env:GITHUB_WORKSPACE\plugin" -Out "results\${{ matrix.version }}.start.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-start-${{ matrix.version }}
+          path: results
+
+  tests:
+    needs: [plan, loadable]
+    if: always() && needs.loadable.outputs.versions != '[]' && needs.loadable.outputs.versions != '' && (inputs.tests || (github.event_name == 'schedule' && contains(fromJSON(needs.loadable.outputs.versions), needs.plan.outputs.newest)))
+    runs-on: windows-2022
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        version: ${{ inputs.tests && fromJSON(needs.loadable.outputs.versions) || fromJSON(format('["{0}"]', needs.plan.outputs.newest)) }}
+    env:
+      YMM4_DIR: '${{ github.workspace }}\app\'
+      PROBE_VIDEO: '${{ github.workspace }}\probe-video.mp4'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/cache@v4
+        with:
+          path: app
+          key: ymm4-app-${{ matrix.version }}
+      - name: YMM4 ${{ matrix.version }}
+        shell: bash
+        run: tools/ci/fetch-ymm4.sh "${{ matrix.version }}" app --top
+      - name: Media Foundation and test video
+        continue-on-error: true
+        run: |
+          $feature = Get-WindowsFeature Server-Media-Foundation
+          if ($feature -and -not $feature.Installed) { Install-WindowsFeature Server-Media-Foundation | Out-Null }
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress | Select-Object -Last 1 }
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
+          ffmpeg -v error -f lavfi -i testsrc=size=320x180:rate=30 -t 2 -c:v libx264 -pix_fmt yuv420p -y $env:PROBE_VIDEO
+      - name: Build the plugin against this YMM4
+        id: build
+        continue-on-error: true
+        run: |
+          dotnet build NVEncVideoWriterPlugin\NVEncVideoWriterPlugin.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Plugin build failed' }
+      - name: Cache key checks (real host)
+        id: keys
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        run: |
+          dotnet run --project tests\CacheChecks\CacheChecks.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR
+          if ($LASTEXITCODE -ne 0) { throw 'CacheChecks failed' }
+      - name: Export hook and cache checks as an unread build (real host, WARP)
+        id: probe
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        run: |
+          $video = @()
+          if (Test-Path $env:PROBE_VIDEO) { $video = @('--video', $env:PROBE_VIDEO) }
+          dotnet run --project tests\HostCacheProbe\HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR --unread --gpu @video
+          if ($LASTEXITCODE -ne 0) { throw 'HostCacheProbe --unread failed' }
+      - name: Record
+        if: always()
+        run: |
+          New-Item -ItemType Directory -Path results -Force | Out-Null
+          $result = @{ build = '${{ steps.build.outcome }}'; keys = '${{ steps.keys.outcome }}'; probe = '${{ steps.probe.outcome }}' } | ConvertTo-Json -Compress
+          [IO.File]::WriteAllText("results\${{ matrix.version }}.tests.json", $result)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-tests-${{ matrix.version }}
+          path: results
+
+  publish:
+    needs: [plan, scan, start, tests]
+    if: always() && needs.plan.outputs.any == 'true' && needs.scan.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: results-*
+          merge-multiple: true
+          path: results
+      - name: Merge and render
+        env:
+          PLUGIN: ${{ needs.plan.outputs.plugin }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          ls results
+          before=$(jq -r '.versions // {} | keys[]' "$DATA" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr -k4,4nr | head -1 || true)
+          echo "before=$before" >> "$GITHUB_ENV"
+          python3 tools/compat/ymm4_compat.py merge results "$DATA" --plugin "$PLUGIN" --commit "$GITHUB_SHA" --run "$RUN_URL"
+          python3 tools/compat/ymm4_compat.py render "$DATA" README.md docs/YMM4_VERSIONS.md
+          git diff --stat
+          sed -n '/ymm4-versions:begin/,/ymm4-versions:end/p' README.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rendered
+          path: |
+            README.md
+            docs/YMM4_VERSIONS.md
+            docs/compat/ymm4-versions.json
+      - name: Commit
+        if: github.ref_name == github.event.repository.default_branch && (github.event_name != 'workflow_dispatch' || inputs.publish)
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md docs/YMM4_VERSIONS.md "$DATA"
+          if git diff --cached --quiet; then echo 'No change.'; exit 0; fi
+          git commit -m "docs(compat): YMM4 version check results [skip ci]" -m "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          for i in 1 2 3; do git pull --rebase --autostash origin "$GITHUB_REF_NAME" && git push origin "HEAD:$GITHUB_REF_NAME" && break; sleep 5; done
+      - name: Issue for a newly published YMM4 version
+        if: github.ref_name == github.event.repository.default_branch && env.before != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEWEST: ${{ needs.plan.outputs.newest }}
+        run: |
+          # Only a version newer than every version checked before (not the first bulk check of old versions).
+          [ "$(printf '%s\n%s\n' "$before" "$NEWEST" | sort -t. -k1,1nr -k2,2nr -k3,3nr -k4,4nr | head -1)" = "$NEWEST" ] && [ "$NEWEST" != "$before" ] || exit 0
+          jq -e --arg v "$NEWEST" '.versions[$v]' "$DATA" > /dev/null || exit 0
+          [ "$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "\"YMM4 $NEWEST の確認結果\" in:title" --json number --jq length)" = "0" ] || exit 0
+          python3 tools/compat/ymm4_compat.py issue "$DATA" "$NEWEST" > issue.md
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "YMM4 $NEWEST の確認結果" --body-file issue.md

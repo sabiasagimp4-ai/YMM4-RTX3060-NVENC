@@ -8,6 +8,7 @@ using NVEncVideoWriterPlugin;
 //   dotnet run --project tools/HostFingerprint -- contracts <YMM4 dir>              (HostContracts parts and the verdict)
 //   dotnet run --project tools/HostFingerprint -- compare <read YMM4 dir> <new YMM4 dir>  (the verdict if the first were read)
 //   dotnet run --project tools/HostFingerprint -- emit <out.cs> <version>=<YMM4 dir>... (HostBaselines.cs, newest first)
+//   dotnet run --project tools/HostFingerprint -- scan <YMM4 dir> [<plugin dir>]   (one JSON line for tools/compat)
 switch (args)
 {
     case ["contracts", var directory]:
@@ -15,6 +16,9 @@ switch (args)
         return 0;
     case ["compare", var before, var after]:
         Compare(before, after);
+        return 0;
+    case ["scan", var directory, .. var plugin] when plugin.Length <= 1:
+        Scan(directory, plugin.FirstOrDefault());
         return 0;
     case ["emit", var output, .. var builds]:
         Emit(output, builds);
@@ -29,7 +33,7 @@ switch (args)
         foreach (var typeName in typeNames) Members(before, after, typeName);
         return 0;
     default:
-        Console.Error.WriteLine("Usage: report <dir> | diff <old.tsv> <new.tsv> | members <old dir> <new dir> <type>... | contracts <dir> | emit <out.cs> <version>=<dir>...");
+        Console.Error.WriteLine("Usage: report <dir> | diff <old.tsv> <new.tsv> | members <old dir> <new dir> <type>... | contracts <dir> | emit <out.cs> <version>=<dir>... | scan <dir> [<plugin dir>]");
         return 2;
 }
 
@@ -166,4 +170,108 @@ static void Compare(string before, string after)
     var evaluation = HostContracts.Evaluate(HostContracts.Describe(after), [baseline]);
     Console.WriteLine($"# verdict against {baseline.Version}: features: {string.Join(", ", evaluation.Features.Order(StringComparer.Ordinal))}");
     foreach (var (feature, problem) in evaluation.Problems) Console.WriteLine($"#   off {feature}: {problem}");
+}
+
+// What decides whether the plugin can run on this YMM4 build, read from the files only (tools/compat):
+// the .NET runtime it starts (runtimeconfig), the host assemblies the plugin references and their versions, whether
+// the build is one whose code was read (HostKnownBuilds), and the HostContracts verdict for the cache.
+static void Scan(string directory, string? pluginDirectory)
+{
+    var result = new Dictionary<string, object?>();
+    string hostPath = Path.Combine(directory, "YukkuriMovieMaker.dll");
+    var host = AssemblyIdentity(hostPath);
+    result["assemblyVersion"] = host?.Version;
+    result["fileVersion"] = host?.FileVersion;
+    string sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(hostPath)));
+    result["knownBuild"] = HostKnownBuilds.All.FirstOrDefault(b => b.Host.Mvid == HostFingerprint.ReadMvid(hostPath) && b.Host.Sha256 == sha)?.Version;
+    string runtimeConfig = Path.Combine(directory, "YukkuriMovieMaker.runtimeconfig.json");
+    if (File.Exists(runtimeConfig))
+    {
+        using var json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(runtimeConfig));
+        var options = json.RootElement.GetProperty("runtimeOptions");
+        var frameworks = options.TryGetProperty("frameworks", out var list) ? list.EnumerateArray().ToArray()
+            : options.TryGetProperty("framework", out var single) ? [single] : [];
+        result["runtime"] = new Dictionary<string, object?>
+        {
+            ["tfm"] = options.TryGetProperty("tfm", out var tfm) ? tfm.GetString() : null,
+            ["rollForward"] = options.TryGetProperty("rollForward", out var roll) ? roll.GetString() : null,
+            ["frameworks"] = frameworks.ToDictionary(f => f.GetProperty("name").GetString()!, f => f.GetProperty("version").GetString()),
+        };
+    }
+    try
+    {
+        var evaluation = HostContracts.Evaluate(HostContracts.Describe(directory));
+        result["contracts"] = new Dictionary<string, object?>
+        {
+            ["baseline"] = evaluation.Baseline,
+            ["features"] = evaluation.Features.Order(StringComparer.Ordinal).ToArray(),
+            ["off"] = evaluation.Problems,
+        };
+    }
+    catch (Exception ex) { result["contracts"] = new Dictionary<string, object?> { ["error"] = ex.GetBaseException().Message }; }
+    if (pluginDirectory is not null)
+    {
+        string pluginPath = Directory.GetFiles(pluginDirectory, "YMM4Rtx3060Nvenc.dll").Single();
+        using var stream = File.OpenRead(pluginPath);
+        using var pe = new System.Reflection.PortableExecutable.PEReader(stream);
+        var reader = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
+        var references = new List<Dictionary<string, object?>>();
+        foreach (var handle in reader.AssemblyReferences)
+        {
+            var reference = reader.GetAssemblyReference(handle);
+            string name = reader.GetString(reference.Name);
+            // Framework assemblies come with the runtime checked above, and the plugin carries its own (Harmony).
+            if (File.Exists(Path.Combine(pluginDirectory, name + ".dll"))) continue;
+            string candidate = Path.Combine(directory, name + ".dll");
+            bool fromHost = File.Exists(candidate);
+            if (!fromHost && !name.StartsWith("YukkuriMovieMaker", StringComparison.Ordinal)) continue;
+            references.Add(new()
+            {
+                ["name"] = name,
+                ["required"] = reference.Version.ToString(),
+                ["host"] = fromHost ? AssemblyIdentity(candidate)?.Version : null,
+            });
+        }
+        result["plugin"] = new Dictionary<string, object?>
+        {
+            ["framework"] = TargetFramework(reader),
+            ["references"] = references,
+        };
+    }
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(result));
+}
+
+static (string Version, string? FileVersion)? AssemblyIdentity(string path)
+{
+    try
+    {
+        using var stream = File.OpenRead(path);
+        using var pe = new System.Reflection.PortableExecutable.PEReader(stream);
+        if (!pe.HasMetadata) return null;
+        var reader = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
+        if (!reader.IsAssembly) return null;
+        string? fileVersion = Attribute(reader, "AssemblyFileVersionAttribute");
+        return (reader.GetAssemblyDefinition().Version.ToString(), fileVersion);
+    }
+    catch (BadImageFormatException) { return null; }
+}
+
+static string? TargetFramework(System.Reflection.Metadata.MetadataReader reader) => Attribute(reader, "TargetFrameworkAttribute");
+
+// The first string argument of an assembly attribute with this type name.
+static string? Attribute(System.Reflection.Metadata.MetadataReader reader, string typeName)
+{
+    foreach (var handle in reader.GetAssemblyDefinition().GetCustomAttributes())
+    {
+        var attribute = reader.GetCustomAttribute(handle);
+        if (attribute.Constructor.Kind != System.Reflection.Metadata.HandleKind.MemberReference) continue;
+        var constructor = reader.GetMemberReference((System.Reflection.Metadata.MemberReferenceHandle)attribute.Constructor);
+        if (constructor.Parent.Kind != System.Reflection.Metadata.HandleKind.TypeReference) continue;
+        var type = reader.GetTypeReference((System.Reflection.Metadata.TypeReferenceHandle)constructor.Parent);
+        if (reader.GetString(type.Name) != typeName) continue;
+        var blob = reader.GetBlobReader(attribute.Value);
+        if (blob.ReadUInt16() != 1) continue; // prolog
+        return blob.ReadSerializedString();
+    }
+    return null;
 }

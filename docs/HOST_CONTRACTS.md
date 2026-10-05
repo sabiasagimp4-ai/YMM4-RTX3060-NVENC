@@ -62,10 +62,10 @@ ShuffleText／ShuffleTextInOutは、フレーム番号（と入力の番号）�
 
 ## ホスト更新の手順
 
-`ymm4-watch` はmainで毎日06:17 JSTに更新サーバーを確認する。新しい版はmanifestのサイズ・ハッシュを照合して取得し、contracts・Windowsビルド・有効な機能のprobeを実行してissueへ結果を残す。実行時間はActionsのスケジュール遅延に影響される。
+`ymm4-compat` はmainで毎日06:17 JSTに更新サーバーを確認する。まだこのプラグインの版で確かめていないYMM4の版（新しい版、またはプラグインのリリース後は全版）を、manifestのサイズ・ハッシュを照合して取得し、ファイルの照合（.NETの版・参照するDLLの版・contracts）、Windowsでの起動（プラグイン自身が使う機能を報告）、新しい版ではWindowsビルド・キー検査・probeを実行する。結果はREADMEの「YMM4 の版ごとの対応」と [YMM4_VERSIONS.md](YMM4_VERSIONS.md) へ自動でcommitし、新しく公開された版にはissueを作る。古い版をまとめて確かめるときは、手動実行で `versions` に `all` を指定する。実行時間はActionsのスケジュール遅延に影響される。
 
 1. issueと型／method差分を読み、公式取得したDLLを調査する。逆コンパイルした実装は製品へコピーしない。
-2. 前提が変わった場合は規則・キー・witnessを修正する。一致していない版をKnownHostsへ追加するだけで有効にしない。
+2. 前提が変わった場合は規則・キー・witnessを修正する。一致していない版をHostKnownBuildsへ追加するだけで有効にしない。
 3. 記録を更新し、実ホスト・decoder失敗・画素一致・無効化・資源返却を検証する。
 
 ```powershell

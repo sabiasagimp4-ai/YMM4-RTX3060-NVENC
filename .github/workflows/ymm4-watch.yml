@@ -57,7 +57,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           check=true
           if [ "$GITHUB_REF_NAME" = "${{ github.event.repository.default_branch }}" ] && [ "$FORCE" != "true" ]; then
-            if grep -q "new(\"$version\"" NVEncVideoWriterPlugin/HostIntegration.cs; then
+            if grep -q "new(\"$version\"" NVEncVideoWriterPlugin/HostKnownBuilds.cs; then
               echo "YMM4 $version is one of the builds whose code was read."; check=false
             elif [ "$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "\"YMM4 $version の確認結果\" in:title" --json number --jq length)" != "0" ]; then
               echo "YMM4 $version was already reported."; check=false
