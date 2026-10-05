@@ -1,0 +1,106 @@
+name: host-history
+
+# Temporary: how YMM4's code that the cache can depend on changed between the versions the plugin loads on
+# (4.47.0.0 and later), one version step at a time back from 4.56.1.0, to decide on which older versions the cache
+# can be enabled (docs/HOST_CONTRACTS.md, "ホスト更新の手順"). Decompiled differences go to the job logs only; no
+# YMM4 code or binary is committed or kept as an artifact beyond a day.
+on:
+  push:
+    branches: ['claude/ymm4-nvenc-perf-analysis-5h1aik']
+    paths: ['.github/workflows/host-history.yml', 'tools/HostHistory/**']
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    outputs:
+      chunks: ${{ steps.chunks.outputs.chunks }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Tools
+        run: |
+          dotnet build tools/HostFingerprint -c Release --nologo -v q
+          dotnet build tools/HostHistory -c Release --nologo -v q
+      - name: Walk back from 4.56.1.0
+        run: |
+          fp=tools/HostFingerprint/bin/Release/net10.0/HostFingerprintTool.dll
+          hh=tools/HostHistory/bin/Release/net10.0/HostHistory.dll
+          versions=$(python3 -c "
+          import json
+          d = json.load(open('docs/compat/ymm4-versions.json'))
+          v = [k for k, e in d['versions'].items() if (e.get('verdict') or {}).get('load') == 'ok']
+          print(' '.join(sorted(v, key=lambda s: tuple(map(int, s.split('.'))), reverse=True)))")
+          echo "versions: $versions"
+          # YMM4's own assemblies and those its types need to be resolved (top-level files only).
+          dlls='^(YukkuriMovieMaker[^\\\\]*|PsdParser|Vortice\.[^\\\\]*|SharpGen\.[^\\\\]*|Newtonsoft\.Json|CommunityToolkit[^\\\\]*|Microsoft\.Xaml\.Behaviors|PresentationCore|PresentationFramework|WindowsBase|System\.Xaml)\.dll$'
+          mkdir -p reports contracts steps
+          newer=
+          for v in $versions; do
+            if [ -n "$newer" ]; then rm -rf prev; cp -al cur prev; fi
+            YMM4_FETCH_PRUNE=1 tools/ci/fetch-ymm4.sh "$v" cur --match "$dlls" > /dev/null
+            dotnet "$fp" report cur > "reports/$v.tsv" 2> /dev/null
+            dotnet "$fp" contracts cur > "contracts/$v.txt"
+            echo "== $v: $(grep '^# verdict' "contracts/$v.txt")"
+            if [ -n "$newer" ]; then
+              python3 tools/HostHistory/changed.py "reports/$newer.tsv" "reports/$v.tsv" "contracts/$newer.txt" "contracts/$v.txt" > changed.txt
+              cut -f1,2 changed.txt > types.txt
+              rm -rf dnew dold
+              dotnet "$hh" decompile prev dnew types.txt
+              dotnet "$hh" decompile cur dold types.txt
+              out="steps/$v..$newer.diff"
+              {
+                echo "######## $v -> $newer: $(wc -l < changed.txt) types (- $v, + $newer)"
+                while IFS=$'\t' read -r assembly type kind; do
+                  a="dold/$assembly/$type.cs"; b="dnew/$assembly/$type.cs"
+                  [ -f "$a" ] || a=/dev/null
+                  [ -f "$b" ] || b=/dev/null
+                  echo "#### $kind $assembly $type"
+                  # Only in the newer version: the older one just lacks it; list it without its code.
+                  if [ "$kind" = newer-only ]; then continue; fi
+                  diff -u --label "$v" --label "$newer" "$a" "$b" | tail -n +3 | head -n 800
+                done < changed.txt
+              } > "$out"
+              echo "   $(wc -l < changed.txt) types, $(wc -l < "$out") lines:"
+              awk -F'\t' '{print "     " $3 " " $1 " " $2}' changed.txt
+            fi
+            newer=$v
+          done
+      - id: chunks
+        run: |
+          mkdir -p chunks
+          for f in steps/*.diff; do
+            name=$(basename "$f" .diff)
+            split -l 3000 -d -a 2 "$f" "chunks/$name."
+          done
+          ls chunks | sort -V -r > chunks.txt
+          echo "$(wc -l < chunks.txt) chunks"
+          echo "chunks=$(jq -Rsc 'split("\n") | map(select(length > 0))' chunks.txt)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: history
+          path: chunks
+          retention-days: 1
+
+  show:
+    needs: history
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        chunk: ${{ fromJSON(needs.history.outputs.chunks) }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: history
+          path: chunks
+      - run: cat "chunks/${{ matrix.chunk }}"
