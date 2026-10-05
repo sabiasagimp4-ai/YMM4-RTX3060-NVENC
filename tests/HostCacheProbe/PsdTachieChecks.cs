@@ -17,7 +17,7 @@ internal static class PsdTachieChecks
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     internal static void Run(Assembly host)
     {
-        foreach (string name in new[] { "pixels", "hidden-vowels", "notify", "inplace-offset", "inplace-layers", "sidecar", "overwrite", "timeout", "settings-budget", "composite-failure", "preobserved-overwrite", "serializer-defaults", "idle-inactive", "snapshot-encoding" })
+        foreach (string name in new[] { "pixels", "hidden-vowels", "notify", "inplace-offset", "inplace-layers", "sidecar", "overwrite", "timeout", "settings-budget", "composite-failure", "preobserved-overwrite", "serializer-defaults", "idle-inactive", "snapshot-encoding", "foreign-enumerable" })
         {
             Exception? failure = null;
             using var finished = new ManualResetEventSlim();
@@ -124,6 +124,30 @@ internal static class PsdTachieChecks
         object settings = PsdTachieDependencies.Settings(test.Fixture.Characters[0]);
         object eyes = settings.GetType().GetProperty("EyeAnimations")!.GetValue(settings)!;
         object eye = ((IEnumerable)eyes).Cast<object>().Single();
+        if (name == "foreign-enumerable")
+        {
+            // A foreign subclass can implement IEnumerable while retaining the native drawing fields.
+            // Treating it as an empty list would omit those fields from the key; it must be rejected.
+            var assembly = System.Reflection.Emit.AssemblyBuilder.DefineDynamicAssembly(new("ymm.tests.foreign-psd-eye"), System.Reflection.Emit.AssemblyBuilderAccess.Run);
+            var builder = assembly.DefineDynamicModule("foreign").DefineType("ForeignEnumerableEye", TypeAttributes.Public, eye.GetType(), [typeof(IEnumerable)]);
+            builder.DefineDefaultConstructor(MethodAttributes.Public);
+            var method = builder.DefineMethod("GetEnumerator", MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.Final,
+                typeof(IEnumerator), Type.EmptyTypes);
+            var il = method.GetILGenerator();
+            il.Emit(System.Reflection.Emit.OpCodes.Call, typeof(Array).GetMethod(nameof(Array.Empty))!.MakeGenericMethod(typeof(object)));
+            il.Emit(System.Reflection.Emit.OpCodes.Callvirt, typeof(IEnumerable).GetMethod(nameof(IEnumerable.GetEnumerator))!);
+            il.Emit(System.Reflection.Emit.OpCodes.Ret);
+            builder.DefineMethodOverride(method, typeof(IEnumerable).GetMethod(nameof(IEnumerable.GetEnumerator))!);
+            object foreign = Activator.CreateInstance(builder.CreateType()!)!;
+            foreign.GetType().GetProperty("Offset")!.SetValue(foreign, 7.0);
+            object changed = eyes.GetType().GetMethod("SetItem")!.Invoke(eyes, [0, foreign])!;
+            settings.GetType().GetProperty("EyeAnimations")!.SetValue(settings, changed);
+            bool rejected = false;
+            try { PsdTachieDependencies.Snapshot(settings); }
+            catch (InvalidDataException) { rejected = true; }
+            Check(rejected, "Foreign enumerable hid native PSD drawing fields from the snapshot");
+            return;
+        }
         if (name == "snapshot-encoding")
         {
             string Legacy()

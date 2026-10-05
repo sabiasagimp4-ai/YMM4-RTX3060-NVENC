@@ -123,6 +123,9 @@ internal static class PsdTachieDependencies
                 if (part is double number) { if (!double.IsFinite(number)) throw new InvalidDataException("Non-finite PSD animation"); return; }
                 if (part is IEnumerable list)
                 {
+                    var listType = part.GetType();
+                    if (!listType.IsGenericType || listType.GetGenericTypeDefinition() != typeof(System.Collections.Immutable.ImmutableList<>))
+                        throw new InvalidDataException("Unknown PSD collection type");
                     int slot = tokens.Count, count = 0; tokens.Add(0);
                     foreach (var child in list) { if (++count > 1024) throw new InvalidDataException("Too many PSD animation layers"); Visit(child, depth + 1); }
                     tokens[slot] = count; return;
