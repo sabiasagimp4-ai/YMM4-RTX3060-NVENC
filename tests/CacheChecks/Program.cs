@@ -17,23 +17,29 @@ internal static class Program
             string file = Path.Combine(hostDir, name.Name + ".dll");
             return File.Exists(file) ? AssemblyLoadContext.Default.LoadFromAssemblyPath(file) : null;
         };
-        return Run();
+        return Run(args.Contains("--voice-measure"), args.Contains("--file-measure"));
     }
 
     // Defer binding host model types until the in-place dependency resolver is installed.
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private static int Run()
+    private static int Run(bool voiceMeasureOnly, bool fileMeasureOnly)
     {
         // Test-only built-in discovery; host files remain in place and no application is started.
         var loaderType = typeof(YukkuriMovieMaker.Plugin.PluginAssemblyLoader);
         var bootstrap = new Harmony("ymm.cachechecks.builtin-loader");
         bootstrap.Patch(loaderType.TypeInitializer!, prefix: new HarmonyMethod(typeof(Program), nameof(SkipLoader)));
         AccessTools.StaticFieldRefAccess<IEnumerable<Assembly>>(AccessTools.Field(loaderType, "<Assemblies>k__BackingField"))() =
-            new[] { typeof(Scene).Assembly, typeof(YukkuriMovieMaker.Plugin.CacheProvider).Assembly };
+            new[] { typeof(Scene).Assembly, typeof(YukkuriMovieMaker.Plugin.CacheProvider).Assembly,
+                Assembly.LoadFrom(Path.Combine(Path.GetDirectoryName(typeof(Scene).Assembly.Location)!, SimpleTachieDependencies.AssemblyName + ".dll")) };
         // 4.56.1.0's PluginLoader also reads these; the skipped static constructor would have created them empty.
         foreach (var name in new[] { "<IncompatiblePluginAssemblies>k__BackingField", "loadFailures" })
             if (AccessTools.Field(loaderType, name) is { } field) // init-only: FieldInfo.SetValue would throw
                 AccessTools.StaticFieldRefAccess<object>(field)() ??= Activator.CreateInstance(typeof(List<>).MakeGenericType(field.FieldType.GetGenericArguments()))!;
+        if (fileMeasureOnly) { FileLookupMeasurements.Run(); return 0; }
+        VoiceDescriptionMeasurements.Run();
+        if (voiceMeasureOnly) return 0; // Additional paired benchmark process; the full CI suite still runs separately.
+        FileLookupMeasurements.Run();
+        VoiceDescriptionChecks.Run();
         var timeline = new Timeline();
         var scenes = new Scenes(false);
         scenes.AddScene(timeline);
@@ -43,6 +49,7 @@ internal static class Program
         Check(!FrameCacheKey.IsBuiltInSourceReader(typeof(Program)), "Custom reader assembly was trusted");
         CheckBundledReaders();
         CheckBundledTachie();
+        SimpleTachieKeyChecks.Run();
         CheckFramePreparesOwnFiles();
         CheckFingerprintCancellation();
         CheckUnverifiableFiles();
@@ -51,6 +58,8 @@ internal static class Program
         CheckCommunity();
         CheckImageSequence();
         CheckDynamicDependencies();
+        CheckAmbiguousDrawingOrder();
+        MeasureValidation();
         Type[][] readerTypes = FrameCacheKey.CaptureSourceReaderTypes();
         Check(FrameCacheKey.SourceReadersMatch(readerTypes), "Unchanged source reader stamp mismatched");
         Check(!FrameCacheKey.SourceReadersMatch([readerTypes[0].Append(typeof(Program)).ToArray(), readerTypes[1], readerTypes[2]]), "Source reader list change was not detected");
@@ -916,8 +925,9 @@ internal static class Program
         [Newtonsoft.Json.JsonIgnore] public bool CanCaptureOnCurrentThread => true;
         [Newtonsoft.Json.JsonIgnore] public string ExternalState { get; set; } = "initial";
         [Newtonsoft.Json.JsonIgnore] public bool FailValidation { get; set; }
+        [Newtonsoft.Json.JsonIgnore] public Action? OnValidate { get; set; }
         public CacheDependencySnapshot CaptureDependencies(long ticks) => new("test/dynamic-blur", "1", ExternalState, "cpu", [new("previous-input", ExternalState, ticks - 1, ticks)]);
-        public bool IsCurrent(CacheDependencySnapshot snapshot) => !FailValidation && snapshot.StateToken == ExternalState;
+        public bool IsCurrent(CacheDependencySnapshot snapshot) { OnValidate?.Invoke(); return !FailValidation && snapshot.StateToken == ExternalState; }
     }
     private static void CheckDynamicDependencies()
     {
@@ -943,9 +953,91 @@ internal static class Program
             }
             effect.FailValidation = true;
             Check(!tracker.TryCapture(5, out _, out _), "Failing dynamic provider did not bypass cache");
+            effect.FailValidation = false;
+            Check(tracker.TryCapture(5, out var reentrant, out reason), reason);
+            using (reentrant)
+            {
+                effect.OnValidate = () => { effect.OnValidate = null; timeline.VideoInfo.BackgroundColor = System.Windows.Media.Colors.Red; };
+                Check(!reentrant!.Validate(files: false), "Provider re-entry edited the model but validated its old capture");
+            }
+            Check(tracker.TryCapture(5, out var trusted, out reason), reason);
+            using (trusted)
+            {
+                KnownCode.Trusted = previousTrust;
+                Check(!trusted!.Validate(files: false), "Trust change left an active capture valid before the next capture");
+            }
+            KnownCode.Trusted = previousTrust.Append(typeof(Program).Assembly.GetName().Name!).ToArray();
+            var front = new DynamicBlurEffect { ExternalState = "red" };
+            var back = new DynamicBlurEffect { ExternalState = "blue" };
+            item.VideoEffects = [front, back];
+            Check(tracker.TryCapture(5, out var ordered, out reason), reason);
+            using (ordered)
+            {
+                (front.ExternalState, back.ExternalState) = (back.ExternalState, front.ExternalState);
+                Check(tracker.TryCapture(5, out var swapped, out reason), reason);
+                using (swapped) Check(ordered!.Model == swapped!.Model && ordered.Key != swapped.Key,
+                    "Hidden state swap between identical host effect slots aliased the frame key");
+            }
             Console.WriteLine("Dynamic host dependencies: animatable discovery, hidden state keys, post-capture validation and fail-closed bypass passed.");
         }
         finally { KnownCode.Trusted = previousTrust; }
+    }
+    // Measurement, not a check: what validating a capture and its parts cost per call on one thread (the render thread
+    // runs a capture's validation several times per frame: live, GPU and RAM reuse, the postfix and the deferred store).
+    private static void MeasureValidation()
+    {
+        var timeline = new Timeline();
+        var scenes = new Scenes(false);
+        scenes.AddScene(timeline);
+        var shape = new ShapeItem { Frame = 0, Length = 30, Layer = 1 };
+        timeline.Items = timeline.Items.Add(shape);
+        var previousTrust = KnownCode.Trusted;
+        using var tracker = new KeyDependencyTracker(new Scene(timeline, scenes, []));
+        static double Time(string name, int count, Func<bool> action)
+        {
+            for (int i = 0; i < 2000; i++) if (!action()) throw new InvalidOperationException(name + " failed");
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            for (int i = 0; i < count; i++) if (!action()) throw new InvalidOperationException(name + " failed");
+            double micro = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMicroseconds / count;
+            Console.WriteLine($"  {name}: {micro:F2} us/call ({count} calls)");
+            return micro;
+        }
+        Console.WriteLine("Validation costs on the real host (one thread, no threshold):");
+        var readers = FrameCacheKey.CaptureSourceReaderTypes();
+        Time("FrameCacheKey.DrawingSettings", 20000, () => FrameCacheKey.DrawingSettings().Length > 0);
+        Time("FrameCacheKey.SourceReadersMatch", 20000, () => FrameCacheKey.SourceReadersMatch(readers));
+        WaitForFrameKey(tracker, 5);
+        Check(tracker.TryCapture(5, out var plain, out string reason), reason);
+        using (plain)
+        {
+            Time("KeyCapture.Validate(files: false), no providers", 20000, () => plain!.Validate(files: false));
+            Time("KeyDependencyTracker.TryCapture, described, no files", 5000, () => { bool ok = tracker.TryCapture(5, out var c, out _); c?.Dispose(); return ok; });
+        }
+        try
+        {
+            KnownCode.Trusted = previousTrust.Append(typeof(Program).Assembly.GetName().Name!).ToArray();
+            shape.VideoEffects = [new DynamicBlurEffect()];
+            WaitForFrameKey(tracker, 5);
+            Check(tracker.TryCapture(5, out var dynamic, out reason), reason);
+            using (dynamic) Time("KeyCapture.Validate(files: false), one dynamic provider", 20000, () => dynamic!.Validate(files: false));
+        }
+        finally { KnownCode.Trusted = previousTrust; }
+    }
+
+    private static void CheckAmbiguousDrawingOrder()
+    {
+        var timeline = new Timeline(); var scenes = new Scenes(false); scenes.AddScene(timeline);
+        var first = new ShapeItem { Frame = 0, Length = 20, Layer = 1 };
+        var second = new ShapeItem { Frame = 10, Length = 20, Layer = 1 };
+        timeline.Items = timeline.Items.Add(first).Add(second);
+        var scene = new Scene(timeline, scenes, []);
+        Check(FrameCacheKey.TryDescribe(scene, FrameCacheKey.CaptureSourceReaderTypes(), out _, out _, out var frames, out string reason), reason);
+        Check(frames!.For(5).Cacheable && !frames.For(10).Cacheable && !frames.For(19).Cacheable && frames.For(20).Cacheable,
+            "Same-layer overlap must bypass only its affected frames");
+        second.Layer = 2;
+        Check(FrameCacheKey.TryDescribe(scene, FrameCacheKey.CaptureSourceReaderTypes(), out _, out _, out frames, out reason), reason);
+        Check(frames!.For(15).Cacheable, "Distinct layers must remain cacheable");
+        Console.WriteLine("Host order certificate: overlapping ties bypass, disjoint frames and distinct layers reuse.");
     }
     private sealed class ForeignShapeItem : ShapeItem { }
     // Readers in the plugin assemblies YMM4 ships (its folder) are built in, so a project with a file or a font

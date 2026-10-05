@@ -10,7 +10,9 @@ internal static class PluginSettings
     internal static void Apply()
     {
         EnsureSaving();
-        ApplyNow(FrameCacheToolSettings.Default);
+        var settings = FrameCacheToolSettings.Default;
+        ApplyNow(settings);
+        if (settings.GpuBudgetMigrationPending) SaveNow(settings);
     }
 
     // From now on every change is applied and saved (without applying the current settings now).
@@ -21,22 +23,29 @@ internal static class PluginSettings
             settings.PropertyChanged += (_, _) =>
             {
                 ApplyNow(settings);
-                try
-                {
-                    settings.Save();
-                    SaveError = null;
-                }
-                catch (Exception exception) { SaveError = exception.GetBaseException().Message; }
+                SaveNow(settings);
             };
+    }
+
+    private static void SaveNow(FrameCacheToolSettings settings)
+    {
+        try
+        {
+            settings.Save();
+            settings.GpuBudgetMigrationPending = false;
+            SaveError = null;
+        }
+        catch (Exception exception) { SaveError = exception.GetBaseException().Message; }
     }
 
     private static void ApplyNow(FrameCacheToolSettings settings)
     {
         bool available = HostIntegration.CacheAvailable;
         CacheMemoryController.Configure(settings.AutomaticRamBudget, settings.RamLimitMiB * CacheMemoryPolicy.MiB);
-        GpuMemoryController.Configure(settings.AutomaticGpuBudget, settings.GpuLimitMiB * GpuMemoryPolicy.MiB);
+        GpuMemoryController.Configure(settings.AutomaticGpuBudget,
+            (settings.GpuLimitMiB < 0 ? 8192 : settings.GpuLimitMiB) * GpuMemoryPolicy.MiB);
         TimelineFrameCache.SetEnabled(available && settings.PreviewCache, available && settings.ExportCache);
-        IdleFramePreRenderer.Configure(settings.IdleDelaySeconds, settings.IdleOrder, settings.IdleRangeStartFrame, settings.IdleRangeEndFrame);
+        IdleFramePreRenderer.Configure(settings.IdleDelaySeconds, settings.IdleOrder, settings.IdleRangeStartFrame, settings.IdleRangeEndFrame, settings.IdleWorkers);
         IdleFramePreRenderer.Enabled = available && settings.PreviewCache && settings.CacheFramesWhenIdle;
         KnownCode.Trusted = settings.TrustedPlugins;
         // Switched on after start: hook the export now, before the next one begins.

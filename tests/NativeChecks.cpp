@@ -3,6 +3,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <limits>
+#include "HevcConfigurationChecks.h"
 
 void Check(bool ok, const char* message)
 {
@@ -88,6 +89,7 @@ int main()
     try
     {
         CheckCleanup();
+        CheckHevcConfiguration();
         Check(NvencFinalize(nullptr) == 0 && NvencWriteAudio(nullptr, nullptr, 0, 48000, 2) == 0,
             "Null handles accepted");
         EncoderState inactive;

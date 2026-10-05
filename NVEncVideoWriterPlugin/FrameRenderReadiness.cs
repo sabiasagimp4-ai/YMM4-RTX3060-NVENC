@@ -304,6 +304,17 @@ internal static class FrameRenderReadiness
         if (!holds) Fail(scope);
     }
 
+    // Other audited asynchronous render inputs share the same nested-frame failure propagation.
+    internal static void ObserveAuxiliary(bool ready, string detail)
+    {
+        using var trace = CacheTrace.Measure("auxiliary-readiness", "state", detail);
+        if (trace is not null) trace.Outcome = ready ? "ready" : "not-ready";
+        if (ready) return;
+        var scope = current.Value;
+        if (scope is null) { if (!active.IsEmpty) FailAllActive(); }
+        else if (Volatile.Read(ref scope.Completed) == 0) Fail(scope);
+    }
+
     private static void Fail(Scope scope)
     {
         // A nested scene's incomplete frame is composited into every enclosing frame.

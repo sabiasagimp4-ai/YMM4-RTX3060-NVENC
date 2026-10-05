@@ -1,4 +1,5 @@
 #include "NvencNative.h"
+#include "HevcConfiguration.h"
 
 #define NOMINMAX
 #include <windows.h>
@@ -1576,46 +1577,7 @@ namespace
 
     std::vector<uint8_t> BuildHvcC(const std::vector<uint8_t>& vps, const std::vector<uint8_t>& sps, const std::vector<uint8_t>& pps)
     {
-        // Minimal hvcC. Many fields are set to defaults; VPS/SPS/PPS are included.
-        std::vector<uint8_t> hvcc;
-        hvcc.reserve(64 + vps.size() + sps.size() + pps.size());
-
-        hvcc.push_back(1); // configurationVersion
-        hvcc.push_back(1); // general_profile_space(0), tier(0), profile_idc(1=Main)
-        hvcc.insert(hvcc.end(), 4, 0); // general_profile_compatibility_flags
-        hvcc.insert(hvcc.end(), 6, 0); // general_constraint_indicator_flags
-        hvcc.push_back(120); // general_level_idc (4.0)
-        hvcc.push_back(0xF0); // min_spatial_segmentation_idc (upper 4 bits set)
-        hvcc.push_back(0);
-        hvcc.push_back(0xFC); // parallelismType (reserved)
-        hvcc.push_back(0xFC); // chromaFormat (reserved)
-        hvcc.push_back(0xF8); // bitDepthLumaMinus8 (reserved)
-        hvcc.push_back(0xF8); // bitDepthChromaMinus8 (reserved)
-        hvcc.push_back(0); // avgFrameRate
-        hvcc.push_back(0);
-        hvcc.push_back(0x03); // constantFrameRate=0, numTemporalLayers=0, temporalIdNested=0, lengthSizeMinusOne=3
-
-        uint8_t numArrays = 0;
-        if (!vps.empty()) numArrays++;
-        if (!sps.empty()) numArrays++;
-        if (!pps.empty()) numArrays++;
-        hvcc.push_back(numArrays);
-
-        auto appendArray = [&](uint8_t nalType, const std::vector<uint8_t>& data)
-        {
-            hvcc.push_back(0x80 | nalType); // array_completeness=1
-            hvcc.push_back(0); // numNalus (hi)
-            hvcc.push_back(1); // numNalus (lo)
-            hvcc.push_back(static_cast<uint8_t>((data.size() >> 8) & 0xFF));
-            hvcc.push_back(static_cast<uint8_t>(data.size() & 0xFF));
-            hvcc.insert(hvcc.end(), data.begin(), data.end());
-        };
-
-        if (!vps.empty()) appendArray(32, vps);
-        if (!sps.empty()) appendArray(33, sps);
-        if (!pps.empty()) appendArray(34, pps);
-
-        return hvcc;
+        return HevcConfiguration::Build(vps, sps, pps);
     }
 
     struct Av1SequenceHeaderInfo
@@ -2302,6 +2264,11 @@ namespace
             std::vector<uint8_t> codecPrivate = hevc ? BuildHvcC(vps, sps, pps) : BuildAvcC(sps, pps);
             if (codecPrivate.empty())
             {
+                if (hevc && !vps.empty() && !sps.empty() && !pps.empty())
+                {
+                    SetError(state, L"Invalid HEVC parameter sets; cannot create the MP4 decoder configuration.");
+                    return false;
+                }
                 return true;
             }
             if (!InitializeMp4Writer(state, state->codec, codecPrivate))

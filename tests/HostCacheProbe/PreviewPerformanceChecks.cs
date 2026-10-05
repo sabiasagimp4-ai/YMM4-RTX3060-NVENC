@@ -544,13 +544,15 @@ internal static class PreviewPerformanceChecks
             item.Opacity.SetFirstValue(43);
             return (IItem)item;
         }));
-        timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, ExtraShapes).Select(i =>
+        var extraShapes = Enumerable.Range(0, ExtraShapes).Select(i =>
         {
             var item = new ShapeItem { Frame = i % Frames, Length = 1, Layer = 2 };
             item.Y.SetFirstValue(200 + i % 5 * 10);
-            return (IItem)item;
-        }));
-        timeline.Items = timeline.Items.Add(new TextItem { Frame = 0, Length = Frames, Layer = 3, Text = "Many material files", Font = "Arial" });
+            return item;
+        }).ToArray();
+        timeline.Items = timeline.Items.AddRange(extraShapes);
+        var text = new TextItem { Frame = 0, Length = Frames, Layer = 3, Text = "Many material files", Font = "Arial" };
+        timeline.Items = timeline.Items.Add(text);
         timeline.Items = timeline.Items.AddRange(Enumerable.Range(0, AudioFiles).Select(i =>
         {
             string file = Path.Combine(folder, $"voice{i:00}.wav");
@@ -558,6 +560,20 @@ internal static class PreviewPerformanceChecks
             return (IItem)new AudioItem { FilePath = file, Frame = 0, Length = Frames, Layer = 10 + i };
         }));
         var scene = new Scene(timeline, scenes, []);
+        // The original fixture puts 120 one-frame shapes on the same layer across 100 frames.
+        // Frames 0..19 therefore have ambiguous host resource ordering and must bypass.
+        // Keep that regression explicit; use distinct layers for the fully cacheable benchmark.
+        var readers = FrameCacheKey.CaptureSourceReaderTypes();
+        Check(FrameCacheKey.TryDescribe(scene, readers, out _, out _, out var ambiguous, out var reason), reason);
+        for (int frame = 0; frame < Frames; frame++)
+            Check(ambiguous!.For(frame).Cacheable == (frame >= ExtraShapes - Frames),
+                $"Files fixture ambiguous-order eligibility mismatch at frame {frame}");
+        for (int i = 0; i < extraShapes.Length; i++) extraShapes[i].Layer = 2 + i / Frames;
+        text.Layer = 4;
+        Check(FrameCacheKey.TryDescribe(scene, readers, out _, out _, out var ordered, out reason), reason);
+        Check(Enumerable.Range(0, Frames).All(frame => ordered!.For(frame).Cacheable),
+            "Files benchmark must have a certified draw order for every frame");
+        Console.WriteLine("Files fixture: original 20 ambiguous frames bypass; ordered benchmark certifies all 100 frames.");
         ITimelineSource Create() => CreateSource(host, context, scene);
         var viewport = baseViewport with { SceneId = scene.ID, TimelineId = timeline.ID, LastDrawTimestamp = Stopwatch.GetTimestamp() };
         var store = new FrameCacheStore(Path.Combine(root, "files-store"), Frames * ((long)Width * Height * 4 + 32) + (1L << 20), 0);
@@ -748,4 +764,3 @@ internal static class PreviewPerformanceChecks
     private static bool SkipLoader() => false;
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
 }
-

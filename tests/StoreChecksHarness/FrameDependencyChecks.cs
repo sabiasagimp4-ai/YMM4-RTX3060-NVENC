@@ -101,6 +101,26 @@ internal static class FrameDependencyChecks
         try { _ = Index(sequence with { FrameFiles = images }); } catch (ArgumentException) { rejected = true; }
         Check(rejected, "Frame files of another length than the item must be rejected");
 
+        // Selected face files are ordinary dependencies. They must split segments, be included through a
+        // transition and by a wide frame, and never claim that the image-sequence decoder displayed them.
+        var faces = new Entry(600, 30, false, false, "FACES", [], FileRanges:
+            [new(600, 10, ["face-a.png"]), new(610, 10, ["face-b.png"]), new(620, 10, [])]);
+        var faceIndex = Index(faces, t with { Frame = 630, Length = 5 });
+        Check(faceIndex.For(609).Files.Contains("face-a.png") && !faceIndex.For(609).Files.Contains("face-b.png")
+            && faceIndex.For(610).Files.Contains("face-b.png") && !faceIndex.For(620).Files.Contains("face-b.png"),
+            "A selected face must depend only on the file of its range");
+        Check(faceIndex.For(609).Shown is null && faceIndex.For(610).Shown is null, "Ordinary faces must not assert decoder sequence images");
+        faceIndex.For(610, out int faceStart, out int faceEnd);
+        Check(faceStart == 610 && faceEnd == 620, "Face ranges did not split segments");
+        var faceTransition = Index(faces, t with { Frame = 610, Length = 5 });
+        Check(faceTransition.For(612).Files.Contains("face-a.png") && faceTransition.For(612).Files.Contains("face-b.png"),
+            "A transition must include the selected face on both sides");
+        Check(faceIndex.Whole.Files.Contains("face-a.png") && faceIndex.Whole.Files.Contains("face-b.png")
+            && Index(faces, d with { Frame = 700 }).For(705).Files.Contains("face-a.png"), "Whole/wide frames omitted face files");
+        rejected = false;
+        try { _ = Index(faces with { FileRanges = [new(599, 1, ["outside.png"])] }); } catch (ArgumentException) { rejected = true; }
+        Check(rejected, "A face range outside the item must be rejected");
+
         // An item formatting numbers with the thread's culture marks its frames (and a transition after it).
         var number = new Entry(500, 10, false, false, "U", [], Culture: true);
         var withNumber = Index(a, number, t with { Frame = 510, Length = 5 });

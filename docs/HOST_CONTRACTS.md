@@ -14,6 +14,8 @@ fingerprintは型・基底・interface・field・属性・正規化IL・生成�
 
 ## デコード完成判定
 
+シンプル立ち絵の `simple-tachie` はcoreとwrapped-sourcesに依存し、同梱SimpleTachie全体、TachieSource、Character、TachieItem、TachieFaceItem、IFaceItemを追加で照合する。ホストのpickerをそのまま呼んで可視表情を選ぶ。4.56.1.0のSimpleTachieは音量の-1だけを非表示に使い、characterのDirectoryは編集UIでしか読まない。型・同梱配置・MVID `be62ee72-e935-4cca-9bba-eb9de4a27cde` も確認する。既定・ボイス・上の表情の画像は実際に選ばれる区間に入れ、使われないfaceのファイルはそのボイス／faceアイテム自身の描画依存から外す。共通の字幕・音声エフェクトが同じファイルを使う場合はそちらの依存を維持する。番号付き画像とグループの時間対応は未確認のため対象外にする。新しいHarmonyフックは追加していないが、記録済み4.56.1.0の全基準をHostFingerprintで再生成している。
+
 `TimelineSource.Update` をAsyncLocal scopeで囲み、要求時刻と実際の動画ソースの状態を検査する。例外なしのreturnだけで完成とは判定しない。
 
 | ソース | 4.56.1.0で読んだ条件 |
@@ -44,6 +46,7 @@ Harmony 2.4.2は一部の例外フィルター付きmethodを作り直せない�
 - Harmony finalizerは例外がなくても走る。遅延保存へ渡すcaptureは `Pending.HandOver()` で移管し、`DeferredStore.Dispose` がReleaseする。
 - 停止時の遅延保存は対応playerのBeforeEditで仕上げる。refresh契約がない版は同期readbackが必要となる場合があり、GPU非待機を一律保証しない。
 - idle複製はTimeline.Lengthも写し、liveの検証済み指紋を引き継ぐ。キーとlease指紋の一致を省略しない。複製・tracker・`TimelineSourceAndDevices` は1本のworker threadで作成・使用・破棄し、モデルと検証済み指紋が同じ間はバッチをまたいで使い回す。仕事が2秒途切れたら解放する。
+- ボイスの圧縮配列は4.56.1.0のホストでは読み取り専用で、生成時は配列を差し替える。idleの複製には記述の内容と一致した配列だけを共有する。JSONに入らない音声パスは `VoiceItem.customVoiceFilePath` に設定し、ライブの `TemporaryFile` の所有権は移さない。元のパスの変更はcaptureの採用時にも確認し、通知がなくても記述し直す。このfieldと `FilePath` は、既存のcoreのGetFiles witnessが収集するVoiceItem全体のfingerprintに含まれる。fieldを確認できない版では、その複製を拒否する。
 - フレーム時刻はホスト同様 `VideoInfo.GetTimeFrom` で作り、正確なticksをキーにする。丸めて別sampleを共有しない。
 - 素材をホストが保持したまま上書きすると、新しい指紋で古い画像を保存し得る。`HostContent` の再起動までのbypassを、ファイルwatch通知だけで解除しない。
 
@@ -73,3 +76,29 @@ dotnet run --project tools/HostFingerprint -- emit NVEncVideoWriterPlugin/HostBa
 ```
 
 emitでは渡さなかった既存版を保持するが、HostContracts.Rulesを変えた場合は全記録済み版を渡し直す。上記NEW_VERSIONは実際の版番号へ置き換える。検査の実行方法は [HostCacheProbe README](../tests/HostCacheProbe/README.md)。
+
+## AnimationTachieと口パクの完成判定（2b）
+
+`lip-sync-readiness` はCoreの `TachieSource` 全体、音量計算・公開session・取消slot・待機timeout latch、音声source、CharacterとVoiceItemを照合する。新しいHarmony対象は `TachieSource.Update`（呼び出し元の立ち絵を識別）と `ReadVolumeAfterRequiredWait`（消費した値の完成確認）。公開済みsampleとのbit一致、現在のsession／task、取消、終了したsessionの全sample公開を確認する。ホストは失敗を吸収するためTaskの正常終了だけでは許可しない。未完成は既存のreadiness scopeから親のsceneまで失敗を伝える。
+
+`animation-tachie` はその規則に依存し、AnimationTachie DLLの全型とTachieItem／FaceItem／IFaceItemを照合する。追加規則の基準値は、記録済みの全版（現在4.56.1.0のみ）について `tools/HostFingerprint emit` で再生成した。実行時にもAnimationTachieのMVIDと同梱場所を確認する。未知の版／外部の型は通常描画。
+
+PNGのみ・付属INIなしを対象とし、全候補部品と番号付き／母音部品を依存にする。一覧の変化は同期確認して再起動まで対象外にする。INI削除後もホストのLayerConfigが残るため、キャッシュの参照と保存の両方で実ソースの13layerの設定と目／口の既存parts countを確認する。既定まばたきはパスの起動ごとのhashを使うので、この段階ではprocess nonceとitem同一性を含むSessionキーを採用する。計算式の複製と起動間の共有は未対応。
+
+停止中の先読みは、AnimationTachie の表示区間だけ追加の音量計算を開始せず見送る。表示区間外は通常の複製経路で先読みし、モデル比較で session 値だけを伏せる。各フレームのキーは完全一致が必要。動画部品、付属INI、差分合成、group、同一layerの表情競合、入れ子sceneは今回の対象外。再生／一時停止／出力でホストが完成させたフレームを再利用する範囲で検査する。
+
+AnimationTachie の一覧は参照可能な部品名の `stem*` を同期で列挙し、一度の SafeSource 内で同じパスの結果を共有する。参照前と採用直前の検証は残す。フォルダー時刻だけで省略せず、時刻を戻した新しい部品も検出する。初期一覧の内容は16MiB、4,096件に制限し、上限超過はbypassする。候補に大文字小文字だけが異なるファイル名が同時にある場合も、依存の別名を取り違えないため対象外。
+
+## PSD立ち絵の共有設定と保持状態（2c）
+
+`psd-tachie` は `lip-sync-readiness` に依存し、同梱Tachie.Psd、FileSource.Psd、PsdParserの全型、TachieItem／FaceItem／IFaceItemを照合する。口パクのHarmony対象は2bの2メソッドを共有し、新しいhookは追加しない。全記録済み版（現在4.56.1.0のみ）の基準をemitで再生成した。実行時にも3つの読込moduleのMVIDと同梱配置を確認し、契約キャッシュの識別にPsdParser.dllも含める。
+
+PSDファイルをlease／指紋／HostContentの依存にする。`PsdFileSettings.LoadFromPsdFilePath` が返す共有オブジェクトの実JSONをキーのresourceに含め、PropertyChangedを購読する。通知されない子要素の変更も、記述時と同じJSONの弱いmodel witnessを参照前・採用前に照合し、古いcaptureを無効にする。キーとwitnessは同じ設定snapshotを使う。設定検査は4,096node、深さ5、1list 1,024要素、文字合計65,536・各4,096、JSON262,144文字に制限し、未知の型や非有限数は対象外。
+
+さらに、実ソースのPSD／root／共有設定の同一性と、正規化済み設定を共有設定のreadonly `ResolveAgainst(root)` の結果と比較する。子要素を直接書き換えたときにホストが古いnormalized設定を保持する場合は、通常描画に戻し保存しない。CPU合成失敗時の空bitmapも、PSDのcanvas寸法との不一致から拒否する。未読込・非表示でrootを解放したソースも保守的に通常描画。正規化確認のroot参照はweakであり、非表示後のPSD画像データを保持しない。通知付きlist置換でホストが正規化を更新した後に再利用できる。
+
+sidecarの再読込を追加しない。ホストは起動中の同一パスで共有設定を保持するため、sidecarの外部上書きだけでは通常の新規sourceでも設定は変わらない。キーはsidecarの生bytesではなく、ホストが実際に使う共有設定に従う。既定まばたきにはSessionキーを用い、PSD 立ち絵の表示区間の停止中先読みは追加の音量計算を始めず見送る。表示区間外は先読みする。group、表情の同一layer競合、入れ子scene、外部立ち絵は対象外。
+
+PSDをキャッシュ有効化前に読み込んでいた場合も、parserが保持するreadonly bytesのSHA-256（parsed file ごとに一度、背景 task・buffer コピーなし）と capture の lease 指紋を比較する。完了前・失敗時は通常描画で保存・再利用しない。不一致ならHostContentを再起動まで対象外にし、古い画素を新しいファイルのキーへ保存しない。元のstreamや配列の所有権は変更しない。
+
+共有設定の JSON は通知の世代と全 scalar/list の bounded な witness が一致するときだけ再利用する。通知なしの子も毎回確認し、エンコードは捕えた値から行う（再読込の A/B/A で witness と JSON を取り違えない）。module の不変の監査結果は AssemblyLoad の世代で再確認し、collectible の依存 DLL を高速経路に入れない。変更・大きな素材の数値は [Claude レビュー対応（2026-10-05）](SPEEDUP_REVIEW_RESPONSE_2026-10-05.md)。

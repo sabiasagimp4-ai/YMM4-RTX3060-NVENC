@@ -2,11 +2,15 @@ name: cache-development
 
 on:
   push:
-    branches: ['main', 'codex/ae-cache-continuation']
+    branches: ['main', 'codex/ae-cache-continuation', 'codex/cache-architecture-audit-*']
   pull_request:
     paths: ['NVEncVideoWriterPlugin/**', 'tests/**', '.github/workflows/cache-development.yml']
   workflow_dispatch:
     inputs:
+      measure_baselines:
+        description: 'Measure historical fixed commits (requires their branches/commits to remain available)'
+        type: boolean
+        default: false
       rtx_check:
         description: 'Also run tools/rtx-check.ps1 -NoNvenc under Windows PowerShell 5.1 and PowerShell 7'
         type: boolean
@@ -34,6 +38,8 @@ jobs:
       - run: python -m unittest discover -s tests/tools -v
       - run: dotnet run --project tests/StoreChecksHarness/StoreChecks.csproj -c Release
       - run: dotnet run --project tests/ReadinessChecks/ReadinessChecks.csproj -c Release
+      - run: dotnet run --project tests/CacheAdversarialChecks/CacheAdversarialChecks.csproj -c Release
+      - run: dotnet run --project tests/DescriptionJsonChecks/DescriptionJsonChecks.csproj -c Release
 
   host:
     runs-on: ubuntu-latest
@@ -80,15 +86,116 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native check build failed' }
           & tests/bin/Release/NativeChecks.exe
           if ($LASTEXITCODE -ne 0) { throw 'Native checks failed' }
+      - name: Duplicate PSD dependency modules reject only affected frames
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --psd-duplicate-parser
+          if ($LASTEXITCODE -ne 0) { throw 'Duplicate PsdParser check failed' }
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --psd-duplicate-source
+          if ($LASTEXITCODE -ne 0) { throw 'Duplicate PSD file-source check failed' }
+      - name: PSD tachie pixels, shared settings and envelope completion
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --psd-tachie-check
+          if ($LASTEXITCODE -ne 0) { throw 'PSD tachie checks failed' }
+      - name: Large PSD tachie second playback and exact pixels (109 MiB per PSD)
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --psd-tachie-large
+          if ($LASTEXITCODE -ne 0) { throw 'Large PSD tachie measurement/checks failed' }
+      - name: PSD tachie before and after (two bounded samples each, WARP)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
+        run: |
+          $before = Join-Path $env:RUNNER_TEMP 'psd-tachie-before'
+          git fetch origin 0b10e2623fd30cc90c2d03cb10e77677eca4e65a
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch PSD baseline' }
+          git worktree add --detach $before 0b10e2623fd30cc90c2d03cb10e77677eca4e65a
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create PSD baseline' }
+          try {
+            $project = Join-Path $before 'tests/HostCacheProbe/HostCacheProbe.csproj'
+            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --psd-tachie-measure
+            if ($LASTEXITCODE -ne 0) { throw 'Before PSD measurement failed' }
+          } finally {
+            git worktree remove --force $before
+          }
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --psd-tachie-measure
+          if ($LASTEXITCODE -ne 0) { throw 'PSD tachie measurement failed' }
+      - name: Large animation tachie second playback and exact pixels (309 PNG parts)
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --animation-tachie-large
+          if ($LASTEXITCODE -ne 0) { throw 'Large animation tachie measurement/checks failed' }
+      - name: Animation tachie before and after (two bounded samples each, WARP)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
+        run: |
+          $before = Join-Path $env:RUNNER_TEMP 'animation-tachie-before'
+          git fetch origin 1fbf4c625ca9236fd60fd0b015990a0f87bf15cc
+          git worktree add --detach $before 1fbf4c625ca9236fd60fd0b015990a0f87bf15cc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create animation baseline' }
+          try {
+            $project = Join-Path $before 'tests/HostCacheProbe/HostCacheProbe.csproj'
+            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --animation-tachie-measure
+            if ($LASTEXITCODE -ne 0) { throw 'Before animation measurements failed' }
+          } finally {
+            git worktree remove --force $before
+          }
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --animation-tachie-measure
+          if ($LASTEXITCODE -ne 0) { throw 'Animation tachie baseline failed' }
       - name: Store, memory policy and idle traversal
         run: |
           dotnet run --project tests/StoreChecksHarness/StoreChecks.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Store checks failed' }
           dotnet run --project tests/ReadinessChecks/ReadinessChecks.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'Readiness checks failed' }
+          dotnet run --project tests/CacheAdversarialChecks/CacheAdversarialChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Adversarial cache checks failed' }
           dotnet run --project tests/FileLeaseChecks/FileLeaseChecks.csproj -c Release
           if ($LASTEXITCODE -ne 0) { throw 'File lease checks failed' }
-      - name: Dependency keys against the real host
+      - name: Live-reuse regression rejects a deliberately removed validation guard
+        run: |
+          $path = Join-Path $env:GITHUB_WORKSPACE 'NVEncVideoWriterPlugin/TimelineFrameCache.cs'
+          $original = [IO.File]::ReadAllText($path)
+          $broken = $original.Replace('ReferenceEquals(state.LastOutput, previousOutput) && StillCurrent(pending))', 'ReferenceEquals(state.LastOutput, previousOutput))')
+          if ($broken -eq $original) { throw 'Live validation mutation did not apply' }
+          try {
+            [IO.File]::WriteAllText($path, $broken)
+            $output = & dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu 2>&1
+            $code = $LASTEXITCODE
+            $output | Write-Output
+            if ($code -eq 0 -or ($output -join "`n") -notmatch 'Edit between capture and live lookup reused stale output') {
+              throw 'Negative control did not fail at the stale-live-output regression'
+            }
+            # The native failure above is the expected observation. GitHub's pwsh wrapper
+            # otherwise propagates LASTEXITCODE after this script successfully validates it.
+            $global:LASTEXITCODE = 0
+          } finally {
+            [IO.File]::WriteAllText($path, $original)
+          }
+      - name: Voice descriptions before hashing (two samples on the same runner)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
+        run: |
+          $before = Join-Path $env:RUNNER_TEMP 'voice-description-before'
+          git fetch --no-tags origin c6bbe36364948799130ca6c0100ab5d4932f4078
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch the measurement-only baseline' }
+          git worktree add --detach $before c6bbe36364948799130ca6c0100ab5d4932f4078
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create the baseline worktree' }
+          try {
+            $project = Join-Path $before 'tests/CacheChecks/CacheChecks.csproj'
+            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --voice-measure
+            if ($LASTEXITCODE -ne 0) { throw 'Baseline voice measurement failed' }
+          } finally {
+            git worktree remove --force $before
+          }
+      - name: File lookups before the notification decision (two samples on the same runner)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
+        run: |
+          $before = Join-Path $env:RUNNER_TEMP 'file-lookups-before'
+          git fetch origin fc09a371d713dc42136e892fc577997fe0b8576e
+          git worktree add --detach $before fc09a371d713dc42136e892fc577997fe0b8576e
+          try {
+            $project = Join-Path $before 'tests/CacheChecks/CacheChecks.csproj'
+            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --file-measure
+            if ($LASTEXITCODE -ne 0) { throw 'Before file measurements failed' }
+          } finally {
+            git worktree remove --force $before
+          }
+      - name: Dependency keys against the real host (includes two after measurements)
         run: |
           dotnet run --project tests/CacheChecks/CacheChecks.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR
           if ($LASTEXITCODE -ne 0) { throw 'Cache checks failed' }
@@ -98,10 +205,94 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Integration checks failed' }
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu
           if ($LASTEXITCODE -ne 0) { throw 'Pixel checks failed' }
+      - name: GPU cold copies, read-ahead and device-loss notification
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu-retention-check
+          if ($LASTEXITCODE -ne 0) { throw 'GPU retention extension checks failed' }
+      - name: Idle parallel workers, pixel parity and cancellation (2 and 4 workers)
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --idle-parallel-check
+          if ($LASTEXITCODE -ne 0) { throw 'Idle parallel worker checks failed' }
+      - name: Incremental descriptions match 1000 actual host edits before enabling production
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --edit-description-check
+          if ($LASTEXITCODE -ne 0) { throw 'Incremental description oracle failed' }
       - name: GPU retention, invalidation and trace measurement (WARP)
         run: |
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" --no-launch-profile -- $env:YMM4_DIR --preview-performance
           if ($LASTEXITCODE -ne 0) { throw 'Preview performance checks failed' }
+      - name: Simple tachie second-play measurements (two samples, WARP)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
+        run: |
+          $before = Join-Path $env:RUNNER_TEMP 'simple-tachie-before'
+          git fetch origin 67b208027d85c5e169fd18313368a09fff347fb0
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch simple tachie baseline' }
+          git worktree add --detach $before 67b208027d85c5e169fd18313368a09fff347fb0
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create simple tachie baseline' }
+          try {
+            $project = Join-Path $before 'tests/HostCacheProbe/HostCacheProbe.csproj'
+            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --simple-tachie-measure
+            if ($LASTEXITCODE -ne 0) { throw 'Before simple tachie measurement failed' }
+          } finally {
+            git worktree remove --force $before
+          }
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --simple-tachie-measure
+          if ($LASTEXITCODE -ne 0) { throw 'Simple tachie measurements failed' }
+      - name: First GPU revisit measurements (two samples, WARP)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
+        run: |
+          $before = Join-Path $env:RUNNER_TEMP 'gpu-first-revisit-before'
+          git fetch origin 55e9a4762d1419a4c3f25d69033851f1514416df
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch GPU revisit baseline' }
+          git worktree add --detach $before 55e9a4762d1419a4c3f25d69033851f1514416df
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create GPU revisit baseline' }
+          try {
+            $project = Join-Path $before 'tests/HostCacheProbe/HostCacheProbe.csproj'
+            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu-first-revisit-measure
+            if ($LASTEXITCODE -ne 0) { throw 'Before GPU revisit measurement failed' }
+          } finally {
+            git worktree remove --force $before
+          }
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --gpu-first-revisit-measure
+          if ($LASTEXITCODE -ne 0) { throw 'GPU first revisit measurement failed' }
+      - name: Idle before and after measurements (two samples each, WARP)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
+        run: |
+          $before = Join-Path $env:RUNNER_TEMP 'idle-parallel-before'
+          git fetch origin 30abd8cc1e4cbeb4dc95cab172cd4cff731871b9
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch idle rendering baseline' }
+          git worktree add --detach $before 30abd8cc1e4cbeb4dc95cab172cd4cff731871b9
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create idle rendering baseline' }
+          try {
+            $project = Join-Path $before 'tests/HostCacheProbe/HostCacheProbe.csproj'
+            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --idle-parallel-measure
+            if ($LASTEXITCODE -ne 0) { throw 'Before idle rendering measurement failed' }
+          } finally {
+            git worktree remove --force $before
+          }
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --idle-parallel-measure
+          if ($LASTEXITCODE -ne 0) { throw 'After idle rendering measurements failed' }
+      - name: Single-item edit descriptions before and after (two samples each)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
+        run: |
+          $before = Join-Path $env:RUNNER_TEMP 'edit-description-before'
+          git fetch origin 7ef3980d0b192c0d9009aa1984c226122ae06415
+          if ($LASTEXITCODE -ne 0) { throw 'Could not fetch edit description baseline' }
+          git worktree add --detach $before 7ef3980d0b192c0d9009aa1984c226122ae06415
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create edit description baseline' }
+          try {
+            $project = Join-Path $before 'tests/HostCacheProbe/HostCacheProbe.csproj'
+            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --edit-description-measure
+            if ($LASTEXITCODE -ne 0) { throw 'Before edit description measurement failed' }
+          } finally {
+            git worktree remove --force $before
+          }
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --edit-description-measure-incremental
+          if ($LASTEXITCODE -ne 0) { throw 'After edit description measurement failed' }
+      - name: Animation tachie pixels, delayed envelopes and hidden source settings
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --animation-tachie-check
+          if ($LASTEXITCODE -ne 0) { throw 'Animation tachie checks failed' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

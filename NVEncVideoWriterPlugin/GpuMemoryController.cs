@@ -15,6 +15,11 @@ internal static class GpuMemoryController
     private static long maximum = 2048 * GpuMemoryPolicy.MiB;
     private static Adapter? adapter;
     private static string status = "VRAMの自動配分は、プレビューの描画が始まると動きます。";
+    private sealed record SampleState(GpuMemorySnapshot Value);
+    private static SampleState? latestSample;
+    private static long adapterGeneration;
+    internal static long AdapterGeneration => Interlocked.Read(ref adapterGeneration);
+    internal static GpuMemorySnapshot? LatestSample => Volatile.Read(ref latestSample)?.Value;
 
     private sealed record Adapter(Vortice.Luid Luid, string Name, long DedicatedVideoMemory, bool Software);
 
@@ -28,6 +33,7 @@ internal static class GpuMemoryController
         {
             if (configured && automatic == allocateAutomatically && maximum == maximumBytes) return;
             configured = true;
+            Volatile.Write(ref latestSample, null);
             automatic = allocateAutomatically;
             maximum = maximumBytes;
             policy.Reset();
@@ -59,6 +65,9 @@ internal static class GpuMemoryController
             {
                 if (adapter is { } known && known.Luid.LowPart == seen.Luid.LowPart && known.Luid.HighPart == seen.Luid.HighPart) return;
                 adapter = seen;
+                Interlocked.Increment(ref adapterGeneration);
+                IdleFramePreRenderer.ResetWorkerMemory();
+                Volatile.Write(ref latestSample, null);
                 policy.Reset();
                 StartIfReady();
             }
@@ -84,6 +93,7 @@ internal static class GpuMemoryController
         {
             if (!configured || !automatic || adapter is not { } current) return;
             var snapshot = ReadSnapshot(current);
+            Volatile.Write(ref latestSample, snapshot is { } seen ? new SampleState(seen) : null);
             long budget = TimelineFrameCache.GpuRetentionBudgetNow;
             long next = policy.Next(budget, TimelineFrameCache.GpuRetainedBytesNow, maximum, snapshot);
             if (next != budget) TimelineFrameCache.SetGpuRetentionBudgetDeferred(next);
@@ -97,6 +107,7 @@ internal static class GpuMemoryController
         catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
         {
             policy.Reset();
+            Volatile.Write(ref latestSample, null);
             Volatile.Write(ref status, "VRAMの自動配分を保留しています: " + error.GetBaseException().Message);
         }
         finally { Monitor.Exit(gate); }
