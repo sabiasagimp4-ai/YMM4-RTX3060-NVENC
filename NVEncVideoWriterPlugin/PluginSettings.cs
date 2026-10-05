@@ -10,7 +10,9 @@ internal static class PluginSettings
     internal static void Apply()
     {
         EnsureSaving();
-        ApplyNow(FrameCacheToolSettings.Default);
+        var settings = FrameCacheToolSettings.Default;
+        ApplyNow(settings);
+        if (settings.GpuBudgetMigrationPending) SaveNow(settings);
     }
 
     // From now on every change is applied and saved (without applying the current settings now).
@@ -21,13 +23,19 @@ internal static class PluginSettings
             settings.PropertyChanged += (_, _) =>
             {
                 ApplyNow(settings);
-                try
-                {
-                    settings.Save();
-                    SaveError = null;
-                }
-                catch (Exception exception) { SaveError = exception.GetBaseException().Message; }
+                SaveNow(settings);
             };
+    }
+
+    private static void SaveNow(FrameCacheToolSettings settings)
+    {
+        try
+        {
+            settings.Save();
+            settings.GpuBudgetMigrationPending = false;
+            SaveError = null;
+        }
+        catch (Exception exception) { SaveError = exception.GetBaseException().Message; }
     }
 
     private static void ApplyNow(FrameCacheToolSettings settings)

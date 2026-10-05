@@ -19,6 +19,10 @@ internal static class GpuBudgetChecks
         Check(current == 2048 * M, $"a 12 GB card reaches the 2048 MiB limit, not {current / M} MiB");
         Check(Settle(new GpuMemoryPolicy(), 128 * M, 512 * M, rtx3060) == 512 * M, "a lower limit wins");
         CheckBudgetTarget(rtx3060, "12 GB sample");
+        Check(GpuMemoryPolicy.Ceiling(8192 * M, 12288 * M) == 6144 * M, "12 GB physical ceiling is 6 GB");
+        Check(GpuMemoryPolicy.Ceiling(8192 * M, 8192 * M) == 4096 * M, "8 GB physical ceiling is 4 GB");
+        Check(GpuMemoryPolicy.Ceiling(8192 * M, 4096 * M) == 2048 * M, "4 GB physical ceiling is 2 GB");
+        Check(GpuMemoryPolicy.Ceiling(8192 * M, 0) == 0, "No dedicated VRAM cannot grow retention");
 
         // Its own retained frames are not pressure: they are part of the usage the target subtracts.
         Check(new GpuMemoryPolicy().Next(2048 * M, 2048 * M, 2048 * M, rtx3060 with { CurrentUsage = 3500 * M }) == 2048 * M,
@@ -28,7 +32,7 @@ internal static class GpuBudgetChecks
         CheckBudgetTarget(new(3584 * M, 1000 * M, 4096 * M, false), "4 GB sample");
         CheckBudgetTarget(new(7400 * M, 1200 * M, 8192 * M, false), "8 GB sample");
         // Integrated GPU: little dedicated memory, stays at the initial budget whatever its shared budget.
-        Check(Settle(new GpuMemoryPolicy(), 128 * M, 2048 * M, new(8192 * M, 500 * M, 128 * M, false)) == 128 * M, "integrated GPU holds 128 MiB");
+        Check(Settle(new GpuMemoryPolicy(), 128 * M, 2048 * M, new(8192 * M, 500 * M, 128 * M, false)) == 64 * M, "integrated GPU obeys half of its dedicated VRAM");
 
         // Pressure: another application takes VRAM and the OS lowers this process's budget.
         policy = new GpuMemoryPolicy();
@@ -58,7 +62,7 @@ internal static class GpuBudgetChecks
     private static void CheckBudgetTarget(GpuMemorySnapshot sample, string label)
     {
         long maximum = 8192 * M;
-        long target = Math.Min(maximum, Math.Min(sample.DedicatedVideoMemory,
+        long target = Math.Min(maximum, Math.Min(sample.DedicatedVideoMemory / 2,
             sample.Budget - GpuMemoryPolicy.Reserve(sample.Budget) - sample.CurrentUsage));
         long settled = Settle(new GpuMemoryPolicy(), 128 * M, maximum, sample);
         Check(settled <= target && settled >= target - 64 * M, label + ": uses OS headroom within growth hysteresis");
