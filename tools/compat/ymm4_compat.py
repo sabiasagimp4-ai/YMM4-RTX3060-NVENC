@@ -243,14 +243,26 @@ def table(entries):
     return '\n'.join(lines)
 
 
+def detail_table(data):
+    lines = ['| YMM4 | 読み込み | NVENC 出力 | 描画キャッシュ | 備考 | 確認 |', '| --- | :---: | :---: | :---: | --- | --- |']
+    versions = data.get('versions', {})
+    for version, (load, nvenc, cache, note) in rows(data):
+        entry = versions[version]
+        steps = '・'.join(name for name, key in (('照合', 'scan'), ('起動', 'start'), ('検査', 'tests')) if entry.get(key))
+        checked = f"{entry.get('checked', '?')}、{entry.get('plugin', '?')}、{steps}" + (f"（[記録]({entry['run']})）" if entry.get('run') else '')
+        lines.append(f'| {version} | {load} | {nvenc} | {cache} | {note} | {checked} |')
+    return '\n'.join(lines)
+
+
 def render(data_path, readme_path, doc_path):
     data = load(data_path)
     plugin, updated = data.get('plugin', '?'), data.get('updated', '?')
     count = len(data.get('versions', {}))
     readme_block = '\n'.join([
         BEGIN,
-        f'YMM4 の更新サーバーで公開されている {count} 版を、プラグイン {plugin} で自動で確かめた結果です（{updated} 更新）。'
-        '同じ結果が続く版はまとめています。版ごとの結果と確かめ方は [YMM4 の版ごとの対応](docs/YMM4_VERSIONS.md) を参照してください。',
+        f'YMM4 の更新サーバーで公開されている版（とコードを読んだ版）の計 {count} 版を、プラグイン {plugin} で自動で確かめた結果です（{updated} 更新）。'
+        '新しい版が公開されると自動で確かめて、ここに追加します。同じ結果が続く版はまとめています。'
+        '版ごとの結果と確かめ方は [YMM4 の版ごとの対応](docs/YMM4_VERSIONS.md) を参照してください。',
         '',
         '**○** 使える　**△** 一部だけ使える　**×** 使えない　**？** 未確認',
         '',
@@ -265,7 +277,6 @@ def render(data_path, readme_path, doc_path):
         raise SystemExit(f'{readme_path}: markers {BEGIN} / {END} not found')
     with open(readme_path, 'w', encoding='utf-8', newline='\n') as stream:
         stream.write(readme)
-    detail = [(f"{version}", row) for version, row in rows(data)]
     runs = sorted({entry.get('run') for entry in data.get('versions', {}).values() if entry.get('run')})
     doc = '\n'.join([
         '# YMM4 の版ごとの対応',
@@ -286,7 +297,7 @@ def render(data_path, readme_path, doc_path):
         '',
         '## 結果',
         '',
-        table(detail),
+        detail_table(data),
         '',
         '## 実行記録',
         '',
