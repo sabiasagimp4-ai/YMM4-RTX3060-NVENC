@@ -51,7 +51,7 @@ internal static class FrameRenderModelComparison
                 if (reader.ValueTextEquals("Format"))
                 {
                     if (format || !reader.Read() || reader.TokenType != System.Text.Json.JsonTokenType.Number
-                        || !reader.TryGetInt32(out int version) || version != 3)
+                        || !reader.TryGetInt32(out int version) || version is not (2 or 3))
                         throw new InvalidDataException("描画記述の版を確認できません。");
                     format = true;
                 }
