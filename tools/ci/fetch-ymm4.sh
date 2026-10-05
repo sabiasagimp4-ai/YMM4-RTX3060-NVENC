@@ -8,9 +8,9 @@
 #        fetch-ymm4.sh <version|latest> <destination> [--dlls|--top|--app|--scan|--match <regex>]
 #          --dlls: only the top-level YukkuriMovieMaker*.dll; --top: the files of the application folder itself
 #          (not Resources and other subfolders, which hold voice data and dictionaries); --scan: the top-level
-#          YukkuriMovieMaker*.dll and the runtime configuration (tools/compat); --app: the files of --top whose names
-#          are ASCII (enough to start YMM4; curl in Git Bash on Windows cannot write the Japanese-named text files);
-#          --match: files whose path matches
+#          YukkuriMovieMaker*.dll and the runtime configuration (tools/compat); --app: what starting YMM4 needs (all
+#          but the FFmpeg and rhubarb programs, the SoundFont and the speech recognition libraries of other
+#          platforms and accelerators, about 350 of 960 MB); --match: files whose path matches
 # Prints the resolved version on the last line. For CI only; the binaries are never committed.
 set -euo pipefail
 BASE=${YMM4_UPDATE_BASE:-https://manjubox.net/Install/YukkuriMovieMaker_v4_Lite}
@@ -26,7 +26,7 @@ dest=${2:?destination directory}
 filter='.'
 [ "${3:-}" = --dlls ] && filter='^YukkuriMovieMaker[^\\\\]*\.dll$'
 [ "${3:-}" = --top ] && filter='^[^\\\\]+$'
-[ "${3:-}" = --app ] && filter='^[ -\[\]-~]+$'
+[ "${3:-}" = --app ] && filter='^(?!Resources\\bin\\x64\\(ffmpeg|rhubarb)\\|Resources\\SoundFonts\\|runtimes\\(?!win-x64\\))'
 [ "${3:-}" = --scan ] && filter='^((YukkuriMovieMaker|Vortice\.|SharpGen\.)[^\\\\]*\.dll|Newtonsoft\.Json\.dll|YukkuriMovieMaker\.runtimeconfig\.json)$'
 [ "${3:-}" = --match ] && filter=${4:?regex}
 [ "$version" = latest ] && version=$(versions | head -1)
@@ -39,27 +39,32 @@ manifest_ "$version" > "$manifest"
 algorithm=$(jq -r '.HashAlgorithm // "SHA256"' "$manifest" | tr -d '\r' | tr '[:upper:]' '[:lower:]')
 # Two downloads at a time, as YMM4's updater does.
 fetch_one() {
-  local file=$1 hash=$2 size=$3 path url
+  local file=$1 hash=$2 size=$3 path url part
   path="$dest/${file//\\//}"
   mkdir -p "$(dirname "$path")"
-  url="$folder/$(printf '%s' "${file//\\//}" | jq -sRr '@uri' | sed 's/%2F/\//g')"
-  if [ ! -f "$path" ] || [ "$(stat -c %s "$path")" != "$size" ] \
-     || [ "$(openssl dgst -"$algorithm" -binary "$path" | base64 -w0)" != "$hash" ]; then
-    curl_ -o "$path" "$url"
+  url="$folder/$(printf '%s' "${file//\\//}" | jq -sRr '@uri' | tr -d '\r' | sed 's/%2F/\//g')"
+  if [ ! -f "$path" ] || [ "$(stat -c %s "$path")" != "$size" ] || [ "$(digest < "$path")" != "$hash" ]; then
+    # Into an ASCII name first: curl in Git Bash on Windows cannot create files with Japanese names, mv can.
+    part=$(mktemp "$dest/.part.XXXXXX")
+    curl_ -o "$part" "$url" && mv -f "$part" "$path" || { rm -f -- "${part:?}"; echo "download failed: $file" >&2; return 1; }
   fi
   [ "$(stat -c %s "$path")" = "$size" ] || { echo "size mismatch: $file" >&2; return 1; }
-  [ "$(openssl dgst -"$algorithm" -binary "$path" | base64 -w0)" = "$hash" ] || { echo "hash mismatch: $file" >&2; return 1; }
+  [ "$(digest < "$path")" = "$hash" ] || { echo "hash mismatch: $file" >&2; return 1; }
 }
-export -f fetch_one curl_
+digest() { openssl dgst -"$algorithm" -binary | base64 -w0; }
+export -f fetch_one curl_ digest
 export dest folder algorithm
-jq -r --arg f "$filter" '.Files[] | select(.File | test($f)) | [.File, .Hash, (.Size|tostring)] | @tsv' "$manifest" | tr -d '\r' > "$manifest.list"
+# join, not @tsv: @tsv would double the backslashes of the paths.
+jq -r --arg f "$filter" '.Files[] | select(.File | test($f)) | [.File, .Hash, (.Size|tostring)] | join("\t")' "$manifest" | tr -d '\r' > "$manifest.list"
 count=$(wc -l < "$manifest.list")
 tr '\t' '\n' < "$manifest.list" | xargs -d '\n' -n 3 -P 2 bash -c 'fetch_one "$@"' _
-# YMM4_FETCH_PRUNE=1: also delete top-level files the version does not have, so that checking versions one after
-# another in one folder (downloading only what changed, as YMM4's updater does) leaves no file of another version.
+# YMM4_FETCH_PRUNE=1: also delete the files (outside user/) this version does not have, so that checking versions
+# one after another in one folder (downloading only what changed, as YMM4's updater does) leaves none of another.
 if [ "${YMM4_FETCH_PRUNE:-}" = 1 ]; then
-  cut -f1 "$manifest.list" > "$manifest.keep"
-  find "$dest" -maxdepth 1 -type f -printf '%f\n' | while read -r f; do grep -qxF "$f" "$manifest.keep" || rm -f -- "${dest:?}/${f:?}"; done
+  cut -f1 "$manifest.list" | tr '\\' '/' > "$manifest.keep"
+  (cd "$dest" && find . -type f -not -path './user/*' -printf '%P\n') | while read -r f; do
+    grep -qxF "$f" "$manifest.keep" || rm -f -- "${dest:?}/${f:?}"
+  done
   rm -f "$manifest.keep"
 fi
 rm -f "$manifest.list"
