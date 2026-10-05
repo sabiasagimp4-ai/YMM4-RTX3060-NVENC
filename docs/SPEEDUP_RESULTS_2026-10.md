@@ -116,11 +116,11 @@ DXGI/D2Dのdevice lostを観測したら、すべてのGPU保持を捨て、問�
 利用者のPCではAutoで同じ区間を往復し、詳細ログのGPU hit／保持byte／予算、`gpu-read-ahead`（先回り転送）を確認する。他アプリのGPU負荷を増やした際に保持が減り、表示が通常描画と一致するか確かめる。明示的上限を保存していた環境では、その上限が維持される。実際のdevice lostはWARPの模擬試験と区別する。最終文書commitのCIリンクはPR #9に記録する。
 
 
-### CIの停止と復旧
+### CIの停止と復旧（当時の経過）
 
 文書commit d0b824b の [run 37204411324](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37204411324) はportable／hostともstepsが0件で、テストを開始できなかった。GitHubのannotationは「The job was not started because recent account payments have failed or your spending limit needs to be increased. Please check the 'Billing & plans' section in your settings」。Windowsは前段ジョブが失敗したため未実行。実装commit 7d787b9 の全通常ジョブ成功とは区別し、最後のcommitで成功という完了条件を満たしたとは数えない。同じ失敗commitを再実行していない。
 
-GitHubの支払い／利用上限を解消後、この項目の最終headでcache-developmentを実行し、成功を確認してから項目8の計測だけのcommitへ進む。項目8は別のローカル作業領域で準備中だが、Windowsの画素一致・2本／4本の取消・同じjobの前後計測は未実行で、製品変更として公開していない。項目5・2b・2cは未着手。この外部の停止理由によって依頼全体は未完了。
+この開始前停止の時点では項目8をローカルで準備中で、製品変更は未公開、項目5・2b・2cは未着手だった。最終headの成功を確認してから次の項目へ進むため、当時は作業を保留した。下記の復旧後に項目8以降を進めている。
 
 利用者から復旧の連絡を受け、最終head d73a2d3 の [run 37207129256](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37207129256) を手動実行した。portable・host・Windowsの通常3ジョブが成功し、任意RTX検査は未選択でskip。先の開始前停止は実装の失敗と数えず、復旧後の成功を確認した。この復旧記録のcommitにも手動CIを実行し、その最終runをPR #9へ記録する。
 
@@ -208,3 +208,49 @@ AnimationTachieとCoreの固定MVID・配置・新しいhost契約を確認し�
 最終補強では一覧の記憶を4,096件・UTF-16内容16MiBで制限し、古い一覧を捨てて誤って再許可しない。上限到達を内部カウンタで模擬し、既存一覧の維持・新しい一覧の拒否・容量がある場合の採用を追加検査する。これは実機で16MiBを消費させた計測ではない。各caseの資源解放、globals復元も検査する。最終headのCIリンクはPR #12へ記録し、全通常jobが成功するまで2cへ進まない。
 
 利用者のPCではPNGのみ・INIなしのAnimationTachie2体とボイス20件の場面を2回再生し、2回目の帯と詳細画面の「再利用」（同じ画像／GPU／RAM）、詳細ログの `timeline-update` の `Outcome`（`live`／`gpu`／`ram`）、`auxiliary-readiness`（`Component=lip-sync-published-value`、`Outcome=ready`／`not-ready`）を確認する。時間切れや `not-ready` の描画が保存されないこと、番号／母音部品の追加や上書き後は通常描画に戻ることを確かめる。設定を変えずに停止中の先読みを待っても、このAnimationTachie sceneは追加の口パク計算を始めない。CLIで同じfixtureを使う場合はHostCacheProbeの `--animation-tachie-check`／`--animation-tachie-measure` を使い、`SPEEDUP2B` の `cache_hits`・`ms_per_frame` と `SPEEDUP2B_PIXELS exact=true` を見る。
+
+### 項目2cに先立って見つかった出力の解放漏れ
+
+PSD変更前のCIで、既存Animationの900frame初回保存が30秒上限に達した。[37246626522](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37246626522)、[37247594129](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37247594129)、[37249208503](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37249208503)は同じcommitの再実行ではない。同期の部品一覧確認を1回の検証内で共有しても解決せず、[37250375821](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37250375821)で処理別に診断した。600frameのUpdate累計15,597.7msのうちHostRender13,632.6msで、キー447.3ms・lookup27.7ms・GPUcopy803.7msだった。
+
+保存用コピーを表示した後、host Updateはそのコピーだけを解放し、元のcommand listが管理リストに毎回残っていた。miss/bypassでhostを実行する直前に元のoutputへ戻し、shownコピーを解放する修正をPR #13に追加した。hostが元のcommand listを通常どおり解放する。再利用のUpdateには復帰を挟まない。120frameでcacheのオン/オフを切り替え、全byte画素一致と管理リスト内のcommand listが2枚以下であることを確認する。temporaryなPROGRESS/STAGE診断は除去した。
+
+修正commit0b10e26の[基準CI37250668285](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37250668285)は全通常job成功。Animationの初回900保存は4,421.0／3,241.8ms、900画素完全一致×2、既存8件と新しい解放検査が成功した。別runnerの時間切れとの数値を直接改善率へ換算せず、解放漏れの解消と元の30秒条件での完了を確認した。PSDも変更前900全byte×2一致に成功し、このcommitをPSDの同一job before計測に使う。
+
+### PSD新設検査の準備修正
+
+最初の実装[CI37251400473](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37251400473)はpixels/hidden-vowels成功後、notifyの準備で失敗した。新しいtrackerの初回TryCaptureは非同期の素材確認を始めるため、即時trueを要求した新検査を、5秒以内に有効captureを得る形へ直した。通知revision増加と古いcapture拒否の必須条件は維持した。
+
+[CI37260237778](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37260237778)ではnotifyと非通知Offsetの実画素反例まで成功し、非通知Layersの画素差で失敗した。frame0は無発話でActiveFacesが空のため、指定したAlwaysCloseがnative PSD sourceへ渡らなかった。指定表情が実際に適用される発話中のframe32へ検査を移した。旧正規化の拒否、captureの無効化、liveとfreshの画素差はすべて必須のままで、製品処理は変更していない。どちらも修正前に理由をPRへ記録し、失敗commitは再実行していない。
+
+### PSDの最初の成功と費用削減
+
+[CI37260489722](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37260489722)ではPSD11検査、前後900全byte一致×各2回、全通常job成功を確認した。2回目再利用は900/900×2。ただしbeforeの2回目1.140858／1.185507ms/frameに対し、afterは3.074633／3.077854ms/frame（自身のoff1.547925／1.165299）で、速度は未達だった。この値を高速化の成功とは扱わない。
+
+実値の確認を維持し、不変のAssembly名とPropertyInfo配列だけを再利用する費用削減を追加した。loaded assembliesは毎回新しく取得し、MVID・DLL位置・設定の実値・子の値・正規化source・採用直前の確認は維持する。さらにアプリ全体のJsonConvert.DefaultSettingsから独立したserializerで設定を記述する。全体のconverterを定数にしてもPSDの実変更が検出される検査を追加し、検査は12件とした。最終の前後計測は下記。
+
+## 項目2c：PSD立ち絵（PR #13、限定対応・評価は一部）
+
+- 状態: 一部（監査済み同梱版・root内の検証済み経路、Sessionキー）
+- ブランチ・PR: `codex/speedup-2c-psd-tachie`、[PR #13](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/pull/13)
+- 変更: 共有PsdFileSettingsの実内容を、全体のJSON設定から独立したserializerでキー化。通知と通知なし変更、source内に残った古い正規化を確認します。読込済みPSDのbytesと保護したファイルを照合し、最初の指紋より前の上書きも拒否。非同期音量の未完成・部分失敗・取消とCPU合成失敗は保存しません。ホスト契約12規則と記録済み全版（4.56.1.0）の基準を更新しました。
+- 検査: PSDの12独立STA/device・各30秒caseと、前後各2回の900frame全byte画素一致が成功。notify、非通知Offset／Layersの実画素反例、sidecar、上書き、timeout、部分失敗／取消、設定上限、CPU合成失敗と回復、指紋前上書き、全体JSON converterへの耐性を含みます。既存Animationには120frameのoutput解放検査を追加し、既存検査も全件維持。[実装最終CI37262111837](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37262111837) 全通常job成功。文書commitを含む最後のCIはPR #13に記録します。
+- 計測（CI、WARP。RTX3060の値ではない）: 上記同一Windows job111611365274、前 `0b10e2623fd30cc90c2d03cb10e77677eca4e65a`／後 `b5ee674a713590597b66fccc4fb8563a4d35147c`。2体・20voice・60秒15fps900frame・321×181、自作7層80×100 RGBA PSD、目／口各3、通常のまばたき・MouseSmooth4。RAM256MiB、GPU保持off、disk0。Update＋黒背景viewportへのDrawを測り、画素読戻し・reference・初回保存は2回目の時間から除きます。各sampleは別STA/device・30秒上限です。
+
+| 対象 | 前（2回） | 後（2回） | 合格基準 | 判定 |
+| --- | --- | --- | --- | --- |
+| off時間 | 2.256610／1.650579 ms/frame | 1.843970／1.431048 ms/frame | 正規化の基準 | runner差を考慮 |
+| 2回目hit | 0／900、0／900 | 900／900、900／900 | 再利用率向上 | 100%、GPU hitは0 |
+| 2回目時間 | 1.619477／1.447797 ms/frame | 1.164649／0.859083 ms/frame | 短縮 | このrunは両回短縮 |
+| 2回目／自身のoff | 0.717659／0.877145 | 0.631598／0.600318 | 正規化して短縮 | 前後約12.0%／31.6%短縮 |
+| 900frame画素比較 | 正常描画同士、各900一致 | off対cache、各900一致 | 全byte一致 | 達成 |
+| afterの初回900保存 | 対象外 | 4009.8563／2670.9473 ms | 30秒以内 | 達成、2回目時間に含めない |
+
+- 計画からの変更点: まばたきは起動中のSessionキーでホスト自身の結果を保持。音量計算2枠を再生へ残すため、PSDを含むsceneのidle先読みは対象外。sidecarの外部変更がホストの共有設定へ反映されない場合は、実際の共有オブジェクトを入力とします。未知module・group・入れ子・表情同一layer競合は拒否。実値検証を省かず、不変のAssembly名とPropertyInfoだけを再利用しました。PSD前のCIで見つかった元のhost output解放漏れをPR #13で修正しました。
+- 残った危険・未確認: afterは自身のoffより約36.8%／40.0%短い一方、直前の別runでは正規化が約2.5%悪化／31.5%改善でした。最新2回だけで安定した高速化を保証しません。小さい自作PSDに限る計測で、実プロジェクトの大きいPSD、PSB、RTX3060、GUI音声／Present、長時間使用は未確認。上書きやsource設定不一致は再起動まで対象外になり得ます。誤った新設fixtureの修正理由は先にPRへ記録し、結果文書にも残しました。同一の失敗commitの再実行はありません。
+- 利用者のPCで確かめてほしいこと: PSD2体・20voiceを2回再生し、「再利用（同じ画像／GPU／RAM／ディスク）」「新規描画」「対象外」とp50/p95を比較。trace `timeline-update` のOutcome `live/gpu/ram`、`auxiliary-readiness` のComponent `lip-sync-published-value` とOutcome `ready/not-ready` を確認。目／口設定の変更・素材上書き・未完成描画が古い画面を保存しないか確認します。CLIの `--psd-tachie-check`／`--psd-tachie-measure` は `SPEEDUP2C` のcache_hits／ms_per_frame、`SPEEDUP2C_PIXELS exact=true`、`SPEEDUP2C_PHASE` のcold_warm_msを確認します。
+
+
+直前のメタデータ再利用の[CI37261436088](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37261436088)も全通常job成功でした。beforeのsecond/offは0.980855／0.939099、afterは1.005518／0.643180で、正規化した前後は約2.5%悪化／31.5%改善でした。afterは900/900 hit×2と900全byte一致×2。最新runだけを選んで安定した改善と扱わないため、この観測も残します。
+
+新設PSD fixtureの最初の[CI37248467485](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37248467485)ではbodyが目・口を覆い、変化必須の検査が失敗しました。理由をPRへ先に記録し、自作PSDのbodyを最初のrecordに配置して変化する目・口を可視にしました。製品コード・全900frame・全byte一致・変化必須・30秒上限は維持しています。
