@@ -16,9 +16,9 @@ internal sealed class GpuMemoryPolicy
     private int healthySamples;
 
     // The physical-memory ceiling; Next also applies the OS budget and keeps room for other allocations.
-    // Integrated GPUs report little dedicated memory and stay at 128 MiB.
+    // The measured physical ceiling is half the dedicated VRAM, including small integrated adapters.
     internal static long Ceiling(long maximum, long dedicatedVideoMemory) =>
-        Math.Min(maximum, Math.Clamp(dedicatedVideoMemory, InitialBudget, 8192 * MiB));
+        Math.Min(maximum, Math.Clamp(dedicatedVideoMemory / 2, 0, 8192 * MiB));
 
     // Headroom left for YMM4 itself (effects, decoders, export textures), other processes and usage spikes.
     internal static long Reserve(long budget) => Math.Max(1024 * MiB, budget / 5);
