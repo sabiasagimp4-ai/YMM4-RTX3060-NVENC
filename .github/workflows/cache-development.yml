@@ -228,6 +228,10 @@ jobs:
           }
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --edit-description-measure-incremental
           if ($LASTEXITCODE -ne 0) { throw 'After edit description measurement failed' }
+      - name: PSD tachie measurement baseline (two bounded samples, WARP)
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --psd-tachie-measure
+          if ($LASTEXITCODE -ne 0) { throw 'PSD tachie measurement failed' }
       - name: Animation tachie pixels, delayed envelopes and hidden source settings
         run: |
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --animation-tachie-check
@@ -247,10 +251,6 @@ jobs:
           }
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --animation-tachie-measure
           if ($LASTEXITCODE -ne 0) { throw 'Animation tachie baseline failed' }
-      - name: PSD tachie measurement baseline (two bounded samples, WARP)
-        run: |
-          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --psd-tachie-measure
-          if ($LASTEXITCODE -ne 0) { throw 'PSD tachie measurement failed' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
