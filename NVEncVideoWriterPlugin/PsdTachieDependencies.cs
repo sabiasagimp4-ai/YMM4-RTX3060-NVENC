@@ -244,7 +244,10 @@ internal static class PsdTachieDependencies
                         // Hold the immutable parser buffer without a 100 MiB copy; no native object is used
                         // on the pool thread. No frame is admitted while its hash is pending or failed.
                         ReadOnlyMemory<byte> memory = new(bytes.Array!, bytes.Offset, bytes.Count);
-                        return new(Task.Run(() => Convert.ToHexString(SHA256.HashData(memory.Span))));
+                        Func<string> hash = () => Convert.ToHexString(SHA256.HashData(memory.Span));
+                        if (ExecutionContext.IsFlowSuppressed()) return new(Task.Run(hash));
+                        // Do not retain the host's render/readiness context on the pool thread.
+                        using (ExecutionContext.SuppressFlow()) return new(Task.Run(hash));
                     });
                     if (content.Hash.Status != TaskStatus.RanToCompletion
                         || !capture.MatchesLoadedFile(PathOf(item.Character)!, content.Hash.Result)) return false;
