@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -29,19 +30,28 @@ internal static class PsdTachieDependencies
     private static readonly ConditionalWeakTable<string, Witness> models = new();
     private static readonly ConditionalWeakTable<object, NormalizedWitness> normalized = new();
 
+    private sealed record ModuleName(string? Value);
+    private static readonly ConditionalWeakTable<Assembly, ModuleName> moduleNames = new();
+    private static string? NameOf(Assembly assembly) => moduleNames.GetValue(assembly, static value => new(value.GetName().Name)).Value;
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> settingsProperties = new();
+    private static PropertyInfo[] PropertiesOf(Type type) => settingsProperties.GetOrAdd(type,
+        static value => value.GetProperties(BindingFlags.Public | BindingFlags.Instance));
+    private static readonly (string Name, Guid Mvid)[] auxiliaryModules = [
+        ("YukkuriMovieMaker.Plugin.FileSource.Psd", new("277031aa-0de0-415b-a9df-12a390227ec4")),
+        ("PsdParser", new("d16c5a72-6eff-48f4-8735-0e5ce6ec73df")) ];
+
     internal static bool Verified(Type? plugin)
     {
-        if (plugin?.FullName != PluginName || plugin.Assembly.GetName().Name != AssemblyName
+        if (plugin?.FullName != PluginName || NameOf(plugin.Assembly) != AssemblyName
             || plugin.Assembly.ManifestModule.ModuleVersionId != ReadBuild || !HostFeatures.For(typeof(Scene).Assembly).PsdTachie
             || !FrameCacheKey.IsBundledPluginAssembly(AssemblyName, plugin.Assembly.Location, Path.GetDirectoryName(typeof(Scene).Assembly.Location))) return false;
         // These dependencies also appear in the PSD contract. The loaded module must be the audited one,
         // including on the read host path where HostFeatures need not evaluate an unread build.
-        foreach (var (name, mvid) in new[] {
-            ("YukkuriMovieMaker.Plugin.FileSource.Psd", new Guid("277031aa-0de0-415b-a9df-12a390227ec4")),
-            ("PsdParser", new Guid("d16c5a72-6eff-48f4-8735-0e5ce6ec73df")) })
+        var loaded = AppDomain.CurrentDomain.GetAssemblies(); // Fresh on every check; only immutable names are cached.
+        string directory = Path.GetDirectoryName(typeof(Scene).Assembly.Location)!;
+        foreach (var (name, mvid) in auxiliaryModules)
         {
-            string directory = Path.GetDirectoryName(typeof(Scene).Assembly.Location)!;
-            var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == name)
+            var assembly = loaded.FirstOrDefault(a => NameOf(a) == name)
                 ?? Assembly.LoadFrom(Path.Combine(directory, name + ".dll"));
             if (assembly.ManifestModule.ModuleVersionId != mvid
                 || !string.Equals(Path.GetFullPath(assembly.Location), Path.Combine(directory, name + ".dll"), StringComparison.OrdinalIgnoreCase)) return false;
@@ -83,7 +93,7 @@ internal static class PsdTachieDependencies
             if (part.GetType().Assembly != assembly || part.GetType().FullName is not (
                 AssemblyName + ".PsdEyeAnimation" or AssemblyName + ".PsdMouthAnimation" or AssemblyName + ".PsdVowelMouthAnimation" or AssemblyName + ".PsdPreset"))
                 throw new InvalidDataException("Unknown PSD animation value");
-            foreach (var property in part.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance)) Visit(property.GetValue(part), depth + 1);
+            foreach (var property in PropertiesOf(part.GetType())) Visit(property.GetValue(part), depth + 1);
         }
         foreach (string name in new[] { "EyeAnimations", "MouthAnimations", "MouthVowelAnimations", "Presets" })
             Visit(value.GetType().GetProperty(name)!.GetValue(value), 0);
