@@ -219,7 +219,12 @@ jobs:
             $scan = (dotnet $tool scan app plugin) -join "`n"
             if ($LASTEXITCODE -ne 0 -or -not $scan) { $scan = '{"error":"scan failed"}' }
             [IO.File]::WriteAllText("$PWD\results\$v.scan.json", $scan)
-            Write-Output $scan.Substring(0, [Math]::Min(1500, $scan.Length))
+            try {
+              $j = $scan | ConvertFrom-Json
+              Write-Output ("read build: {0}; cache basis: {1}; cache features off: {2}; missing host APIs: {3}" -f $j.knownBuild, $j.contracts.baseline,
+                (@($j.contracts.off.PSObject.Properties.Name) -join ', '), @($j.plugin.apiMissing).Count)
+              @($j.plugin.apiMissing) | Select-Object -First 20 | ForEach-Object { Write-Output "  missing: $_" }
+            } catch { Write-Output $scan.Substring(0, [Math]::Min(1500, $scan.Length)) }
             if ($env:START -eq 'true') {
               powershell -NoProfile -ExecutionPolicy Bypass -File tools\compat\start-check.ps1 -HostDir "$PWD\app" -PluginDir "$PWD\plugin" -Out "$PWD\results\$v.start.json"
             }
