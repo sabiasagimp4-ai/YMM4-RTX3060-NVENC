@@ -117,6 +117,7 @@ jobs:
             [IO.File]::WriteAllText($path, $original)
           }
       - name: Voice descriptions before hashing (two samples on the same runner)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.measure_baselines }}
         run: |
           $before = Join-Path $env:RUNNER_TEMP 'voice-description-before'
           git fetch --no-tags origin c6bbe36364948799130ca6c0100ab5d4932f4078
