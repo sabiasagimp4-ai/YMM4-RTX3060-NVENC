@@ -26,7 +26,7 @@ internal sealed class AnimationTachieFixture : IDisposable
     internal TachieItem[] Tachies { get; }
     internal string[] Images { get; }
     internal ITachiePlugin Plugin { get; }
-    internal AnimationTachieFixture(bool hideWithoutVoice = false)
+    internal AnimationTachieFixture(bool hideWithoutVoice = false, bool large = false)
     {
         Directory.CreateDirectory(Root);
         Plugin = PluginLoader.TachiePlugins.Single(p => p.GetType().FullName == "YukkuriMovieMaker.Plugin.Tachie.AnimationTachie.AnimationTachiePlugin");
@@ -51,6 +51,10 @@ internal sealed class AnimationTachieFixture : IDisposable
                     }));
             }
         }
+        if (large)
+            for (int part = 0; part < 300; part++)
+                File.WriteAllBytes(Path.Combine(Root, "costume-part-" + part + ".png"),
+                    FramePixelChecks.Png(80, 100, (x, y) => ((byte)(part % 256), (byte)x, (byte)y, (byte)255)));
         byte[] cachedAudio = VoiceDescriptionMeasurements.VoiceCache();
         string audioPath = Path.Combine(Root, "voice.wav");
         using (var input = new MemoryStream(cachedAudio))
@@ -102,7 +106,7 @@ internal sealed class AnimationTachieFixture : IDisposable
 
 internal static class AnimationTachieMeasurements
 {
-    internal static void Run(Assembly host)
+    internal static void Run(Assembly host, bool large = false)
     {
         for (int repeat = 1; repeat <= 2; repeat++)
         {
@@ -111,22 +115,22 @@ internal static class AnimationTachieMeasurements
             using var finished = new ManualResetEventSlim();
             var thread = new Thread(() =>
             {
-                try { RunCase(host, sample); }
+                try { RunCase(host, sample, large); }
                 catch (Exception error) { failure = error; }
                 finally { finished.Set(); }
             }) { IsBackground = true, Name = "Animation tachie measurement" };
             thread.SetApartmentState(ApartmentState.STA); thread.Start();
-            Check(finished.Wait(TimeSpan.FromSeconds(30)), "Animation tachie measurement exceeded 30 seconds");
+            Check(finished.Wait(TimeSpan.FromSeconds(large ? 120 : 30)), "Animation tachie measurement exceeded 30 seconds");
             if (failure is not null) throw new InvalidOperationException("Animation tachie measurement", failure);
         }
     }
-    private static void RunCase(Assembly host, int repeat)
+    private static void RunCase(Assembly host, int repeat, bool large)
     {
         var harmony = new Harmony("ymm.tests.animation-tachie-measurements");
         harmony.Patch(typeof(PluginAssemblyLoader).TypeInitializer!, prefix: new HarmonyMethod(typeof(AnimationTachieMeasurements), nameof(SkipLoader)));
         ProbeLoader.Stub(ProbeLoader.Assemblies(host).Append(Assembly.LoadFrom(Path.Combine(Path.GetDirectoryName(host.Location)!,
             "YukkuriMovieMaker.Plugin.Tachie.AnimationTachie.dll"))));
-        using var fixture = new AnimationTachieFixture();
+        using var fixture = new AnimationTachieFixture(large: large);
         using var devices = new GraphicsDevices();
         using var context = devices.CreateContext();
         var dc = context.DeviceContext;
@@ -185,6 +189,8 @@ internal static class AnimationTachieMeasurements
                 {
                     mode, repeat, frames = AnimationTachieFixture.Frames, fps = AnimationTachieFixture.Fps,
                     project_seconds = 60, tachies = 2, voices = 20, cacheable,
+                    fixture = large ? "300-extra-png-parts" : "small",
+                    part_files = Directory.GetFiles(fixture.Root, "*.png").Length,
                     ms_per_frame = elapsed / AnimationTachieFixture.Frames,
                     cache_hits = TimelineFrameCache.Hits - hits, gpu_hits = TimelineFrameCache.GpuHits - gpu,
                 }));

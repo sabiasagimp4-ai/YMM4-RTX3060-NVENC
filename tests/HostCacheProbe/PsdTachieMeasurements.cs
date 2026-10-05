@@ -29,17 +29,18 @@ internal sealed class PsdTachieFixture : IDisposable
     internal TachieItem[] Tachies { get; }
     internal string[] Images { get; }
     internal ITachiePlugin Plugin { get; }
-    internal PsdTachieFixture(bool hideWithoutVoice = false)
+    internal PsdTachieFixture(bool hideWithoutVoice = false, bool large = false)
     {
         Directory.CreateDirectory(Root);
         Plugin = PluginLoader.TachiePlugins.Single(p => p.GetType().FullName == "YukkuriMovieMaker.Plugin.Tachie.Psd.PsdTachiePlugin");
         Images = Enumerable.Range(0, 2).Select(i => Path.Combine(Root, "face-" + i + ".psd")).ToArray();
         for (int i = 0; i < Images.Length; i++)
         {
-            File.WriteAllBytes(Images[i], OwnPsd(i == 0));
-            // Own sidecar; all IDs refer to the own seven-layer PSD below.
-            File.WriteAllText(Path.Combine(Root, "face-" + i + "-ymm.json"),
-                "{\"EyeAnimations\":[{\"Layers\":[\"i1\",\"i2\",\"i3\"],\"Offset\":0,\"Interval\":0}],\"MouthAnimations\":[{\"Layers\":[\"i4\",\"i5\",\"i6\"]}]}");
+            File.WriteAllBytes(Images[i], OwnPsd(i == 0, large ? 1920 : 80, large ? 1920 : 100));
+            // Own sidecar, including a substantial shared settings graph for the large fixture.
+            string eyes = string.Join(",", Enumerable.Repeat("{\"Layers\":[\"i1\",\"i2\",\"i3\"],\"Offset\":0,\"Interval\":0}", large ? 200 : 1));
+            string mouths = string.Join(",", Enumerable.Repeat("{\"Layers\":[\"i4\",\"i5\",\"i6\"]}", large ? 100 : 1));
+            File.WriteAllText(Path.Combine(Root, "face-" + i + "-ymm.json"), "{\"EyeAnimations\":[" + eyes + "],\"MouthAnimations\":[" + mouths + "]}");
         }
         byte[] cachedAudio = VoiceDescriptionMeasurements.VoiceCache();
         string audioPath = Path.Combine(Root, "voice.wav");
@@ -63,6 +64,7 @@ internal sealed class PsdTachieFixture : IDisposable
         Tachies = Characters.Select((character, i) =>
         {
             var item = new TachieItem(character) { Frame = 0, Length = Frames, Layer = i };
+            if (large) item.Zoom.SetFirstValue(100.0 * 80 / 1920);
             item.X.SetFirstValue(i == 0 ? -55.25 : 55.25); item.Y.SetFirstValue(0);
             return item;
         }).ToArray();
@@ -82,9 +84,9 @@ internal sealed class PsdTachieFixture : IDisposable
 
     // Original fixture writer: Adobe 8BPS v1, RGB, raw RGBA planes, seven layers with explicit lyid metadata.
     // No host code or host binary is embedded. All pixels are generated here.
-    internal static byte[] OwnPsd(bool red)
+    internal static byte[] OwnPsd(bool red, int width = 80, int height = 100)
     {
-        const int width = 80, height = 100, pixels = width * height;
+        int pixels = checked(width * height);
         using var records = new MemoryStream(); using var planes = new MemoryStream();
         using var rw = new BinaryWriter(records); using var pw = new BinaryWriter(planes);
         U16(rw, 7);
@@ -107,9 +109,10 @@ internal sealed class PsdTachieFixture : IDisposable
                 U16(pw, 0);
                 for (int y = 0; y < height; y++) for (int x = 0; x < width; x++)
                 {
+                    int sx = x * 80 / width, sy = y * 100 / height;
                     bool body = layer == 6;
-                    bool visible = body || (layer < 3 ? x >= 20 && x < 60 && y >= 24 && y < 25 + layer * 4
-                        : x >= 28 && x < 52 && y >= 64 && y < 65 + (layer - 3) * 4);
+                    bool visible = body || (layer < 3 ? sx >= 20 && sx < 60 && sy >= 24 && sy < 25 + layer * 4
+                        : sx >= 28 && sx < 52 && sy >= 64 && sy < 65 + (layer - 3) * 4);
                     byte value = channel == -1 ? (byte)(visible ? 255 : 0) : body
                         ? channel == 0 ? (byte)(red ? 220 : 30) : channel == 1 ? (byte)60 : (byte)(red ? 30 : 220)
                         : (byte)20;
@@ -136,7 +139,7 @@ internal sealed class PsdTachieFixture : IDisposable
 
 internal static class PsdTachieMeasurements
 {
-    internal static void Run(Assembly host)
+    internal static void Run(Assembly host, bool large = false)
     {
         for (int repeat = 1; repeat <= 2; repeat++)
         {
@@ -145,22 +148,23 @@ internal static class PsdTachieMeasurements
             using var finished = new ManualResetEventSlim();
             var thread = new Thread(() =>
             {
-                try { RunCase(host, sample); }
+                try { RunCase(host, sample, large); }
                 catch (Exception error) { failure = error; }
                 finally { finished.Set(); }
             }) { IsBackground = true, Name = "PSD tachie measurement" };
             thread.SetApartmentState(ApartmentState.STA); thread.Start();
-            Check(finished.Wait(TimeSpan.FromSeconds(30)), "PSD tachie measurement exceeded 30 seconds");
+            Check(finished.Wait(TimeSpan.FromSeconds(large ? 180 : 30)), "PSD tachie measurement exceeded 30 seconds");
             if (failure is not null) throw new InvalidOperationException("PSD tachie measurement", failure);
         }
     }
-    private static void RunCase(Assembly host, int repeat)
+    private static void RunCase(Assembly host, int repeat, bool large)
     {
         var harmony = new Harmony("ymm.tests.animation-tachie-measurements");
         harmony.Patch(typeof(PluginAssemblyLoader).TypeInitializer!, prefix: new HarmonyMethod(typeof(PsdTachieMeasurements), nameof(SkipLoader)));
         ProbeLoader.Stub(ProbeLoader.Assemblies(host).Append(Assembly.LoadFrom(Path.Combine(Path.GetDirectoryName(host.Location)!,
             "YukkuriMovieMaker.Plugin.Tachie.Psd.dll"))));
-        using var fixture = new PsdTachieFixture();
+        using var fixture = new PsdTachieFixture(large: large);
+        int frames = large ? 120 : PsdTachieFixture.Frames;
         using var devices = new GraphicsDevices();
         using var context = devices.CreateContext();
         var dc = context.DeviceContext;
@@ -212,21 +216,23 @@ internal static class PsdTachieMeasurements
                 TimelineFrameCache.Enabled = enabled;
                 long hits = TimelineFrameCache.Hits, gpu = TimelineFrameCache.GpuHits;
                 var clock = Stopwatch.StartNew();
-                for (int frame = 0; frame < PsdTachieFixture.Frames; frame++) { Update(frame); Draw(); }
+                for (int frame = 0; frame < frames; frame++) { Update(frame); Draw(); }
                 double elapsed = clock.Elapsed.TotalMilliseconds;
                 TimelineFrameCache.CompletePendingStore(source);
                 Console.WriteLine("SPEEDUP2C " + JsonSerializer.Serialize(new
                 {
-                    mode, repeat, frames = PsdTachieFixture.Frames, fps = PsdTachieFixture.Fps,
-                    project_seconds = 60, tachies = 2, voices = 20, cacheable,
-                    ms_per_frame = elapsed / PsdTachieFixture.Frames,
+                    mode, repeat, frames = frames, fps = PsdTachieFixture.Fps,
+                    project_seconds = (double)frames / PsdTachieFixture.Fps, tachies = 2, voices = 20, cacheable,
+                    fixture = large ? "1920-square-7-raw-layers-300-animation-settings" : "small",
+                    psd_bytes = new FileInfo(fixture.Images[0]).Length,
+                    ms_per_frame = elapsed / frames,
                     cache_hits = TimelineFrameCache.Hits - hits, gpu_hits = TimelineFrameCache.GpuHits - gpu,
                 }));
             }
             {
                 Measure("off", false, repeat);
                 var phase = Stopwatch.StartNew();
-                var reference = new byte[PsdTachieFixture.Frames][];
+                var reference = new byte[frames][];
                 for (int frame = 0; frame < reference.Length; frame++)
                 {
                     Update(frame);
@@ -239,7 +245,7 @@ internal static class PsdTachieMeasurements
                 Console.WriteLine($"SPEEDUP2C_PHASE repeat={repeat}; reference_ms={phase.Elapsed.TotalMilliseconds:R}");
                 phase.Restart();
                 TimelineFrameCache.Enabled = true; TimelineFrameCache.Clear();
-                for (int frame = 0; frame < PsdTachieFixture.Frames; frame++)
+                for (int frame = 0; frame < frames; frame++)
                 { Update(frame); Draw(); TimelineFrameCache.CompletePendingStore(source); }
                 Console.WriteLine($"SPEEDUP2C_PHASE repeat={repeat}; cold_warm_ms={phase.Elapsed.TotalMilliseconds:R}");
                 Measure("second-play", true, repeat);
@@ -249,7 +255,7 @@ internal static class PsdTachieMeasurements
                     var actual = TimelineFrameCache.CapturePreview(dc, source.Output, view)!;
                     Check(actual.SequenceEqual(reference[frame]), "PSD pixel mismatch at frame " + frame);
                 }
-                Console.WriteLine("SPEEDUP2C_PIXELS repeat=" + repeat + "; frames=900; exact=true; smoothing=4; psd_eyes=3; psd_mouths=3; default_blink=true");
+                Console.WriteLine("SPEEDUP2C_PIXELS repeat=" + repeat + "; frames=" + frames + "; exact=true; smoothing=4; psd_eyes=3; psd_mouths=3; default_blink=true");
             }
         }
         finally

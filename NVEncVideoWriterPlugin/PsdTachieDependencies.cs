@@ -140,8 +140,9 @@ internal static class PsdTachieDependencies
         files = [Path.GetFullPath(path)];
         return true;
     }
-    internal static bool ContainsNative(Scene scene) => scene.Timeline.Items.OfType<TachieItem>()
-        .Any(item => item.Character?.TachieType?.FullName == PluginName);
+    internal static bool ContainsNative(Scene scene, int frame) => scene.Timeline.Items.OfType<TachieItem>()
+        .Any(item => item.Frame <= frame && frame < (long)item.Frame + item.Length
+            && item.Character?.TachieType?.FullName == PluginName);
     internal static bool SafeSource(object timelineSource, Scene scene, int frame, KeyCapture? capture = null)
     {
         try

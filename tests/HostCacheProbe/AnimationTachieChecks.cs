@@ -17,7 +17,7 @@ internal static class AnimationTachieChecks
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     internal static void Run(Assembly host)
     {
-        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback", "metadata-budget", "output-lifetime" })
+        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback", "metadata-budget", "output-lifetime", "idle-inactive" })
         {
             Exception? failure = null;
             using var finished = new ManualResetEventSlim();
@@ -37,6 +37,33 @@ internal static class AnimationTachieChecks
 
     private static void RunCase(Case test, string name, Assembly host)
     {
+        if (name == "idle-inactive")
+        {
+            foreach (var item in test.Fixture.Tachies) { item.Frame = 30; item.Length -= 30; }
+            test.Fixture.Timeline.Items = test.Fixture.Timeline.Items.Add(new ShapeItem { Frame = 0, Length = 30, Layer = 4 });
+            test.Fixture.Timeline.RefreshTimelineLengthAndMaxLayer();
+            TimelineFrameCache.Enabled = false;
+            var idleReference = Enumerable.Range(0, 6).Select(frame => { test.Update(frame); return test.Pixels(); }).ToArray();
+            using var idleTracker = new KeyDependencyTracker(test.Fixture.Scene);
+            Check(SpinWait.SpinUntil(() => { if (!idleTracker.TryCapture(0, out var c, out _)) return false; c!.Dispose(); return true; }, TimeSpan.FromSeconds(5)), "Inactive scene did not become ready");
+            Check(idleTracker.TryCapture(0, out var capture, out var reason), reason);
+            using (capture)
+            using (var batch = new IdleFramePreRenderer.BatchRenderer(idleTracker, capture!.Model))
+            {
+                Check(SpinWait.SpinUntil(() => { if (!batch.CloneTracker.TryCapture(0, out var c, out _)) return false; c!.Dispose(); return true; }, TimeSpan.FromSeconds(5)), "Inactive clone did not become ready");
+                TimelineFrameCache.Enabled = true; TimelineFrameCache.Clear();
+                for (int frame = 0; frame < idleReference.Length; frame++)
+                {
+                    var idleResult = IdleFramePreRenderer.PrimeBatchFrame(idleTracker, test.Fixture.Scene, batch, frame, test.View, () => true, CancellationToken.None, out reason);
+                    Check(idleResult == IdleFramePreRenderer.IdleFrameResult.Rendered, "Inactive tachie stopped idle frame: " + idleResult + "; " + reason);
+                    long hits = TimelineFrameCache.Hits; test.Update(frame);
+                    Check(TimelineFrameCache.Hits == hits + 1 && test.Pixels().SequenceEqual(idleReference[frame]), "Inactive idle hit/pixels differed");
+                }
+                Check(IdleFramePreRenderer.PrimeBatchFrame(idleTracker, test.Fixture.Scene, batch, 30, test.View, () => true, CancellationToken.None, out _) == IdleFramePreRenderer.IdleFrameResult.Normal,
+                    "Visible tachie occupied the host envelope calculation slots");
+            }
+            return;
+        }
         if (name == "rollback") { test.CheckInstallRollback(host); return; }
         if (name == "retained-ini")
         {

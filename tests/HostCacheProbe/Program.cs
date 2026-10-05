@@ -30,6 +30,11 @@ internal static class Program
         bool unread = args.Contains("--unread");
         bool known = HostIntegration.VerifyHost(host, out var hostReason);
         if (!unread) Check(known, "Host binary verification failed: " + hostReason);
+        if (args.Contains("--psd-tachie-large"))
+        {
+            PsdTachieMeasurements.Run(host, large: true);
+            return 0;
+        }
         if (args.Contains("--psd-tachie-check"))
         {
             PsdTachieChecks.Run(host);
@@ -38,6 +43,11 @@ internal static class Program
         if (args.Contains("--psd-tachie-measure"))
         {
             PsdTachieMeasurements.Run(host);
+            return 0;
+        }
+        if (args.Contains("--animation-tachie-large"))
+        {
+            AnimationTachieMeasurements.Run(host, large: true);
             return 0;
         }
         if (args.Contains("--animation-tachie-check"))
