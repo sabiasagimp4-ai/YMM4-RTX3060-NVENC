@@ -82,6 +82,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native check build failed' }
           & tests/bin/Release/NativeChecks.exe
           if ($LASTEXITCODE -ne 0) { throw 'Native checks failed' }
+      - name: Animation tachie before and after (two bounded samples each, WARP)
+        run: |
+          $before = Join-Path $env:RUNNER_TEMP 'animation-tachie-before'
+          git fetch origin 1fbf4c625ca9236fd60fd0b015990a0f87bf15cc
+          git worktree add --detach $before 1fbf4c625ca9236fd60fd0b015990a0f87bf15cc
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create animation baseline' }
+          try {
+            $project = Join-Path $before 'tests/HostCacheProbe/HostCacheProbe.csproj'
+            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --animation-tachie-measure
+            if ($LASTEXITCODE -ne 0) { throw 'Before animation measurements failed' }
+          } finally {
+            git worktree remove --force $before
+          }
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --animation-tachie-measure
+          if ($LASTEXITCODE -ne 0) { throw 'Animation tachie baseline failed' }
       - name: Store, memory policy and idle traversal
         run: |
           dotnet run --project tests/StoreChecksHarness/StoreChecks.csproj -c Release
@@ -236,21 +251,6 @@ jobs:
         run: |
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --animation-tachie-check
           if ($LASTEXITCODE -ne 0) { throw 'Animation tachie checks failed' }
-      - name: Animation tachie before and after (two bounded samples each, WARP)
-        run: |
-          $before = Join-Path $env:RUNNER_TEMP 'animation-tachie-before'
-          git fetch origin 1fbf4c625ca9236fd60fd0b015990a0f87bf15cc
-          git worktree add --detach $before 1fbf4c625ca9236fd60fd0b015990a0f87bf15cc
-          if ($LASTEXITCODE -ne 0) { throw 'Could not create animation baseline' }
-          try {
-            $project = Join-Path $before 'tests/HostCacheProbe/HostCacheProbe.csproj'
-            dotnet run --project $project -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --animation-tachie-measure
-            if ($LASTEXITCODE -ne 0) { throw 'Before animation measurements failed' }
-          } finally {
-            git worktree remove --force $before
-          }
-          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --animation-tachie-measure
-          if ($LASTEXITCODE -ne 0) { throw 'Animation tachie baseline failed' }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

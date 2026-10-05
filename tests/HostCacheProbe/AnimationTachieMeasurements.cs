@@ -205,6 +205,7 @@ internal static class AnimationTachieMeasurements
                 Console.WriteLine($"SPEEDUP2B_PHASE repeat={repeat}; reference_ms={phase.Elapsed.TotalMilliseconds:R}");
                 phase.Restart();
                 TimelineFrameCache.Enabled = true; TimelineFrameCache.Clear();
+                PreviewPerformance.Reset();
                 double updateMs = 0, drawMs = 0, storeMs = 0;
                 var operation = new Stopwatch();
                 for (int frame = 0; frame < AnimationTachieFixture.Frames; frame++)
@@ -212,7 +213,12 @@ internal static class AnimationTachieMeasurements
                     operation.Restart(); Update(frame); updateMs += operation.Elapsed.TotalMilliseconds;
                     operation.Restart(); Draw(); drawMs += operation.Elapsed.TotalMilliseconds;
                     operation.Restart(); TimelineFrameCache.CompletePendingStore(source); storeMs += operation.Elapsed.TotalMilliseconds;
-                    if (frame % 100 == 0) Console.WriteLine($"SPEEDUP2B_PROGRESS repeat={repeat}; frame={frame}; update_ms={updateMs:R}; draw_ms={drawMs:R}; store_ms={storeMs:R}; status={TimelineFrameCache.Status}");
+                    if (frame % 100 == 0)
+                    {
+                        Console.WriteLine($"SPEEDUP2B_PROGRESS repeat={repeat}; frame={frame}; update_ms={updateMs:R}; draw_ms={drawMs:R}; store_ms={storeMs:R}; status={TimelineFrameCache.Status}");
+                        foreach (var row in PreviewPerformance.Snapshot())
+                            Console.WriteLine($"SPEEDUP2B_STAGE frame={frame}; stage={row.Stage}; total_ms={row.TotalTicks * 1000.0 / Stopwatch.Frequency:R}; count={row.SampleCount}");
+                    }
                 }
                 Console.WriteLine($"SPEEDUP2B_PHASE repeat={repeat}; cold_warm_ms={phase.Elapsed.TotalMilliseconds:R}");
                 Measure("second-play", true, repeat);
