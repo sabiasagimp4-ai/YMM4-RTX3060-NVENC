@@ -43,7 +43,7 @@ internal static class FrameCacheKey
             reason = "描画キャッシュの状態検査を省略しました: " + ex.GetType().Name;
             return false;
         }
-        if (!frames!.Whole.Cacheable) return Bypass("立ち絵、外部プラグインのコード、確認できない素材のいずれかを使うアイテムがあります。", out reason);
+        if (!frames!.Whole.Cacheable) return Bypass("描画順を確定できない同一レイヤーの重なり、立ち絵、外部プラグインのコード、確認できない素材のいずれかを含みます。", out reason);
         hasExternalDependencies = paths.Length != 0;
         if (hasExternalDependencies)
             return Bypass("外部素材は背景での内容確認が必要です。", out reason);
@@ -88,7 +88,9 @@ internal static class FrameCacheKey
             var timelines = scene.Scenes.Timelines.Append(scene.Timeline).Distinct().OrderBy(t => t.ID).ToArray();
             var items = timelines.SelectMany(t => t.Items).ToArray();
             if (items.Length > 100_000) return Bypass("プロジェクトがキャッシュ検査の上限を超えています。", out reason);
+            var voiceInputs = FrameVoiceCloneState.Capture(timelines);
             var characters = items.Select(GetCharacter).OfType<Character>().Distinct().OrderBy(c => c.Name, StringComparer.Ordinal).ToArray();
+            var psdInputs = PsdTachieDependencies.Capture(characters);
             var paths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             var resources = new SortedSet<string>(StringComparer.Ordinal);
             var nestedPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -111,12 +113,14 @@ internal static class FrameCacheKey
             var foreignCharacters = new HashSet<Character>();
             foreach (var character in characters)
             {
+                if (SimpleTachieDependencies.Character(character))
+                    characterResources.Add("simple-tachie-code://" + character.TachieType.Assembly.ManifestModule.ModuleVersionId.ToString("D"));
                 var ownPaths = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
                 var ownFonts = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
                 try
                 {
-                    // A character's tachie settings only reach TachieSource, whose frames are never cached: their
-                    // files are not dependencies of any frame (the settings themselves stay in the key).
+                    // Tachie defaults are selected by the item and its active face. Their files belong to that
+                    // selected range, while their settings remain part of the description.
                     var (shared, tachieOnly) = SplitCharacter<IFileItem>(character);
                     var files = shared.SelectMany(part => part.GetFiles()).ToList();
                     var tachieFiles = tachieOnly.SelectMany(part => part.GetFiles());
@@ -152,21 +156,39 @@ internal static class FrameCacheKey
                     // (TimelineSource picks them per frame, 4.56.1.0), so other frames stay cacheable; in another
                     // timeline it disables the scene item frames that draw it. Its files are then never needed.
                     bool tachie = item is TachieItem;
+                    FrameDependencyIndex.FileRange[]? fileRanges = null;
+                    bool simple = false;
+                    if (item is TachieItem simpleItem)
+                        simple = SimpleTachieDependencies.TryRanges(simpleItem, timeline, out fileRanges);
+                    bool animation = false;
+                    string[] animationFiles = [];
+                    if (root && item is TachieItem animationItem)
+                        animation = AnimationTachieDependencies.TryFiles(animationItem, timeline, out animationFiles);
+                    bool psd = false;
+                    string[] psdFiles = [];
+                    if (root && item is TachieItem psdItem)
+                        psd = PsdTachieDependencies.TryFiles(psdItem, timeline, out psdFiles);
+                    bool supportedTachie = simple || animation || psd;
+                    bool animationCharacter = AnimationTachieDependencies.Character(GetCharacter(item));
+                    bool simpleCharacter = SimpleTachieDependencies.Character(GetCharacter(item));
                     // Code this plugin did not read renders a plugin's item type, a plugin's shape, and (below) a
                     // plugin's effect, brush or transition: only the frames showing such an item are rendered normally
                     // (CompositeItemPicker draws an item only at its own frames; transitions and scene items are
                     // followed by FrameDependencyIndex).
-                    bool uncacheable = tachie || !code.Knows(item.GetType())
+                    bool uncacheable = tachie && !supportedTachie || !code.Knows(item.GetType())
                         || item is ShapeItem shape && !code.Knows(shape.ShapeType2)
                         || item is TransitionItem transition && transition.TransitionType is { } transitionType && !code.Knows(transitionType)
                         || GetCharacter(item) is { } character && foreignCharacters.Contains(character);
-                    bool session = false, culture = false;
+                    bool session = animation || psd, culture = false;
+                    if (psd) { itemResources.Add(PsdTachieDependencies.Resource(psdInputs.Single(input => ReferenceEquals(input.Character, GetCharacter(item))))); itemResources.Add(PsdTachieDependencies.SessionResource + "/" + RuntimeHelpers.GetHashCode(item)); }
+                    if (animation) itemResources.Add(AnimationTachieDependencies.SessionResource + "/" + RuntimeHelpers.GetHashCode(item));
                     string[]? frameFiles = null;
                     try
                     {
                         if (!tachie)
                         {
-                            foreach (var file in item.GetFiles()) AddPath(file, itemPaths);
+                            foreach (var file in simpleCharacter && item is VoiceItem or TachieFaceItem
+                                ? SimpleTachieDependencies.FilesWithoutFace(item) : item.GetFiles()) AddPath(file, itemPaths);
                             if (item is VoiceItem voice && !string.IsNullOrWhiteSpace(voice.FilePath)) AddPath(voice.FilePath, itemPaths);
                             // A numbered image played as a video (ImageSequence): every file it shows is fingerprinted;
                             // a root frame depends on the one image it shows, a scene item's frames on all of them.
@@ -182,10 +204,23 @@ internal static class FrameCacheKey
                                 else uncacheable = true;
                             }
                         }
-                        foreach (var resource in item.GetResources())
+                        else if (supportedTachie && item is TachieItem supportedItem)
+                        {
+                            foreach (var effect in supportedItem.VideoEffects.OfType<IFileItem>())
+                                foreach (var file in effect.GetFiles()) AddPath(file, itemPaths);
+                            if (animation) foreach (string file in animationFiles) AddPath(file, itemPaths);
+                            if (psd) foreach (string file in psdFiles) AddPath(file, itemPaths);
+                            if (simple) paths.UnionWith(fileRanges!.SelectMany(range => range.Files));
+                            if (!root && simple) itemPaths.UnionWith(fileRanges!.SelectMany(range => range.Files));
+                        }
+                        foreach (var resource in simpleCharacter && item is VoiceItem or TachieFaceItem
+                            ? SimpleTachieDependencies.ResourcesWithoutFace(item) : item.GetResources())
                         {
                             uncacheable |= Note(ClassifyResource(resource.Key, code), ref audioForeign);
-                            AddResource(resource, tachie ? Unused() : itemPaths, itemResources, itemFonts);
+                            // The audited simple parameters report the editor's directory as a Tachie resource.
+                            // It is not a file the source reads; actual selected faces are listed above.
+                            bool directory = (simpleCharacter || animationCharacter) && resource.ResourceType == TimelineResourceType.Tachie;
+                            AddResource(resource, directory || tachie && !supportedTachie ? Unused() : itemPaths, itemResources, itemFonts);
                         }
                         // Randomness YMM4 seeds with object identities (see IdentitySeeds), and text drawn by code
                         // outside YMM4's own assemblies (DrawnText).
@@ -197,7 +232,7 @@ internal static class FrameCacheKey
                             itemResources.Add("identity://" + string.Join(",", seeds));
                             session = true;
                         }
-                        foreach (string font in drawn.Fonts) AddFont(font, tachie ? Unused() : itemPaths, itemResources, itemFonts);
+                        foreach (string font in drawn.Fonts) AddFont(font, tachie && !supportedTachie ? Unused() : itemPaths, itemResources, itemFonts);
                         if (drawn.Culture)
                         {
                             itemResources.Add(CultureResource());
@@ -218,10 +253,11 @@ internal static class FrameCacheKey
                         // A font file that is not local, a remote file, or a plugin item failing to list its files.
                         uncacheable = true;
                     }
-                    if (customReaders && itemPaths.Any(path => !itemFonts.Contains(path))) uncacheable = true;
+                    if (customReaders && (itemPaths.Any(path => !itemFonts.Contains(path)) || simple && fileRanges!.Any(range => range.Files.Length != 0))) uncacheable = true;
                     paths.UnionWith(itemPaths);
                     resources.UnionWith(itemResources);
-                    if (root) rootDependencies.Add(new(itemPaths, itemResources) { Uncacheable = uncacheable, Session = session, Culture = culture, FrameFiles = frameFiles });
+                    if (root) rootDependencies.Add(new(itemPaths, itemResources) { Uncacheable = uncacheable, Session = session, Culture = culture,
+                        FrameFiles = frameFiles, FileRanges = simple ? fileRanges : null });
                     else
                     {
                         nestedPaths.UnionWith(itemPaths);
@@ -239,7 +275,7 @@ internal static class FrameCacheKey
             var loaders = SettingsBase<PluginLoaderSettings>.Default;
             var snapshot = new
             {
-                Format = 2,
+                Format = 3,
                 Host = typeof(Scene).Assembly.ManifestModule.ModuleVersionId,
                 PluginApi = typeof(CacheProvider).Assembly.ManifestModule.ModuleVersionId,
                 Root = scene.ID,
@@ -264,9 +300,14 @@ internal static class FrameCacheKey
                     Audio = SourceReaderIdentities(sourceReaders[2]),
                 },
             };
-            model = YukkuriMovieMaker.Json.Json.GetJsonText(snapshot);
+            model = FrameDescriptionJson.Serialize(snapshot, items.OfType<VoiceItem>()
+                .Where(FrameVoiceCloneState.CanShare).Select(voice => voice.VoiceCache).OfType<byte[]>(),
+                voiceInputs.Where(input => FrameVoiceCloneState.CanShare(input.Live)).Select(input =>
+                    $"Timelines[{input.TimelineIndex}].Items[{input.ItemIndex}].VoiceCache").ToHashSet(StringComparer.Ordinal));
+            FrameVoiceCloneState.Bind(model, voiceInputs);
+            PsdTachieDependencies.Bind(model, psdInputs);
             if (model.Length > MaximumModelCharacters)
-                return Bypass("プロジェクトの描画状態がキャッシュ検査の上限を超えています。", out reason);
+                return Bypass($"プロジェクトの描画状態がキャッシュ検査の上限を超えています（埋め込みデータ {FrameDescriptionJson.EmbeddedBytesCount(model) / 1024:N0} KiB、うちボイス {items.OfType<VoiceItem>().Sum(voice => (long)(voice.VoiceCache?.Length ?? 0)) / 1024:N0} KiB）。", out reason);
             // Runtime types in polymorphic parameters and effects are checked while the model is split (strings stay
             // strings, so distinct texts never serialize to the same token): a plugin's type disables the item,
             // timeline or character holding it; elsewhere (project-wide settings) the whole project.
@@ -296,6 +337,12 @@ internal static class FrameCacheKey
             // The MIDI reader YMM4 ships (Community) synthesizes with its own settings and SoundFont files, which the
             // key does not hold: frames that read audio render normally.
             audioForeign |= paths.Any(IsMidi);
+            // Nested frames cannot be certified if a referenced timeline can draw ties
+            // in resource insertion order. Wide dependencies conservatively include it.
+            nestedUncacheable |= timelines.Where(timeline => !ReferenceEquals(timeline, scene.Timeline)).Any(timeline =>
+                FrameDependencyIndex.HasPotentialOrderAmbiguity(timeline.Items.OfType<IVideoItem>().Select(item =>
+                    new FrameDependencyIndex.Entry(item.Frame, item.Length, false, false, string.Empty, [],
+                        Layer: item.Layer, AlwaysOnTop: item.IsAlwaysOnTop))));
             // Wide frames (scene items, audio spectrum) read other timelines and the audio: a plugin's audio effect
             // anywhere reaches them.
             frames = DescribeFrames(split, rootItems, rootDependencies, characterPaths, nestedPaths, nestedResources,
@@ -311,7 +358,7 @@ internal static class FrameCacheKey
     }
 
     // A "$type" outside the host and plugin API is a plugin's code, except where no cached frame reads it: tachie
-    // parameters only reach TachieSource (tachie frames are never cached), and voice parameters only make the voice's
+    // parameters reach only their separately audited tachie (unknown tachie frames are bypassed), and voice parameters make the voice's
     // audio, a fingerprinted file (no video renderer reads them: TimelineSource, JimakuSource, 4.56.1.0). Audio
     // effects only reach frames that read audio.
     private static FrameModelSplit.TypeUse ClassifyType(string type, IReadOnlyList<string> path, KnownCode code)
@@ -327,7 +374,7 @@ internal static class FrameCacheKey
     }
 
     // Resources naming a plugin's code: ve:// (video effect), ae:// (audio effect), plugin:// (shape, transition,
-    // brush, voice, tachie). Voice and tachie plugins draw nothing a cached frame shows (see ClassifyType).
+    // brush, voice, tachie). Tachie admission is checked separately against exact bundled code and parameters.
     private static FrameModelSplit.TypeUse ClassifyResource(string resource, KnownCode code)
     {
         int scheme = resource.IndexOf("://", StringComparison.Ordinal);
@@ -501,6 +548,7 @@ internal static class FrameCacheKey
         internal bool Session { get; set; }
         internal bool Culture { get; set; }
         internal string[]? FrameFiles { get; init; }
+        internal FrameDependencyIndex.FileRange[]? FileRanges { get; init; }
     }
 
     // How a random move serializes (StringEnumConverter): the safety net for one the walk did not reach.
@@ -571,7 +619,8 @@ internal static class FrameCacheKey
             bool wide = item is SceneItem || text.Contains("AudioSpectrum", StringComparison.Ordinal);
             entries[i] = new(item.Frame, item.Length, item is TransitionItem, wide, FrameDependencyIndex.Hash(identity),
                 rootDependencies[i].Paths.ToArray(), rootDependencies[i].Uncacheable, rootDependencies[i].Session, rootDependencies[i].Culture,
-                rootDependencies[i].FrameFiles);
+                rootDependencies[i].FrameFiles, item is IVideoItem ? item.Layer : null,
+                item is IVideoItem video && video.IsAlwaysOnTop, rootDependencies[i].FileRanges);
         }
         return new FrameDependencyIndex(FrameDependencyIndex.Hash(global), characterPaths,
             FrameDependencyIndex.Hash(nested + "\n" + string.Join("\n", nestedResources)), nestedPaths, entries, nestedUncacheable, nestedSession,
@@ -582,6 +631,7 @@ internal static class FrameCacheKey
     {
         VoiceItem voice => voice.Character,
         TachieItem tachie => tachie.Character,
+        TachieFaceItem face => face.Character,
         _ => null,
     };
 

@@ -45,6 +45,34 @@ internal static class HostContractChecks
         Check(verdict.Baseline == "1.0" && !verdict.Has(decoder) && verdict.Features.Count == all.Count - 1
             && verdict.Problems[decoder].Contains("変更 Decoder", StringComparison.Ordinal), "A changed decoder must only turn its own feature off");
 
+        var changedSimple = Parts();
+        changedSimple[HostContracts.SimpleTachie]["X|simple-tachie"] = "changed";
+        verdict = HostContracts.Evaluate(changedSimple, [new("1.0", Frozen(baseline))]);
+        Check(!verdict.Has(HostContracts.SimpleTachie) && verdict.Has(HostContracts.Core) && verdict.Has(HostContracts.Preview),
+            "Changed simple tachie code must disable its feature while preserving ordinary caching");
+        var changedWrapper = Parts();
+        changedWrapper[HostContracts.WrappedSources]["X|wrapped-sources"] = "changed";
+        verdict = HostContracts.Evaluate(changedWrapper, [new("1.0", Frozen(baseline))]);
+        Check(!verdict.Has(HostContracts.SimpleTachie) && verdict.Has(HostContracts.Core), "Simple tachie must require verified source wrappers");
+
+        var changedLipSync = Parts();
+        changedLipSync[HostContracts.LipSync]["X|lip-sync-readiness"] = "changed";
+        verdict = HostContracts.Evaluate(changedLipSync, [new("1.0", Frozen(baseline))]);
+        Check(!verdict.Has(HostContracts.LipSync) && !verdict.Has(HostContracts.AnimationTachie) && !verdict.Has(HostContracts.PsdTachie)
+            && verdict.Has(HostContracts.SimpleTachie) && verdict.Has(HostContracts.Core),
+            "Changed envelope code must disable advanced tachie while preserving simple and ordinary caching");
+        var changedAnimation = Parts();
+        changedAnimation[HostContracts.AnimationTachie]["X|animation-tachie"] = "changed";
+        verdict = HostContracts.Evaluate(changedAnimation, [new("1.0", Frozen(baseline))]);
+        Check(!verdict.Has(HostContracts.AnimationTachie) && verdict.Has(HostContracts.LipSync),
+            "Changed animation assembly must disable animation admission");
+
+        var changedPsd = Parts();
+        changedPsd[HostContracts.PsdTachie]["X|psd-tachie"] = "changed";
+        verdict = HostContracts.Evaluate(changedPsd, [new("1.0", Frozen(baseline))]);
+        Check(!verdict.Has(HostContracts.PsdTachie) && verdict.Has(HostContracts.LipSync) && verdict.Has(HostContracts.AnimationTachie),
+            "PSD changes must disable only PSD, retaining verified lip sync and PNG animation");
+
         var changedPreview = Parts();
         changedPreview[HostContracts.Preview]["X|Player"] = "changed";
         verdict = HostContracts.Evaluate(changedPreview, [new("1.0", Frozen(baseline))]);

@@ -30,6 +30,76 @@ internal static class Program
         bool unread = args.Contains("--unread");
         bool known = HostIntegration.VerifyHost(host, out var hostReason);
         if (!unread) Check(known, "Host binary verification failed: " + hostReason);
+        if (args.Contains("--psd-duplicate-parser") || args.Contains("--psd-duplicate-source"))
+        {
+            PsdTachieChecks.RunDuplicate(host, parser: args.Contains("--psd-duplicate-parser"));
+            return 0;
+        }
+        if (args.Contains("--psd-tachie-large"))
+        {
+            PsdTachieMeasurements.Run(host, large: true);
+            return 0;
+        }
+        if (args.Contains("--psd-tachie-check"))
+        {
+            PsdTachieChecks.Run(host);
+            return 0;
+        }
+        if (args.Contains("--psd-tachie-measure"))
+        {
+            PsdTachieMeasurements.Run(host);
+            return 0;
+        }
+        if (args.Contains("--animation-tachie-large"))
+        {
+            AnimationTachieMeasurements.Run(host, large: true);
+            return 0;
+        }
+        if (args.Contains("--animation-tachie-check"))
+        {
+            AnimationTachieChecks.Run(host);
+            return 0;
+        }
+        if (args.Contains("--animation-tachie-measure"))
+        {
+            AnimationTachieMeasurements.Run(host);
+            return 0;
+        }
+        if (args.Contains("--edit-description-check"))
+        {
+            EditDescriptionChecks.Run(host);
+            return 0;
+        }
+        if (args.Contains("--edit-description-measure") || args.Contains("--edit-description-measure-incremental"))
+        {
+            EditDescriptionMeasurements.Run(host, args.Contains("--edit-description-measure-incremental"));
+            return 0;
+        }
+        if (args.Contains("--idle-parallel-measure"))
+        {
+            IdleParallelMeasurements.Run(host);
+            return 0;
+        }
+        if (args.Contains("--idle-parallel-check"))
+        {
+            IdleParallelMeasurements.RunChecks(host);
+            return 0;
+        }
+        if (args.Contains("--gpu-first-revisit-measure"))
+        {
+            GpuFirstRevisitMeasurements.Run(host);
+            return 0;
+        }
+        if (args.Contains("--gpu-retention-check"))
+        {
+            GpuRetentionChecks.Run(host);
+            return 0;
+        }
+        if (args.Contains("--simple-tachie-measure"))
+        {
+            SimpleTachieMeasurements.Run(host);
+            return 0;
+        }
         if (args.Contains("--preview-performance"))
         {
             PreviewPerformanceChecks.Run(host);
@@ -176,7 +246,8 @@ internal static class ProbeLoader
     internal static IEnumerable<Assembly> Assemblies(Assembly host)
     {
         var assemblies = new List<Assembly> { host, typeof(YukkuriMovieMaker.Plugin.CacheProvider).Assembly };
-        foreach (string name in new[] { "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation", "YukkuriMovieMaker.Plugin.FileSource.WIC" })
+        foreach (string name in new[] { "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation", "YukkuriMovieMaker.Plugin.FileSource.WIC",
+            "YukkuriMovieMaker.Plugin.Tachie.SimpleTachie" })
         {
             string reader = Path.Combine(Path.GetDirectoryName(host.Location)!, name + ".dll");
             var loaded = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == name);
@@ -186,4 +257,3 @@ internal static class ProbeLoader
         return assemblies;
     }
 }
-

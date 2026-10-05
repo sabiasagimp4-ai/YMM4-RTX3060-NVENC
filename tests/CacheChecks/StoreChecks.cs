@@ -94,7 +94,7 @@ internal static class StoreChecks
         File.WriteAllText(stale, "interrupted atomic write");
         File.WriteAllText(unrelated, "preserve me");
         byte[] header = new byte[48];
-        "YMMFRM01"u8.CopyTo(header);
+        "YMMFRM02"u8.CopyTo(header);
         BinaryPrimitives.WriteInt64LittleEndian(header.AsSpan(8), long.MaxValue);
         string currentDirectory = Directory.GetDirectories(directory, "epoch-*").Single();
         File.WriteAllBytes(Path.Combine(currentDirectory, Key(7) + ".ymmframe"), header);

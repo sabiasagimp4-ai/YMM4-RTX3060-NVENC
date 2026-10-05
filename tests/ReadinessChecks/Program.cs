@@ -55,6 +55,7 @@ internal static class Program
             Check(FrameRenderReadiness.TryInstall(update, checks, harmony, out var reason), reason);
             Check(!FrameRenderReadiness.TryInstall(update, checks, harmony, out _), "Second install must be rejected");
             CheckReadyFrame();
+            CheckAuxiliaryReadiness();
             CheckDecoderTimeoutPropagatesToParents();
             CheckSwallowedDecoderException();
             CheckUpdateExceptionIsPreserved();
@@ -164,6 +165,21 @@ internal static class Program
             "Fully decoded frame must be recorded ready");
         Check(!FrameRenderReadiness.WasLastUpdateReady(root, Frame * 6), "Readiness must be bound to the rendered time");
         Check(!FrameRenderReadiness.IsUpdateReady(root), "Scope leaked past Update");
+    }
+
+    private static void CheckAuxiliaryReadiness()
+    {
+        var child = Scene(decoders: 1);
+        var root = Scene(decoders: 1, children: [child]);
+        child.During = _ => FrameRenderReadiness.ObserveAuxiliary(false, "unpublished-lip-sync");
+        Render(root, Frame);
+        Check(CacheLike.Last(child) == false && CacheLike.Last(root) == false,
+            "Unpublished asynchronous input must fail the nested frame and its parent");
+        child.During = _ => FrameRenderReadiness.ObserveAuxiliary(true, "published-lip-sync");
+        Render(root, Frame * 2);
+        Check(CacheLike.Last(child) == true && CacheLike.Last(root) == true, "A published input must recover");
+        FrameRenderReadiness.ObserveAuxiliary(false, "outside-render");
+        Check(FrameRenderReadiness.WasLastUpdateReady(root, Frame * 2), "An idle observation changed a completed frame");
     }
 
     private static void CheckDecoderTimeoutPropagatesToParents()

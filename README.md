@@ -112,6 +112,7 @@ README の画像（バナー・バッジ・カード）は `python tools/readme-
 開発の基準は `main` です。Windows CI でビルド・実ホスト・画素一致・GPU 保持を検証し、別の CI では実 YMM4 の GUI を操作してログを採取しています。AE に近い挙動を目標にしており、再生前キャッシュ、音声と同期したレンダー待機、MFR は未実装です。
 
 - [開発状況・次の課題](docs/AE_CACHE_DEVELOPMENT.md)
+- [目的・invariantsからのアーキテクチャ監査と改善](docs/CACHE_ARCHITECTURE_AUDIT_2026-10-04.md)
 - [AE SDK と現行キャッシュの契約差](docs/AE_CACHE_CONTRACTS.md)
 - [ホスト契約と更新手順](docs/HOST_CONTRACTS.md)
 - [詳細ログの採取と集計](docs/CACHE_DIAGNOSTICS.md)

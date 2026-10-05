@@ -130,6 +130,8 @@ internal static partial class TimelineFrameCache
     }
     // Disk reads queued ahead of the playhead.
     internal static long ReadAheads => Interlocked.Read(ref readAheads);
+    private static long gpuReadAheads;
+    internal static long GpuReadAheads => Interlocked.Read(ref gpuReadAheads);
     // Rendered preview frames shown from the pixels drawn for storing them (the player's Draw blits them instead of
     // evaluating the composition a second time), and those shown copies replaced by the host's output again because
     // the player drew another view.
@@ -150,11 +152,12 @@ internal static partial class TimelineFrameCache
     // Full Update time by path, including deferred work, storing and finalizer cleanup.
     internal static readonly FrameTimeSamples RenderTimes = new(), RamTimes = new(), DiskTimes = new(), LiveTimes = new(), GpuTimes = new();
     internal static FrameCacheStore? StoreIfCreated => store.IsValueCreated ? store.Value : null;
+    internal static Action? BeforeCacheLookupForTests { get; set; }
 
     // Tests only: a store with other budgets or in another folder (the caller disposes it).
     internal static void UseStore(FrameCacheStore replacement)
     {
-        lock (cacheGate) { ClearGpuFrames(); store = new Lazy<FrameCacheStore>(replacement); }
+        lock (cacheGate) { Interlocked.Increment(ref generation); ClearGpuFrames(); store = new Lazy<FrameCacheStore>(replacement); }
     }
     internal static void Clear()
     {
@@ -175,6 +178,7 @@ internal static partial class TimelineFrameCache
     internal static bool TryInstall(Assembly host, Harmony harmony, out string reason)
     {
         var patched = new List<MethodBase>();
+        bool readinessAdded = false;
         try
         {
             var features = HostFeatures.For(host);
@@ -251,11 +255,15 @@ internal static partial class TimelineFrameCache
             }
             if (!FrameRenderReadiness.TryInstall(host, harmony, out reason))
                 throw new NotSupportedException(reason);
+            readinessAdded = true;
+            if (!NativeTachieReadiness.TryInstall(host, harmony, out reason))
+                throw new NotSupportedException(reason);
             reason = string.Empty;
             return true;
         }
         catch (Exception error)
         {
+            if (readinessAdded) FrameRenderReadiness.Uninstall(harmony);
             foreach (var target in patched)
                 try { harmony.Unpatch(target, HarmonyPatchType.All, harmony.Id); } catch { }
             reason = "キャッシュ用フックを接続できません: " + error.GetBaseException().Message;
@@ -296,6 +304,8 @@ internal static partial class TimelineFrameCache
         // Textures of this source's readbacks, reused from frame to frame.
         internal readonly ReadbackPool Pool = new();
         internal bool IsDisposed;
+        internal bool DeviceLost;
+        internal long RecentUpdateTicks;
         internal int ReadAheadFrame = int.MinValue;
         // Read-ahead keys by (frame key, frame) for one environment/usage/view (render thread only): a playing window
         // gains one frame per update, so the others are not composed and hashed again.
@@ -350,9 +360,10 @@ internal static partial class TimelineFrameCache
     private sealed class Pending(SourceState state, Scene scene, IGraphicsDevicesAndContext devices,
         ID2D1CommandList? previousOutput, KeyCapture capture, string liveKey, string? cacheKey,
         long generation, TimeSpan time, string usageKey, PreviewViewport? viewport, bool wantRects, bool rectsReusable, bool playing,
-        string environment, int fps) : IDisposable
+        string environment, int fps, object owner) : IDisposable
     {
         // The render-thread state and frame rate LiveKey/CacheKey were composed with (StillCurrent compares them).
+        internal readonly object Owner = owner;
         internal readonly string Environment = environment;
         internal readonly int Fps = fps;
         internal readonly bool Playing = playing;
@@ -365,6 +376,7 @@ internal static partial class TimelineFrameCache
         internal readonly KeyCapture Capture = capture;
         internal readonly string LiveKey = liveKey;
         internal readonly string? CacheKey = cacheKey;
+        internal readonly FrameCacheStore.Publication Publication = cacheKey is null ? default : store.Value.BeginPublication();
         internal readonly long Generation = generation;
         internal readonly TimeSpan Time = time;
         internal readonly string UsageKey = usageKey;
@@ -407,6 +419,7 @@ internal static partial class TimelineFrameCache
         updateMeasurements.AddOrUpdate(__instance, __state);
         __state.RunsHost = CachePrefix(__instance, time, usage, out var pending);
         __state.Pending = pending;
+        if (__state.RunsHost) RestoreHostOutputBeforeUpdate(__instance);
         __state.HostStarted = PreviewPerformance.Timestamp;
         return __state.RunsHost;
     }
@@ -440,9 +453,13 @@ internal static partial class TimelineFrameCache
             var context = devices.DeviceContext;
             if (!ValidContext(context)) return Bypass("描画コンテキストの状態が対象外のため、通常描画を使用します。");
             var state = sources.GetValue(__instance, _ => new SourceState(scene));
+            if (state.DeviceLost) return Bypass("描画デバイスの再作成を待っているため、通常描画を使用します。");
             string environment = KeyEnvironment(context);
             state.Environment = environment;
             if (!state.Tracker.TryCapture(FrameOf(time, scene), out capture, out var reason, settle: true, background: preview)) return Bypass(reason);
+            if ((!AnimationTachieDependencies.SafeSource(__instance, scene, FrameOf(time, scene))
+                || !PsdTachieDependencies.SafeSource(__instance, scene, FrameOf(time, scene), capture)))
+                return Bypass("立ち絵の画像一覧・付属設定・描画ソースを確認できないため、通常描画を使用します。");
             var traits = modelTraits.GetValue(capture!.Model, static model => new ModelTraits(model));
             string usageKey = exporting ? usageName : PreviewUsage.KeyFor(usageName, traits.ShowOnlyPreview);
             PreviewViewport? viewport = preview && TryGetPreviewViewportForSource(__instance, out var currentViewport)
@@ -454,8 +471,9 @@ internal static partial class TimelineFrameCache
             long revision = capture.Revision;
             var previousOutput = (ID2D1CommandList?)outputField.GetValue(__instance);
             pending = new Pending(state, scene, devices, previousOutput, capture, liveKey, cacheKey,
-                currentGeneration, time, usageKey, viewport, wantRects, traits.RectsReusable, usageName == "Playing", environment, fps);
+                currentGeneration, time, usageKey, viewport, wantRects, traits.RectsReusable, usageName == "Playing", environment, fps, __instance);
             capture = null;
+            BeforeCacheLookupForTests?.Invoke();
             if (preview) PreviewPerformance.End(PreviewStage.KeyGeneration, keyStarted);
             keyMeasured = true;
             using var lookup = preview ? PreviewPerformance.Measure(PreviewStage.CacheLookup) : default;
@@ -481,10 +499,12 @@ internal static partial class TimelineFrameCache
             {
                 TrimGpuFrames(0); // a budget lowered by GpuMemoryController takes effect on this thread
                 if (gpuRetentionEnabled && viewport is not null && cacheKey is not null) state.GpuAdmission.Observe(cacheKey);
+                // The capture's full validation runs last: it is the expensive part, and during playback the key
+                // rarely matches the previous frame's.
                 if (currentGeneration == Interlocked.Read(ref generation) && state.Generation == currentGeneration
                     && state.LastKey == liveKey && (state.LastViewportKey is null || state.LastViewportKey == cacheKey)
                     && state.LastOutput is { NativePointer: not 0 }
-                    && ReferenceEquals(state.LastOutput, previousOutput))
+                    && ReferenceEquals(state.LastOutput, previousOutput) && StillCurrent(pending))
                 {
                     var update = wantRects && traits.RectsReusable && !state.Rects.IsMissing(time)
                         && state.RectsKey == liveKey && state.RectsRevision == revision ? RectsUpdate.Keep : stored;
@@ -501,7 +521,7 @@ internal static partial class TimelineFrameCache
             if (stored is not null && cacheKey is not null && viewport is { } resident && TryRestoreGpu(__instance, pending))
             {
                 // A run of GPU-resident frames still reads the frames after it ahead from disk.
-                ReadAhead(state, scene, time, usageKey, resident, !paused);
+                ReadAhead(state, scene, time, usageKey, resident, !paused, devices);
                 Hit(__instance, pending, stored.Value, recalled);
                 Interlocked.Increment(ref gpuHits);
                 pending.Path = GpuTimes;
@@ -519,7 +539,7 @@ internal static partial class TimelineFrameCache
                 if (found)
                     using (PreviewPerformance.Measure(PreviewStage.CacheRestore)) replaced = TryReplaceFrame(__instance, pending, record);
             }
-            if (viewport is { } view) ReadAhead(state, scene, time, usageKey, view, !paused);
+            if (viewport is { } view) ReadAhead(state, scene, time, usageKey, view, !paused, devices);
             if (replaced)
             {
                 Hit(__instance, pending, stored!.Value, recalled);
@@ -533,7 +553,11 @@ internal static partial class TimelineFrameCache
             __state = pending;
             return true;
         }
-        catch (Exception error) { pending?.Dispose(); return Bypass("キャッシュを使用しませんでした: " + error.GetType().Name); }
+        catch (Exception error)
+        {
+            ObserveDeviceLoss(pending?.State ?? (sources.TryGetValue(__instance, out var failedState) ? failedState : null), error);
+            pending?.Dispose(); return Bypass("キャッシュを使用しませんでした: " + error.GetType().Name);
+        }
         finally
         {
             capture?.Dispose();
@@ -581,14 +605,15 @@ internal static partial class TimelineFrameCache
             if (__state.CacheKey is not null)
                 deferred = __state.Viewport is { } view ? StorePreview(__instance, __state, output, view) : StoreExport(__state, output);
         }
-        catch (Exception error) { status = "フレームの保存に失敗しました: " + error.GetType().Name; }
+        catch (Exception error) { ObserveDeviceLoss(__state.State, error); status = "フレームの保存に失敗しました: " + error.GetType().Name; }
         finally { if (!deferred) __state.Dispose(); }
     }
 
     // Queues disk reads for the frames the player shows next (playback: the next half second; paused: two frames
     // either way, for stepping and scrubbing). Keys come from the current description without leasing files: a read
     // only moves a stored record into RAM, and showing it still needs the exact key of a validated capture.
-    private static void ReadAhead(SourceState state, Scene scene, TimeSpan time, string usage, PreviewViewport viewport, bool playing)
+    private static void ReadAhead(SourceState state, Scene scene, TimeSpan time, string usage, PreviewViewport viewport, bool playing,
+        IGraphicsDevicesAndContext devices)
     {
         try
         {
@@ -621,17 +646,25 @@ internal static partial class TimelineFrameCache
             }
             int queued = store.Value.Prefetch(keys);
             if (queued != 0) Interlocked.Add(ref readAheads, queued);
+            if (playing && viewport.IsPlaying) WarmNextGpuFrame(state, devices, keys, viewport, scene.FPS);
         }
-        catch { } // optional
+        catch (Exception error) { ObserveDeviceLoss(state, error); } // optional
     }
 
-    private static Exception? Finalizer(Exception? __exception, UpdateMeasurement? __state)
+    private static Exception? Finalizer(object __instance, Exception? __exception, UpdateMeasurement? __state)
     {
+        if (__exception is null && sources.TryGetValue(__instance, out var lostState) && lostState.DeviceLost)
+            lostState.Released(); // The bypassed host update released its old displayed borrower.
         if (__state is not null)
         {
             __state.EndHost();
             __state.Pending?.Dispose();
             __state.TotalTicks = PreviewPerformance.Timestamp - __state.Started;
+            if (__state.Pending is { } pending)
+            {
+                pending.State.RecentUpdateTicks = __state.TotalTicks;
+                ObserveDeviceLoss(pending.State, __exception);
+            }
             __state.Pending?.Path?.Add(__state.TotalTicks);
             if (__state.Preview) PreviewPerformance.Add(PreviewStage.TotalUpdate, __state.TotalTicks);
             __state.Completed = __exception is null;
@@ -657,7 +690,8 @@ internal static partial class TimelineFrameCache
         if (!EnabledFor(value.UsageKey == "Exporting") || value.Generation != Interlocked.Read(ref generation)) return false;
         bool valid;
         using (CacheTrace.Measure(files ? "capture-dependency-validation" : "capture-state-validation")) valid = value.Capture.Validate(files);
-        if (!valid) return false;
+        if (!valid || (!AnimationTachieDependencies.SafeSource(value.Owner, value.Scene, FrameOf(value.Time, value.Scene))
+            || !PsdTachieDependencies.SafeSource(value.Owner, value.Scene, FrameOf(value.Time, value.Scene), value.Capture))) return false;
         // The keys are functions of the capture, time, usage and viewport (fixed in Pending), the frame rate and the
         // context's render state: comparing those two is the same check as composing both keys again.
         using var keys = CacheTrace.Measure("render-environment-key-validation");
@@ -802,21 +836,29 @@ internal static partial class TimelineFrameCache
         PreviewViewport viewport, string? expectedModelKey = null) =>
         TryPrimeCore(timelineSource, time, usage, viewport, expectedModelKey);
 
+    // A producer that renders before it stores (the idle pre-renderer) takes this before rendering: a purge or a store
+    // swap after it rejects the frame, however late the producer reaches the commit.
+    internal readonly record struct PrimeTicket(long Generation, FrameCacheStore.Publication Publication);
+    internal static PrimeTicket BeginPrime() => new(Interlocked.Read(ref generation), store.Value.BeginPublication());
+
     // capture: a capture of this frame from a tracker of the source's own scene that the caller holds (the idle
     // pre-renderer's clone capture); without it the source's tracker captures the frame here.
+    // ticket: taken before the frame was rendered (BeginPrime); without it, the purge state when this is called.
     internal static bool TryPrimePreviewIfCurrent(object timelineSource, TimeSpan time, object usage,
-        PreviewViewport viewport, string? expectedModelKey, CancellationToken cancellation, KeyCapture? capture = null) =>
-        TryPrimeCore(timelineSource, time, usage, viewport, expectedModelKey, cancellation, capture);
+        PreviewViewport viewport, string? expectedModelKey, CancellationToken cancellation, KeyCapture? capture = null,
+        PrimeTicket? ticket = null) =>
+        TryPrimeCore(timelineSource, time, usage, viewport, expectedModelKey, cancellation, capture, ticket);
 
     // The idle pre-renderer's own renderer: Updates of it skip the live preview's cache (lookups, keys, stores).
     internal static void ExcludeFromPreviewCache(object sourceOrOwner) =>
         privateSources.AddOrUpdate(GetTimelineSource(sourceOrOwner), new ReadbackPool());
 
     private static bool TryPrimeCore(object timelineSource, TimeSpan time, object usage,
-        PreviewViewport? viewport, string? expectedModelKey, CancellationToken cancellation = default, KeyCapture? provided = null)
+        PreviewViewport? viewport, string? expectedModelKey, CancellationToken cancellation = default, KeyCapture? provided = null,
+        PrimeTicket? ticket = null)
     {
         if (!Enabled || cancellation.IsCancellationRequested) return false;
-        long captureGeneration = Interlocked.Read(ref generation);
+        long captureGeneration = ticket?.Generation ?? Interlocked.Read(ref generation);
         try
         {
             timelineSource = GetTimelineSource(timelineSource);
@@ -848,6 +890,8 @@ internal static partial class TimelineFrameCache
                 var traits = modelTraits.GetValue(capture!.Model, static model => new ModelTraits(model));
                 string usageKey = exporting ? usageName : PreviewUsage.KeyFor(usageName, traits.ShowOnlyPreview);
                 var key = MakeKey(capture.Key, time, scene.FPS, usageKey, context, viewport);
+                var destination = store.Value;
+                var publication = ticket?.Publication ?? destination.BeginPublication();
                 var output = (ID2D1CommandList)outputField.GetValue(timelineSource)!;
                 privateSources.TryGetValue(timelineSource, out var pool); // the idle renderer's textures, reused
                 var record = viewport is { } view ? CapturePreview(context, output, view, pool) : CaptureScene(context, output, scene);
@@ -856,7 +900,7 @@ internal static partial class TimelineFrameCache
                 {
                     if (cancellation.IsCancellationRequested || captureGeneration != generation
                         || !capture.Validate(files: false) || !EnabledFor(exporting)) return false;
-                    if (!store.Value.PutOwned(key, record)) return false;
+                    if (!destination.PutOwned(key, record, publication)) return false;
                     status = viewport is null ? "出力フレームを先読みしました。" : "プレビューのフレームを先読みしました。";
                     return true;
                 }
@@ -961,4 +1005,3 @@ internal static partial class TimelineFrameCache
         }
     }
 }
-

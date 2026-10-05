@@ -7,6 +7,11 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../NVEncVideoWriterPlugin/PsdTachieDependencies.cs" Link="PsdTachieDependencies.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/AnimationTachieDependencies.cs" Link="AnimationTachieDependencies.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/NativeTachieReadiness.cs" Link="NativeTachieReadiness.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/FrameRenderModelComparison.cs" Link="FrameRenderModelComparison.cs" />
+    <Compile Include="../CacheChecks/VoiceDescriptionMeasurements.cs" Link="VoiceDescriptionMeasurements.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameAdmissionHistory.cs" Link="FrameAdmissionHistory.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/FrameCacheEconomics.cs" Link="FrameCacheEconomics.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/ProcessingTraceHooks.cs" Link="ProcessingTraceHooks.cs" />
@@ -36,15 +41,19 @@
     <Compile Include="..\..\NVEncVideoWriterPlugin\CacheBarLayout.cs" Link="CacheBarLayout.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameCacheStore.cs" Link="FrameCacheStore.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameCacheKey.cs" Link="FrameCacheKey.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\SimpleTachieDependencies.cs" Link="SimpleTachieDependencies.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\FrameVoiceCloneState.cs" Link="FrameVoiceCloneState.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FontEnvironment.cs" Link="FontEnvironment.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\ImageSequence.cs" Link="ImageSequence.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\KnownCode.cs" Link="KnownCode.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameModelSplit.cs" Link="FrameModelSplit.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\KeyDependencyTracker.cs" Link="KeyDependencyTracker.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameDependencyIndex.cs" Link="FrameDependencyIndex.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\FrameDependencyIdentity.cs" Link="FrameDependencyIdentity.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FileDependencyLease.cs" Link="FileDependencyLease.cs" />
     <!-- The performance harness drives idle batches with this assembly's TimelineFrameCache (IdleCacheOrder is the plugin's public type). -->
     <Compile Include="..\..\NVEncVideoWriterPlugin\IdleFramePlan.cs" Link="IdleFramePlan.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\IdleWorkerPolicy.cs" Link="IdleWorkerPolicy.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\IdleFramePreRenderer.cs" Link="IdleFramePreRenderer.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\IdleFramePreRenderer.Worker.cs" Link="IdleFramePreRenderer.Worker.cs" />
     <Reference Include="YukkuriMovieMaker"><HintPath>$(YMM4DirPath)YukkuriMovieMaker.dll</HintPath><Private>false</Private></Reference>

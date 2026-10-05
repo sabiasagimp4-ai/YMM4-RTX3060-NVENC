@@ -253,6 +253,7 @@ internal static class HostContent
     }
 
     internal static bool Changed(string path) => changed.ContainsKey(path);
+    internal static void Reject(string path) => changed.TryAdd(Path.GetFullPath(path), 0);
 
     // Tests: as after a restart of YMM4, the file's current content is what it shows.
     internal static void Forget(string path)

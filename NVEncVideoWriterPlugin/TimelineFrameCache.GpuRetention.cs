@@ -27,7 +27,8 @@ internal static partial class TimelineFrameCache
     // Cache owner and active-output borrower share one accounted allocation. Each native wrapper
     // owns a distinct COM reference; eviction never disposes the source's wrapper.
     private sealed class GpuFrame(SourceState owner, string key, ID2D1DeviceContext context,
-        ID2D1CommandList command, long bytes, long generation)
+        ID2D1CommandList command, long bytes, long generation, PooledTarget? target = null,
+        PreviewViewport? viewport = null)
     {
         internal readonly WeakReference<SourceState> Owner = new(owner);
         internal readonly string Key = key;
@@ -36,11 +37,17 @@ internal static partial class TimelineFrameCache
         internal readonly long Bytes = bytes, Generation = generation;
         internal LinkedListNode<GpuFrame>? Node;
         internal int Owners = 2; // retention + currently displayed output
+        internal bool RecycleTarget = true;
         internal void Release()
         {
             if (--Owners != 0) return;
             try { Command.Dispose(); }
-            finally { Interlocked.Add(ref gpuBytes, -Bytes); }
+            finally
+            {
+                Interlocked.Add(ref gpuBytes, -Bytes);
+                if (target is not null && (!RecycleTarget || Context.NativePointer == 0 || target.Bitmap.NativePointer == 0 || viewport is not { } view
+                    || !Owner.TryGetTarget(out var state) || state.IsDisposed || !state.Pool.Return(target, view))) target.Dispose();
+            }
         }
     }
 
@@ -65,7 +72,8 @@ internal static partial class TimelineFrameCache
         while (gpuLru.First is { } node && (gpuRetainedBytes + incoming > gpuRetentionBudget
             || gpuLru.Count + (incoming > 0 ? 1 : 0) > limit)) RemoveGpuFrame(node.Value);
     }
-    private static void RetainUploaded(Pending pending, ID2D1CommandList command, long bytes)
+    private static void RetainUploaded(Pending pending, ID2D1CommandList command, long bytes,
+        PooledTarget? target = null, PreviewViewport? viewport = null)
     {
         if (!gpuRetentionEnabled || bytes > gpuRetentionBudget || pending.CacheKey is null) return;
         // Check every LRU victim required to make room. A one-use scan cannot displace equally
@@ -85,16 +93,18 @@ internal static partial class TimelineFrameCache
             retained = command.QueryInterface<ID2D1CommandList>();
             if (pending.State.GpuFrames.TryGetValue(pending.CacheKey, out var previous)) RemoveGpuFrame(previous);
             TrimGpuFrames(bytes);
-            var frame = new GpuFrame(pending.State, pending.CacheKey, pending.Devices.DeviceContext, retained, bytes, pending.Generation);
+            var frame = new GpuFrame(pending.State, pending.CacheKey, pending.Devices.DeviceContext, retained, bytes, pending.Generation, target, viewport);
             frame.Node = gpuLru.AddLast(frame);
             pending.State.GpuFrames.Add(frame.Key, frame);
             gpuRetainedBytes += bytes;
             pending.State.Bytes = 0; // transfer the existing reservation; do not double-count aliases
             pending.State.ActiveGpuFrame = frame;
+            if (target is not null) pending.State.ShownTarget = null;
             retained = null;
         }
         catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
         {
+            ObserveDeviceLoss(pending.State, error);
             using var failure = CacheTrace.Measure("gpu-retention", "state");
             if (failure is not null) { failure.Outcome = "failed"; failure.Detail = error.GetType().Name; }
         }
@@ -127,6 +137,73 @@ internal static partial class TimelineFrameCache
             }
         }
     }
+
+    // One cached RAM frame per playing update, on the context's owning thread. A peek cannot validate
+    // files, so this only warms storage: serving it still requires TryRestoreGpu's validated capture.
+    private static void WarmNextGpuFrame(SourceState state, IGraphicsDevicesAndContext devices,
+        IEnumerable<string?> keys, PreviewViewport view, int fps)
+    {
+        long bytes = view.FrameBytes;
+        if (!gpuRetentionEnabled || state.DeviceLost || state.RecentUpdateTicks <= 0
+            || state.RecentUpdateTicks > System.Diagnostics.Stopwatch.Frequency / Math.Max(1, fps) / 2) return;
+        long currentGeneration = Interlocked.Read(ref generation), revision = state.Tracker.Revision;
+        foreach (var key in keys.Take(4))
+        {
+            if (key is null) continue;
+            lock (cacheGate)
+                if (state.GpuFrames.ContainsKey(key)) continue;
+                else if (gpuRetainedBytes + bytes > gpuRetentionBudget
+                    || gpuLru.Count >= GpuMemoryPolicy.EntryLimit(gpuRetentionBudget)) return;
+            if (!store.Value.TryGetCached(key, out var record) || !ParseRecord(record.Span, out int width,
+                out int height, out _, out int version, out float dpiX, out float dpiY)
+                || version != 2 || width != view.Width || height != view.Height || dpiX != view.DpiX || dpiY != view.DpiY) continue;
+            if (!Reserve(bytes)) return;
+            ID2D1CommandList? command = null;
+            bool transferred = false;
+            try
+            {
+                using var trace = CacheTrace.Measure("gpu-read-ahead");
+                command = UploadPreview(devices.DeviceContext, record.Span, view);
+                lock (cacheGate)
+                {
+                    if (!Enabled || state.DeviceLost || state.IsDisposed || state.Tracker.Revision != revision
+                        || generation != currentGeneration || state.GpuFrames.ContainsKey(key)
+                        || gpuRetainedBytes + bytes > gpuRetentionBudget
+                        || gpuLru.Count >= GpuMemoryPolicy.EntryLimit(gpuRetentionBudget)) return;
+                    var frame = new GpuFrame(state, key, devices.DeviceContext, command, bytes, currentGeneration) { Owners = 1 };
+                    frame.Node = gpuLru.AddLast(frame); state.GpuFrames.Add(key, frame);
+                    gpuRetainedBytes += bytes; transferred = true;
+                    Interlocked.Increment(ref gpuReadAheads);
+                }
+            }
+            finally { if (!transferred) { command?.Dispose(); Interlocked.Add(ref gpuBytes, -bytes); } }
+            return;
+        }
+    }
+
+    private static bool IsDeviceLoss(Exception error) => unchecked((uint)error.HResult) is
+        0x887A0005 or 0x887A0006 or 0x887A0007 or 0x887A0020 or 0x8899000C;
+
+    // Native output references remain with the host until its normal update/disposal. Lost targets
+    // never return to a drawing pool; a new source/context is required before caching resumes.
+    private static void ObserveDeviceLoss(SourceState? state, Exception? error)
+    {
+        if (state is null || error is null || !IsDeviceLoss(error)) return;
+        lock (cacheGate)
+        {
+            state.DeviceLost = true; state.LastKey = null; state.LastViewportKey = null;
+            foreach (var frame in gpuLru) frame.RecycleTarget = false;
+            ClearGpuFrames(); state.Pool.Reset();
+            foreach (var deferred in state.Deferred) deferred.Readback.Failed();
+            foreach (var deferred in state.Deferred) deferred.Dispose();
+            state.Deferred.Clear();
+            if (state.ShownTarget is { } target) { state.ShownTarget = null; target.Dispose(); }
+            status = "描画デバイスが失われたため、描画器が作り直されるまで通常描画を使用します。";
+        }
+    }
+
+    internal static void NotifyDeviceLossForTests(object source, Exception error)
+    { if (sources.TryGetValue(source, out var state)) ObserveDeviceLoss(state, error); }
     private static bool CommitReplacement(object source, Pending pending, ID2D1CommandList replacement, long bytes, GpuFrame? borrowed)
     {
         if (!StillCurrent(pending) || !sources.TryGetValue(source, out var currentState)

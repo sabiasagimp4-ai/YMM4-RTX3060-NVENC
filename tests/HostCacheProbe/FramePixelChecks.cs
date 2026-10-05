@@ -87,13 +87,22 @@ internal static class FramePixelChecks
                 source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
                 Check(TimelineFrameCache.Hits > oldHits, "Actual source did not hit: " + TimelineFrameCache.Status);
                 oldHits = TimelineFrameCache.Hits;
+                const int ReuseSamples = 200;
+                var reuseTimes = new double[ReuseSamples];
                 var reuseClock = System.Diagnostics.Stopwatch.StartNew();
-                for (int i = 0; i < 8; i++) source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                for (int i = 0; i < ReuseSamples; i++)
+                {
+                    long started = System.Diagnostics.Stopwatch.GetTimestamp();
+                    source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+                    reuseTimes[i] = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                }
                 reuseClock.Stop();
-                Check(TimelineFrameCache.Hits - oldHits == 8, "Repeated source cache hit count changed during timing sample");
-                Console.WriteLine($"Measured TimelineSource.Update: baseline {baselineClock.Elapsed.TotalMilliseconds / 3:F2} ms/update; live reuse {reuseClock.Elapsed.TotalMilliseconds / 8:F2} ms/update (3/8 samples; no performance threshold)");
+                Check(TimelineFrameCache.Hits - oldHits == ReuseSamples, "Repeated source cache hit count changed during timing sample");
+                Array.Sort(reuseTimes);
+                Console.WriteLine($"Measured TimelineSource.Update: baseline {baselineClock.Elapsed.TotalMilliseconds / 3:F2} ms/update; live reuse {reuseClock.Elapsed.TotalMilliseconds / ReuseSamples:F3} ms/update, p50 {reuseTimes[ReuseSamples / 2]:F3} ms, p95 {reuseTimes[ReuseSamples * 95 / 100]:F3} ms (3/{ReuseSamples} samples; no performance threshold)");
                 var cached = TimelineFrameCache.Capture(dc, source.Output, 321, 181, new(-160.5f, -90.5f))!;
                 Check(baseline.SequenceEqual(cached), "Actual background/ShapeItem source pixel parity failed");
+                CheckEditDuringLiveLookup(source, timeline, dc);
                 timeline.VideoInfo.BackgroundColor = System.Windows.Media.Colors.Red;
                 oldHits = TimelineFrameCache.Hits;
                 source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
@@ -117,7 +126,14 @@ internal static class FramePixelChecks
             Console.WriteLine("Actual host automatic source cache: hit/parity/invalidation/GPU cleanup OK");
             CheckExportStore(host, context);
             Check(TimelineFrameCache.GpuBytes == 0, "Export store checks leaked global GPU reservation");
-            if (features.DecoderVerified("YukkuriMovieMaker.Plugin.FileSource.WIC")) CheckImageSequence(host, context, harmony);
+            DrawOrderMeasurements.Run(host, context);
+            if (features.DecoderVerified("YukkuriMovieMaker.Plugin.FileSource.WIC"))
+            {
+                CheckImageSequence(host, context, harmony);
+                FileNotificationSafetyChecks.Run(host, context);
+                if (features.SimpleTachie) SimpleTachiePixelChecks.Run(host);
+                Check(TimelineFrameCache.GpuBytes == 0, "File notification checks leaked global GPU reservation");
+            }
             else Console.WriteLine("Image sequence check skipped: the WIC reader is not trusted on this build");
             if (features is { Preview: true, SelectionRects: true })
             {
@@ -131,6 +147,10 @@ internal static class FramePixelChecks
                 Check(TimelineFrameCache.GpuBytes == 0, "Preview delivery checks leaked global GPU reservation");
                 IdleRandomChecks.Run(host, context);
                 Check(TimelineFrameCache.GpuBytes == 0, "Idle random checks leaked global GPU reservation");
+                VoiceCachePixelChecks.Run(host, context);
+                Check(TimelineFrameCache.GpuBytes == 0, "Voice cache checks leaked global GPU reservation");
+                OperationSequenceChecks.Run(host, context);
+                Check(TimelineFrameCache.GpuBytes == 0, "Operation sequences leaked global GPU reservation");
             }
             if (features.DecoderVerified(mediaFoundation)) CheckBoundaryTimes(host, context, videoPath);
             if (features.DecoderVerified(mediaFoundation)) CheckVideoDecodeFailureIsNotStored(host, context, videoPath);
@@ -145,6 +165,28 @@ internal static class FramePixelChecks
         }
     }
     private static bool SkipLoader() => false;
+
+    private static void CheckEditDuringLiveLookup(ITimelineSource source, Timeline timeline, ID2D1DeviceContext dc)
+    {
+        long hits = TimelineFrameCache.Hits;
+        TimelineFrameCache.BeforeCacheLookupForTests = () =>
+        {
+            TimelineFrameCache.BeforeCacheLookupForTests = null;
+            timeline.VideoInfo.BackgroundColor = System.Windows.Media.Colors.Green;
+        };
+        try
+        {
+            source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+            Check(TimelineFrameCache.Hits == hits, "Edit between capture and live lookup reused stale output");
+            var edited = TimelineFrameCache.Capture(dc, source.Output, 321, 181, new(-160.5f, -90.5f))!;
+            TimelineFrameCache.Enabled = false;
+            source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
+            var fresh = TimelineFrameCache.Capture(dc, source.Output, 321, 181, new(-160.5f, -90.5f))!;
+            Check(edited.SequenceEqual(fresh), "Concurrent-edit fallback differs from fresh host rendering");
+            Console.WriteLine("Host live reuse: edit after capture rejects stale output and matches fresh pixels.");
+        }
+        finally { TimelineFrameCache.BeforeCacheLookupForTests = null; TimelineFrameCache.Enabled = true; }
+    }
 
     // The settings switch the preview cache and the export cache separately (NVENC output is a third switch).
     private static void CheckSeparateSwitches(ITimelineSource source)
@@ -356,7 +398,7 @@ internal static class FramePixelChecks
     }
 
     // A minimal RGBA PNG (one IDAT, no filtering).
-    private static byte[] Png(int width, int height, Func<int, int, (byte R, byte G, byte B, byte A)> pixel)
+    internal static byte[] Png(int width, int height, Func<int, int, (byte R, byte G, byte B, byte A)> pixel)
     {
         var raw = new System.IO.MemoryStream();
         for (int y = 0; y < height; y++)

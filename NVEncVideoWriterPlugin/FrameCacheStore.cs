@@ -24,8 +24,10 @@ internal sealed class FrameCacheStore : IDisposable
     private const int MaxDiskEntries = 4096;
     private const int MaxQueuedOperations = 128;
     private const long MaxQueuedWriteBytes = MaxFrameBytes;
-    private static ReadOnlySpan<byte> Magic => "YMMFRM01"u8;
-    private static ReadOnlySpan<byte> CompressedMagic => "YMMFRZ01"u8;
+    // v2 binds the checksum to the requested content key as well as the decoded pixels.
+    // v1 records cannot prove that association and are discarded during index loading.
+    private static ReadOnlySpan<byte> Magic => "YMMFRM02"u8;
+    private static ReadOnlySpan<byte> CompressedMagic => "YMMFRZ02"u8;
     private readonly object _gate = new();
     private long _version;
     private readonly object _clearGate = new();
@@ -89,6 +91,12 @@ internal sealed class FrameCacheStore : IDisposable
     internal long RamBytes { get { lock (_gate) return _ramBytes; } }
     internal long RamBudget { get { lock (_gate) return _ramBudget; } }
     internal long QueuedWriteBytes { get { lock (_gate) return _queuedWriteBytes; } }
+
+    // A producer captures this before starting work. Content identity answers what the
+    // pixels mean; this permit separately answers whether that work may still publish.
+    internal readonly record struct Publication(FrameCacheStore? Owner, long Generation);
+    // Read without the lock (every cached render takes one): Put compares it again under the lock, with Clear.
+    internal Publication BeginPublication() => new(this, Interlocked.Read(ref _generation));
 
     // Eviction drops our references only: a borrowed hit or queued write still owns immutable pixels.
     // Disk records survive a smaller RAM budget and can be promoted again when memory recovers.
@@ -221,11 +229,16 @@ internal sealed class FrameCacheStore : IDisposable
     // For a freshly captured array the caller never touches again: stored without a snapshot copy.
     internal bool PutOwned(string key, byte[] pixels) => Put(key, pixels, owned: true);
 
-    private bool Put(string key, byte[] pixels, bool owned)
+    // Validation and insertion share _gate with Clear: no check-then-publish race.
+    internal bool PutOwned(string key, byte[] pixels, Publication publication) =>
+        Put(key, pixels, owned: true, publication);
+
+    private bool Put(string key, byte[] pixels, bool owned, Publication? publication = null)
     {
         ArgumentNullException.ThrowIfNull(pixels);
         lock (_gate)
         {
+            if (publication is { } permit && (!ReferenceEquals(permit.Owner, this) || permit.Generation != _generation)) return false;
             if (_disposed || !ValidKey(key) || pixels.Length == 0 || pixels.Length > MaxFrameBytes) return false;
             key = key.ToLowerInvariant();
             if (pixels.LongLength > _ramBudget)
@@ -264,11 +277,11 @@ internal sealed class FrameCacheStore : IDisposable
                 Interlocked.Increment(ref _version);
                 _ramLru.Clear();
                 _ramBytes = 0;
+                long generation = Interlocked.Increment(ref _generation); // RAM-only producers obey the same purge barrier.
+                Monitor.PulseAll(_gate);
                 if (_disposed || _diskWorker is null) return;
                 if (_workerFailed) throw new IOException("The frame cache disk worker stopped before its purge could be persisted.");
 
-                long generation = ++_generation;
-                Monitor.PulseAll(_gate);
                 var retainedClears = new List<DiskOperation>();
                 while (_operations.TryTake(out var pending))
                 {
@@ -513,7 +526,11 @@ internal sealed class FrameCacheStore : IDisposable
                 }
                 else using (CacheTrace.Measure("disk-read-bytes", "io-wall")) file.ReadExactly(pixels);
                 using (CacheTrace.Measure("disk-checksum"))
-                    if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(pixels), header[16..])) throw new InvalidDataException();
+                {
+                    Span<byte> checksum = stackalloc byte[32];
+                    HashRecord(operation.Key, pixels, checksum);
+                    if (!CryptographicOperations.FixedTimeEquals(checksum, header[16..])) throw new InvalidDataException();
+                }
                 if (trace is not null) trace.Outcome = "verified";
             }
             catch (Exception error) when (IsFileFailure(error))
@@ -566,7 +583,7 @@ internal sealed class FrameCacheStore : IDisposable
             Span<byte> header = stackalloc byte[HeaderBytes];
             (compressedLength > 0 ? CompressedMagic : Magic).CopyTo(header);
             BinaryPrimitives.WriteInt64LittleEndian(header[8..], snapshot.LongLength);
-            using (CacheTrace.Measure("disk-checksum")) SHA256.HashData(snapshot, header[16..]);
+            using (CacheTrace.Measure("disk-checksum")) HashRecord(operation.Key, snapshot, header[16..]);
             using (var file = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
                 using (CacheTrace.Measure("disk-write-bytes", "io-wall"))
@@ -786,6 +803,15 @@ internal sealed class FrameCacheStore : IDisposable
     }
 
     private string RecordPath(string key) => Path.Combine(_directory, key + ".ymmframe");
+    // The key is exactly 32 bytes, so its boundary with the payload is unambiguous.
+    // Compression is storage-only: the same decoded pixels have the same identity checksum.
+    private static void HashRecord(string key, ReadOnlySpan<byte> pixels, Span<byte> checksum)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(Convert.FromHexString(key));
+        hash.AppendData(pixels);
+        hash.GetHashAndReset(checksum);
+    }
     private static bool ValidHeader(ReadOnlySpan<byte> header, long fileLength, out int length)
     {
         long size = BinaryPrimitives.ReadInt64LittleEndian(header[8..]);

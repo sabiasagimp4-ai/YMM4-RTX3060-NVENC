@@ -148,10 +148,11 @@ internal static class IdleFramePreRendererChecks
         var scenes = new Scenes(false);
         scenes.AddScene(timeline);
         var live = new Scene(timeline, scenes, []);
-        Check(FrameCacheKey.TryDescribe(live, out var model, out var files, out var reason), reason);
+        var pluginAssembly = typeof(FrameCacheToolPlugin).Assembly;
+        string model = DescribePluginScene(pluginAssembly, live, out var files);
         Check(files.Length == 0, "Test scene unexpectedly acquired external file dependencies");
 
-        var renderer = typeof(FrameCacheToolPlugin).Assembly.GetType("NVEncVideoWriterPlugin.IdleFramePreRenderer", true)!;
+        var renderer = pluginAssembly.GetType("NVEncVideoWriterPlugin.IdleFramePreRenderer", true)!;
         var cloneMethod = renderer.GetMethod("CloneSceneFromModel", BindingFlags.Static | BindingFlags.NonPublic)!;
         var clone = (Scene)cloneMethod.Invoke(null, [model])!;
         Check(!ReferenceEquals(clone, live), "Clone reused the live Scene instance");
@@ -164,7 +165,7 @@ internal static class IdleFramePreRendererChecks
         Check(clone.Timeline.VideoInfo.Width == timeline.VideoInfo.Width && clone.Timeline.VideoInfo.Height == timeline.VideoInfo.Height,
             "Clone changed video dimensions");
         Check(clone.Timeline.Length == timeline.Length, $"Clone changed the timeline length ({clone.Timeline.Length}, live {timeline.Length})");
-        Check(FrameCacheKey.TryDescribe(clone, out var clonedModel, out _, out reason), reason);
+        string clonedModel = DescribePluginScene(pluginAssembly, clone, out _);
         Check(clonedModel == model, "Clone changed the serialized drawing state used for cache identity");
         bootstrap.UnpatchAll(bootstrap.Id);
     }
@@ -178,7 +179,7 @@ internal static class IdleFramePreRendererChecks
         var scenes = new Scenes(false);
         scenes.AddScene(timeline);
         var liveScene = new Scene(timeline, scenes, []);
-        Check(FrameCacheKey.TryDescribe(liveScene, out var model, out _, out var reason), reason);
+        string model = DescribePluginScene(assembly, liveScene, out _);
         var cloneMethod = renderer.GetMethod("CloneSceneFromModel", BindingFlags.Static | BindingFlags.NonPublic)!;
         var cloneScene = (Scene)cloneMethod.Invoke(null, [model])!;
 
@@ -205,7 +206,7 @@ internal static class IdleFramePreRendererChecks
                 using var cancellation = new CancellationTokenSource();
                 cancellation.Cancel();
                 var result = method.Invoke(null,
-                    [cancellation.Token, liveScene, cloneScene, null, TimeSpan.Zero, viewport, liveCapture, cloneCapture]);
+                    [cancellation.Token, liveScene, cloneScene, null, TimeSpan.Zero, viewport, liveCapture, cloneCapture, null]);
                 Check(result is false && Volatile.Read(ref primeCalls) == 0,
                     "Cancelled idle job reached the preview-cache commit");
             }
@@ -226,6 +227,19 @@ internal static class IdleFramePreRendererChecks
         Check(captured, "Could not capture the test scene: " + args[2]);
         capture = (IDisposable)args[1]!;
         return (IDisposable)tracker;
+    }
+
+    // Description payload witnesses are private to the assembly that created the description. These two checks
+    // exercise the actual plugin DLL, so both halves must run there rather than mixing it with the linked harness.
+    private static string DescribePluginScene(Assembly assembly, Scene scene, out string[] files)
+    {
+        var type = assembly.GetType("NVEncVideoWriterPlugin.FrameCacheKey", true)!;
+        var method = type.GetMethod("TryDescribe", BindingFlags.Static | BindingFlags.NonPublic,
+            [typeof(Scene), typeof(string).MakeByRefType(), typeof(string[]).MakeByRefType(), typeof(string).MakeByRefType()])!;
+        object?[] args = [scene, null, null, null];
+        Check((bool)method.Invoke(null, args)!, "Could not describe the plugin scene: " + args[3]);
+        files = (string[])args[2]!;
+        return (string)args[1]!;
     }
 
     // The plugin's KeyCapture is internal to its assembly; read its key by reflection.
