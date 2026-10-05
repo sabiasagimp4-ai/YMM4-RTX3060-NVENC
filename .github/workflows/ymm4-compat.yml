@@ -210,7 +210,7 @@ jobs:
           New-Item -ItemType Directory -Path results -Force | Out-Null
           foreach ($v in -split $env:GROUP) {
             Write-Output "::group::YMM4 $v"
-            & $bash tools/ci/fetch-ymm4.sh $v app --top
+            & $bash tools/ci/fetch-ymm4.sh $v app --app
             if ($LASTEXITCODE -ne 0) {
               [IO.File]::WriteAllText("$PWD\results\$v.scan.json", '{"error":"download failed"}')
               Write-Output '::endgroup::'
@@ -225,6 +225,7 @@ jobs:
             }
             Write-Output '::endgroup::'
           }
+          exit 0 # a version that could not be checked is recorded as such, not as a failed job
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -258,7 +259,7 @@ jobs:
         shell: bash
         env:
           YMM4_FETCH_PRUNE: '1'
-        run: tools/ci/fetch-ymm4.sh "${{ matrix.version }}" app --top
+        run: tools/ci/fetch-ymm4.sh "${{ matrix.version }}" app --app
       - name: Media Foundation and test video
         continue-on-error: true
         run: |

@@ -5,10 +5,12 @@
 #   Application Files/YukkuriMovieMaker_A_B_C_D/<File> -> each file, checked against Hash (base64) and Size
 # Usage: fetch-ymm4.sh list
 #        fetch-ymm4.sh manifest <version>  (the file list with hashes and sizes, as JSON)
-#        fetch-ymm4.sh <version|latest> <destination> [--dlls|--top|--scan|--match <regex>]
+#        fetch-ymm4.sh <version|latest> <destination> [--dlls|--top|--app|--scan|--match <regex>]
 #          --dlls: only the top-level YukkuriMovieMaker*.dll; --top: the files of the application folder itself
 #          (not Resources and other subfolders, which hold voice data and dictionaries); --scan: the top-level
-#          YukkuriMovieMaker*.dll and the runtime configuration (tools/compat); --match: files whose path matches
+#          YukkuriMovieMaker*.dll and the runtime configuration (tools/compat); --app: the files of --top whose names
+#          are ASCII (enough to start YMM4; curl in Git Bash on Windows cannot write the Japanese-named text files);
+#          --match: files whose path matches
 # Prints the resolved version on the last line. For CI only; the binaries are never committed.
 set -euo pipefail
 BASE=${YMM4_UPDATE_BASE:-https://manjubox.net/Install/YukkuriMovieMaker_v4_Lite}
@@ -24,6 +26,7 @@ dest=${2:?destination directory}
 filter='.'
 [ "${3:-}" = --dlls ] && filter='^YukkuriMovieMaker[^\\\\]*\.dll$'
 [ "${3:-}" = --top ] && filter='^[^\\\\]+$'
+[ "${3:-}" = --app ] && filter='^[ -\[\]-~]+$'
 [ "${3:-}" = --scan ] && filter='^((YukkuriMovieMaker|Vortice\.|SharpGen\.)[^\\\\]*\.dll|Newtonsoft\.Json\.dll|YukkuriMovieMaker\.runtimeconfig\.json)$'
 [ "${3:-}" = --match ] && filter=${4:?regex}
 [ "$version" = latest ] && version=$(versions | head -1)
