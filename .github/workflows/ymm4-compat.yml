@@ -67,7 +67,7 @@ jobs:
       - uses: actions/checkout@v4
       - id: plan
         env:
-          MODE: ${{ inputs.versions || (github.event_name == 'push' && '4.56.1.0 4.56.0.1 4.50.0.0 4.47.0.0 4.46.1.7 4.23.0.0') || 'new' }}
+          MODE: ${{ inputs.versions || (github.event_name == 'push' && '4.56.1.0 4.23.0.0') || 'new' }}
         run: |
           tools/ci/fetch-ymm4.sh list > server.txt
           echo "$(wc -l < server.txt) versions on the update server"
@@ -164,6 +164,8 @@ jobs:
           v=$(echo $TARGETS | cut -d' ' -f1)
           tools/ci/fetch-ymm4.sh manifest "$v" | jq -r '.Files[] | [.File, .Size] | @tsv' \
             | awk -F'\t' '{ n = index($1, "\\"); d = n ? substr($1, 1, n - 1) : "(top)"; s[d] += $2; c[d]++ } END { for (d in s) printf "%8.1f MB %5d files  %s\n", s[d] / 1048576, c[d], d }' | sort -rn
+          tools/ci/fetch-ymm4.sh manifest "$v" | jq -r '.Files[] | select(.File | test("^(Resources|runtimes)\\\\")) | "\(.Size / 1048576 * 10 | floor / 10) MB  \(.File)"' | sort -k1,1nr | head -120
+          tools/ci/fetch-ymm4.sh manifest "$v" | jq -r '.Files[].File' | grep -i -E 'win32|service|\.exe$' || true
       - id: groups
         run: |
           # Oldest first, in up to two groups, each checked in one folder.
