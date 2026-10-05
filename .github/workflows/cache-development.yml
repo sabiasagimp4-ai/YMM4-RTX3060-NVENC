@@ -86,6 +86,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native check build failed' }
           & tests/bin/Release/NativeChecks.exe
           if ($LASTEXITCODE -ne 0) { throw 'Native checks failed' }
+      - name: Duplicate PSD dependency modules reject only affected frames
+        run: |
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --psd-duplicate-parser
+          if ($LASTEXITCODE -ne 0) { throw 'Duplicate PsdParser check failed' }
+          dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --psd-duplicate-source
+          if ($LASTEXITCODE -ne 0) { throw 'Duplicate PSD file-source check failed' }
       - name: PSD tachie pixels, shared settings and envelope completion
         run: |
           dotnet run --project tests/HostCacheProbe/HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:YMM4_DIR" -- $env:YMM4_DIR --psd-tachie-check

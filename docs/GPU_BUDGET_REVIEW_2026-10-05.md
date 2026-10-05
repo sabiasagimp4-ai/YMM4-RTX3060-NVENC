@@ -2,6 +2,8 @@
 
 Claude レビュー §6 に従い、自動配分の物理上限を搭載 dedicated VRAM の 1/2 とする。OS の予算、YMM4 自身の使用量、max(1 GiB, OS 予算の 20%) の余裕、利用者の上限、最大 8 GiB も同時に適用する。12 GB / 8 GB / 4 GB の合成 sample はそれぞれ 6 GB / 4 GB / 2 GB を越えない。測定できた integrated の少量 dedicated VRAM も 1/2 に従う。測定できない WARP は従来の 128 MiB のまま広げない。手動の固定設定は利用者の選択として維持する。
 
+内蔵 GPU でも、測定できた dedicated VRAM が 0 なら自動の GPU 保持上限は 0。少量ならその半分で、128 MiB の下限には引き上げない。GPU 保持をほぼ使えない場合も RAM キャッシュからの表示は利用できる。共有システムメモリを dedicated VRAM とみなして上限を広げない。これは搭載 VRAM の 1/2 を厳守するための意図した仕様である。
+
 旧設定の AutomaticGpuBudget=true / GpuLimitMiB=2048 だけは、初回 Initialize で -1（自動の上限）へ移す。GpuBudgetMigrationVersion=1 を保存し、後から自動・2048 を選んだ場合は再移行しない。手動・2048、手動・0、自動の他の上限は変更しない。既存のプレビュー・出力の switch の移行は別の SettingsVersion として維持する。
 
 YMM4 の SettingsBase は読込時に Initialize するが、自動で Save しないため、PluginSettings.Apply は移行済み設定の初回保存を行う。以後は通常の変更時だけ保存する。

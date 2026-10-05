@@ -60,8 +60,9 @@ internal static class PsdTachieDependencies
         string directory = Path.GetDirectoryName(typeof(Scene).Assembly.Location)!;
         foreach (var (name, mvid) in auxiliaryModules)
         {
-            var assembly = loaded.SingleOrDefault(candidate => NameOf(candidate) == name)
-                ?? Assembly.LoadFrom(Path.Combine(directory, name + ".dll"));
+            var candidates = loaded.Where(candidate => NameOf(candidate) == name).Take(2).ToArray();
+            if (candidates.Length > 1) return false;
+            var assembly = candidates.FirstOrDefault() ?? Assembly.LoadFrom(Path.Combine(directory, name + ".dll"));
             if (assembly.IsCollectible || assembly.ManifestModule.ModuleVersionId != mvid
                 || !string.Equals(Path.GetFullPath(assembly.Location), Path.Combine(directory, name + ".dll"), StringComparison.OrdinalIgnoreCase)) return false;
         }

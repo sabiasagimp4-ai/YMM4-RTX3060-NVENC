@@ -53,3 +53,7 @@ dotnet run --project tests/HostCacheProbe -c Release "-p:YMM4DirPath=D:\YMM4\" -
 立ち絵が表示区間外の先読みは 6 フレームの実 RAM hit と画素一致を追加。表示区間は見送りを検査する。animation はフォルダー時刻を戻した新部品を拒否し、PSD は 100 回の非通知編集を従来の fresh serializer と全値で照合、同値 JSON の再利用、A/B/A の復元を検査する。既存の遅延・失敗・上書き・古い正規化・外部 serializer defaults の検査は残す。
 
 固定の過去 commit を取る 8 手順は workflow_dispatch の measure_baselines=true の時だけ動く。上記の検査・大きな素材の測定は常時動く。PR #14 は main 独立の出力寿命・inactive random idle の regression と各修正の個別除去による失敗を tools/ci/verify-host-output-idle.ps1 で検査する。最終 head の CI・追加計測は各 PR に記録する。
+
+## PSD の同名依存 DLL の反例
+
+`--psd-duplicate-parser` / `--psd-duplicate-source` は、real host の正常な module verdict をキャッシュした後、専用 AssemblyLoadContext に同じ DLL を二重ロードする。PSD の判定が例外なく false へ変わること、立ち絵のない図形の区間が実 RAM hit と全バイト画素一致を保つことを検査する。DLL は検査 process の終了まで載るので、各反例は別 process で実行する。通常 CI では常時実行し、素材の固定 commit の測定とは独立する。

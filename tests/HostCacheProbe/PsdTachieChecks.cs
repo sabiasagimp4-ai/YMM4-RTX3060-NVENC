@@ -15,6 +15,32 @@ using YukkuriMovieMaker.Project.Items;
 internal static class PsdTachieChecks
 {
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+    // Each dependency is checked in a fresh process: the duplicate stays loaded until exit.
+    internal static void RunDuplicate(Assembly host, bool parser)
+    {
+        using var test = new Case(host, false);
+        foreach (var item in test.Fixture.Tachies) { item.Frame = 30; item.Length -= 30; }
+        test.Fixture.Timeline.Items = test.Fixture.Timeline.Items.Add(new ShapeItem { Frame = 0, Length = 30, Layer = 4 });
+        test.Fixture.Timeline.RefreshTimelineLengthAndMaxLayer();
+        test.Update(0); byte[] reference = test.Pixels();
+        Type plugin = test.Fixture.Characters[0].TachieType;
+        Check(PsdTachieDependencies.Verified(plugin) && PsdTachieDependencies.Verified(plugin), "Audited PSD verdict was not cached before duplicate load");
+        string name = parser ? "PsdParser" : "YukkuriMovieMaker.Plugin.FileSource.Psd";
+        var context = new System.Runtime.Loader.AssemblyLoadContext("duplicate-" + name, isCollectible: false);
+        context.LoadFromAssemblyPath(Path.Combine(Path.GetDirectoryName(host.Location)!, name + ".dll"));
+        Check(AppDomain.CurrentDomain.GetAssemblies().Count(assembly => assembly.GetName().Name == name) == 2, "Duplicate dependency control did not load two copies");
+        Check(!PsdTachieDependencies.Verified(plugin) && !PsdTachieDependencies.Verified(plugin), "Duplicate dependency reused the old valid module verdict");
+        Check(PsdTachieDependencies.SharedObjects(test.Fixture.Characters).Length == 0, "Unaudited PSD settings were subscribed");
+        using var tracker = new KeyDependencyTracker(test.Fixture.Scene);
+        Check(SpinWait.SpinUntil(() => { if (!tracker.TryCapture(0, out var capture, out _)) return false; capture!.Dispose(); return true; }, TimeSpan.FromSeconds(5)),
+            "Duplicate PSD disabled an unrelated shape interval");
+        Check(!tracker.TryCapture(30, out var active, out _), "Duplicate PSD frame remained cacheable");
+        active?.Dispose();
+        test.Warm(0);
+        Check(test.Pixels().SequenceEqual(reference), "Unrelated cached shape pixels changed after duplicate load");
+        Console.WriteLine("PSD_DUPLICATE_MODULE: " + name + "; cached verdict invalidated; PSD rejected; unrelated shape RAM hit and exact pixels passed");
+    }
+
     internal static void Run(Assembly host)
     {
         foreach (string name in new[] { "pixels", "hidden-vowels", "notify", "inplace-offset", "inplace-layers", "sidecar", "overwrite", "timeout", "settings-budget", "composite-failure", "preobserved-overwrite", "serializer-defaults", "idle-inactive", "snapshot-encoding", "foreign-enumerable" })
