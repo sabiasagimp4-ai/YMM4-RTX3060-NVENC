@@ -17,7 +17,7 @@ internal static class PsdTachieChecks
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     internal static void Run(Assembly host)
     {
-        foreach (string name in new[] { "pixels", "hidden-vowels", "notify", "inplace-offset", "inplace-layers", "sidecar", "overwrite", "timeout", "settings-budget", "composite-failure", "preobserved-overwrite" })
+        foreach (string name in new[] { "pixels", "hidden-vowels", "notify", "inplace-offset", "inplace-layers", "sidecar", "overwrite", "timeout", "settings-budget", "composite-failure", "preobserved-overwrite", "serializer-defaults" })
         {
             Exception? failure = null;
             using var finished = new ManualResetEventSlim();
@@ -97,6 +97,21 @@ internal static class PsdTachieChecks
         object settings = PsdTachieDependencies.Settings(test.Fixture.Characters[0]);
         object eyes = settings.GetType().GetProperty("EyeAnimations")!.GetValue(settings)!;
         object eye = ((IEnumerable)eyes).Cast<object>().Single();
+        if (name == "serializer-defaults")
+        {
+            string before = PsdTachieDependencies.Snapshot(settings);
+            var original = Newtonsoft.Json.JsonConvert.DefaultSettings;
+            try
+            {
+                Newtonsoft.Json.JsonConvert.DefaultSettings = () => new() { Converters = { new ConstantSettingsConverter() } };
+                Check(Newtonsoft.Json.JsonConvert.SerializeObject(settings) == "\"constant\"", "Global serializer control was not applied");
+                Check(PsdTachieDependencies.Snapshot(settings) == before, "Global JSON defaults changed a PSD dependency snapshot");
+                eye.GetType().GetProperty("Offset")!.SetValue(eye, 2.0);
+                Check(PsdTachieDependencies.Snapshot(settings) != before, "Global JSON defaults hid an actual PSD offset change");
+            }
+            finally { Newtonsoft.Json.JsonConvert.DefaultSettings = original; }
+            return;
+        }
         if (name is "notify" or "inplace-offset" or "inplace-layers" or "settings-budget")
         {
             const int frame = 32; // The active voice supplies AlwaysClose to the native PSD source.
@@ -240,6 +255,12 @@ internal static class PsdTachieChecks
             }
         }
         finally { sessionField.SetValue(core, originalSession); taskField.SetValue(core, originalTask); }
+    }
+    private sealed class ConstantSettingsConverter : Newtonsoft.Json.JsonConverter
+    {
+        public override bool CanConvert(Type type) => type.FullName == PsdTachieDependencies.AssemblyName + ".PsdFileSettings";
+        public override void WriteJson(Newtonsoft.Json.JsonWriter writer, object? value, Newtonsoft.Json.JsonSerializer serializer) => writer.WriteValue("constant");
+        public override object? ReadJson(Newtonsoft.Json.JsonReader reader, Type type, object? value, Newtonsoft.Json.JsonSerializer serializer) => throw new NotSupportedException();
     }
     private static bool FailComposite(ref Vortice.Direct2D1.ID2D1Bitmap? __result) { __result = null; return false; }
     private static void ShortWait(object[] __args) => __args[5] = TimeSpan.Zero;

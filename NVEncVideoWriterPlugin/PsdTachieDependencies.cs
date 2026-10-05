@@ -97,7 +97,11 @@ internal static class PsdTachieDependencies
         }
         foreach (string name in new[] { "EyeAnimations", "MouthAnimations", "MouthVowelAnimations", "Presets" })
             Visit(value.GetType().GetProperty(name)!.GetValue(value), 0);
-        string json = JsonConvert.SerializeObject(value, Formatting.None);
+        // Application-wide JsonConvert.DefaultSettings must not hide a render dependency.
+        using var output = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
+        using (var writer = new JsonTextWriter(output) { Formatting = Formatting.None })
+            JsonSerializer.Create().Serialize(writer, value);
+        string json = output.ToString();
         if (json.Length > 262144) throw new InvalidDataException("PSD settings JSON exceeds the inspection bound");
         return json;
     }
