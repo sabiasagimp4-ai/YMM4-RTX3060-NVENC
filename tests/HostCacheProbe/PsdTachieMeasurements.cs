@@ -89,7 +89,8 @@ internal sealed class PsdTachieFixture : IDisposable
         using var rw = new BinaryWriter(records); using var pw = new BinaryWriter(planes);
         U16(rw, 7);
         string[] names = ["eye.closed", "eye.half", "eye.open", "mouth.closed", "mouth.half", "mouth.open", "body"];
-        for (int layer = 0; layer < names.Length; layer++)
+        // The host composites records in this order. Put the own opaque body behind all facial layers.
+        foreach (int layer in new[] { 6, 0, 1, 2, 3, 4, 5 })
         {
             U32(rw, 0); U32(rw, 0); U32(rw, height); U32(rw, width); U16(rw, 4);
             foreach (int channel in new[] { 0, 1, 2, -1 }) { U16(rw, unchecked((ushort)channel)); U32(rw, pixels + 2); }
