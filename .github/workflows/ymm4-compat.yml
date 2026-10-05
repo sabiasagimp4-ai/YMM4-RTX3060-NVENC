@@ -329,7 +329,8 @@ jobs:
           python3 tools/compat/ymm4_compat.py merge results "$DATA" --plugin "$PLUGIN" --commit "$GITHUB_SHA" --run "$RUN_URL"
           python3 tools/compat/ymm4_compat.py render "$DATA" README.md docs/YMM4_VERSIONS.md
           git diff --stat
-          sed -n '/ymm4-versions:begin/,/ymm4-versions:end/p' README.md >> "$GITHUB_STEP_SUMMARY"
+          sed -n '/ymm4-versions:begin/,/ymm4-versions:end/p' README.md | tee -a "$GITHUB_STEP_SUMMARY"
+          sed -n '/^## 結果/,/^## 実行記録/p' docs/YMM4_VERSIONS.md
       - uses: actions/upload-artifact@v4
         with:
           name: rendered
