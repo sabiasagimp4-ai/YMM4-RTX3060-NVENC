@@ -1,0 +1,37 @@
+name: ymm4-compat
+
+# Temporary reconnaissance: which YMM4 Lite versions does the update server publish, how large are they, and which
+# .NET runtime does each one run on.
+on:
+  push:
+    branches: ['claude/ymm4-nvenc-perf-analysis-5h1aik']
+    paths: ['.github/workflows/ymm4-compat.yml', 'tools/compat/**', 'tools/ci/fetch-ymm4.sh']
+
+permissions:
+  contents: read
+
+jobs:
+  recon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          tools/ci/fetch-ymm4.sh list | tee versions.txt
+          echo "count: $(wc -l < versions.txt)"
+          printf 'version\tfiles\ttotal_MB\ttop_MB\tdlls_MB\truntime\n' > recon.tsv
+          while read -r v; do
+            m=$(tools/ci/fetch-ymm4.sh manifest "$v" 2>/dev/null) || { printf '%s\tno-manifest\n' "$v" >> recon.tsv; continue; }
+            files=$(jq '.Files|length' <<<"$m")
+            total=$(jq '[.Files[].Size]|add/1048576|floor' <<<"$m")
+            top=$(jq '[.Files[]|select(.File|test("^[^\\\\]+$"))|.Size]|add/1048576|floor' <<<"$m")
+            dlls=$(jq '[.Files[]|select(.File|test("^YukkuriMovieMaker[^\\\\]*\\.dll$"))|.Size]|add/1048576|floor' <<<"$m")
+            rt=$(jq -r '[.Files[].File|select(test("runtimeconfig"))]|join(",")' <<<"$m")
+            runtime=-
+            if [ -n "$rt" ]; then
+              rm -rf rc; tools/ci/fetch-ymm4.sh "$v" rc --match '^YukkuriMovieMaker\.runtimeconfig\.json$' >/dev/null 2>&1 || true
+              [ -f rc/YukkuriMovieMaker.runtimeconfig.json ] && runtime=$(jq -c '[.runtimeOptions.tfm] + [(.runtimeOptions.frameworks // [.runtimeOptions.framework])[] | "\(.name) \(.version)"]' rc/YukkuriMovieMaker.runtimeconfig.json)
+            fi
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$v" "$files" "$total" "$top" "$dlls" "$runtime" >> recon.tsv
+          done < versions.txt
+          column -t -s $'\t' recon.tsv
