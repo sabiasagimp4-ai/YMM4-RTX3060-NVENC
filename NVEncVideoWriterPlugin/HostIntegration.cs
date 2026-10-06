@@ -76,7 +76,7 @@ internal static class HostIntegration
                 ["features"] = features is null ? null : new Dictionary<string, object?>
                 {
                     ["basis"] = features.Basis, ["preview"] = features.Preview, ["selectionRects"] = features.SelectionRects,
-                    ["wrappedSources"] = features.WrappedSources, ["rulerBars"] = features.RulerBars,
+                    ["wrappedSources"] = features.WrappedSources, ["rulerBars"] = features.RulerBars, ["identityRandom"] = features.IdentityRandom,
                     ["simpleTachie"] = features.SimpleTachie, ["lipSync"] = features.LipSync,
                     ["animationTachie"] = features.AnimationTachie, ["psdTachie"] = features.PsdTachie,
                     ["decoders"] = features.VerifiedDecoders?.Order(StringComparer.Ordinal).ToArray(),
@@ -222,7 +222,8 @@ internal static class HostIntegration
         evaluation.Has(HostContracts.RulerBars),
         evaluation.Features.Where(f => f.StartsWith(HostContracts.DecoderPrefix, StringComparison.Ordinal))
             .Select(f => f[HostContracts.DecoderPrefix.Length..]).ToHashSet(StringComparer.Ordinal))
-        { SimpleTachie = evaluation.Has(HostContracts.SimpleTachie), LipSync = evaluation.Has(HostContracts.LipSync),
+        { IdentityRandom = evaluation.Has(HostContracts.IdentityRandom),
+            SimpleTachie = evaluation.Has(HostContracts.SimpleTachie), LipSync = evaluation.Has(HostContracts.LipSync),
             AnimationTachie = evaluation.Has(HostContracts.AnimationTachie), PsdTachie = evaluation.Has(HostContracts.PsdTachie) };
 
     // The features the contracts allow, of which the tachie ones only with the bundled tachie assembly that was read

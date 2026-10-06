@@ -98,6 +98,7 @@ internal static class FrameCacheKey
             var rootItems = scene.Timeline.Items.ToArray();
             var rootDependencies = new List<ItemDependencies>(rootItems.Length);
             bool nestedUncacheable = false, nestedSession = false, nestedCulture = false, audioForeign = false;
+            bool identityRandom = HostFeatures.For(typeof(Scene).Assembly).IdentityRandom;
             if (sourceReaders.Length != 3) return Bypass("読み込みプラグインの状態を確認できません。", out reason);
             // Files are read by the file source readers (fonts by DirectWrite). With a reader whose code was not
             // read, the items that read files are rendered normally.
@@ -227,7 +228,9 @@ internal static class FrameCacheKey
                         var drawn = new DrawnText();
                         var seeds = IdentitySeeds(item, out bool randomOrder, drawn);
                         uncacheable |= randomOrder;
-                        if (seeds.Count != 0)
+                        // Keyed by those objects only where YMM4 draws the values from them (HostFeatures.IdentityRandom).
+                        if (seeds.Count != 0 && !identityRandom) uncacheable = true;
+                        else if (seeds.Count != 0)
                         {
                             itemResources.Add("identity://" + string.Join(",", seeds));
                             session = true;

@@ -647,12 +647,14 @@ internal static class Program
 
         // A font named by a control tag is resolved like the item's font, and the user dictionary's asterisk word sets
         // rewrite the drawn text: both are part of the text frames' keys and of no other frame's.
-        var tagged = new TextItem { Frame = 300, Length = 10, Layer = 4, Text = "a<@ymm-cache-tag>b<@> ymm", Font = "Arial" };
+        var tag = HostCompat.FontTag("ymm-cache-tag");
+        var tagged = new TextItem { Frame = 300, Length = 10, Layer = 4, Text = $"a{tag?.Open ?? "<@ymm-cache-tag>"}b{tag?.Close ?? "<@>"} ymm", Font = "Arial" };
         timeline.Items = timeline.Items.Add(tagged);
         string taggedFrame = WaitForFrameKey(tracker, 305);
         var tagFont = new YukkuriMovieMaker.Settings.Font { FontName = "ymm-cache-tag", CanonicalFontName = "Arial", CanonicalFontWeight = YukkuriMovieMaker.Settings.FontWeight.Bold };
         fontSettings.CustomFonts.Add(tagFont);
-        try { Check(WaitForFrameKey(tracker, 305) != taggedFrame, "Mapping a font named by a control tag did not change its frames"); }
+        // Before 4.51 the tag is drawn as text: the font it names is not used.
+        try { Check((WaitForFrameKey(tracker, 305) != taggedFrame) == tag.HasValue, "Mapping a font named by a control tag did not change its frames"); }
         finally { fontSettings.CustomFonts.Remove(tagFont); }
         Check(WaitForFrameKey(tracker, 305) == taggedFrame, "Removing the control tag's font entry did not restore the frames");
         var dictionaryType = typeof(Scene).Assembly.GetType("YukkuriMovieMaker.KanjiToYomi.UserDictionary", true)!;
@@ -749,6 +751,16 @@ internal static class Program
         timeline.Items = timeline.Items.Add(still).Add(shaking).Add(shaken).Add(randomText);
         var scene = new Scene(timeline, scenes, []);
         using var tracker = new KeyDependencyTracker(scene);
+        if (!HostFeatures.For(typeof(Scene).Assembly).IdentityRandom)
+        {
+            // A build where identity-seeded randomness is not known to come from the model (before 4.52.0.2 the random
+            // effects seeded with their renderer's objects): those frames render normally.
+            WaitForFrameKey(tracker, 10);
+            Check(!tracker.TryCapture(70, out _, out _) && !tracker.TryCapture(130, out _, out _) && !tracker.TryCapture(190, out _, out _),
+                "A frame with identity-seeded randomness was keyed on a build that does not draw it from the model");
+            Console.WriteLine("Identity-seeded randomness: not keyed on this build (its frames render normally)");
+            return;
+        }
         string stillKey = WaitForFrameKey(tracker, 10), shakingKey = WaitForFrameKey(tracker, 70), shakenKey = WaitForFrameKey(tracker, 130);
         Check(!tracker.RendersNormally(10) && tracker.RendersNormally(70) && tracker.RendersNormally(130),
             "Frames keyed by object identities were not told apart (the idle pre-renderer must pass them)");

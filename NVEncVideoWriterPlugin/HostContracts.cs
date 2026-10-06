@@ -18,6 +18,7 @@ internal static partial class HostContracts
     internal const string SelectionRects = "selection-rects";
     internal const string WrappedSources = "wrapped-sources";
     internal const string RulerBars = "ruler-bars";
+    internal const string IdentityRandom = "identity-random";
     internal const string SimpleTachie = "simple-tachie";
     internal const string LipSync = "lip-sync-readiness";
     internal const string AnimationTachie = "animation-tachie";
@@ -42,6 +43,8 @@ internal static partial class HostContracts
     // preview player is the Preview feature's part.
     private const string NotEditorUi = @"^(?!YukkuriMovieMaker\.(ViewModels|Views|ItemEditor)\.)(?!YukkuriMovieMaker\.Player\.TimelineVideoPlayer(\+|$))";
     // Where the items, effects and characters whose files the key fingerprints are defined.
+    // Where randomness that is drawn into frames is seeded (and Animation's random move).
+    private const string RandomNamespaces = @"^YukkuriMovieMaker\.(Player\.Video|Project\.Items|Project\.Effects|Shape|Brush|Plugin\.Brush|Transition|Commons\.Animation)(\.|\+|$)";
     private const string ModelNamespaces = @"^YukkuriMovieMaker\.(Project|Player\.Video|Shape|Brush|Plugin\.Brush|Plugin\.Effects|Transition)(\.|\+|$)";
     private static readonly string[] decoderAssemblies =
     [
@@ -125,6 +128,15 @@ internal static partial class HostContracts
                 "YukkuriMovieMaker|YukkuriMovieMaker.ViewModels.TimelineScaleViewModel",
             ],
             [], []),
+        // Randomness YMM4 seeds with object identities (FrameCacheKey.IdentitySeeds) is drawn from the model objects
+        // the key names. Before 4.52.0.2 the random effects (RandomEffectBase) seeded with the renderer's own effect
+        // object, so another renderer of the same scene drew other values. Witnesses: all code that seeds or draws
+        // randomness, or hashes object identities, in the rendering namespaces.
+        new(IdentityRandom, [Core],
+            ["YukkuriMovieMaker|YukkuriMovieMaker.Player.Video.Effects.RandomEffectBase`1"],
+            [],
+            [new(@"^(MathNet\.Numerics\.Random\.MersenneTwister::\.ctor|System\.Random::\.ctor|YukkuriMovieMaker\.Commons\.StatelessRandom::\w+|YukkuriMovieMaker\.Commons\.Animation::GetRandomMoveRate|System\.Object::GetHashCode|System\.Runtime\.CompilerServices\.RuntimeHelpers::GetHashCode)$",
+                model, RandomNamespaces)]),
         new(SimpleTachie, [Core, WrappedSources],
             [
                 "YukkuriMovieMaker|YukkuriMovieMaker.Player.Video.Items.TachieSource+",

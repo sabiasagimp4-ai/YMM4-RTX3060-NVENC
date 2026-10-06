@@ -12,7 +12,7 @@
 
 `HostIntegration` の既知ビルドは配置・MVID・SHA-256を確認する。4.56.1.0が全機能の基準。NVENC出力は `HostExportScope` のメソッド／field構造が一致する版で接続し、出力フックの失敗はキャッシュ全体を停止しない。
 
-4.56.1.0以外のキャッシュは `HostContracts`／`HostFingerprint` が前提コードを機能ごとに照合する。`core`、`preview`、`selection-rects`、`wrapped-sources`、`ruler-bars`、`decoder:<assembly>` に依存関係があり、不一致の機能を通常描画へ落とす。照合の相手は、コードを読んだ版（`HostBaselines.cs`）と、読んだ版との違いを読んだ版（`HostReviewedBuilds.cs`、次の節）。coreが一致する記録の機能を合わせて使う（coreが同じなら、各機能は自分の部品と前提の機能だけで決まる）。照合成功は記録した前提との一致であり、新版全体の実使用保証ではない。
+4.56.1.0以外のキャッシュは `HostContracts`／`HostFingerprint` が前提コードを機能ごとに照合する。`core`、`preview`、`selection-rects`、`wrapped-sources`、`ruler-bars`、`identity-random`、`decoder:<assembly>` に依存関係があり、不一致の機能を通常描画へ落とす。照合の相手は、コードを読んだ版（`HostBaselines.cs`）と、読んだ版との違いを読んだ版（`HostReviewedBuilds.cs`、次の節）。coreが一致する記録の機能を合わせて使う（coreが同じなら、各機能は自分の部品と前提の機能だけで決まる）。照合成功は記録した前提との一致であり、新版全体の実使用保証ではない。
 
 fingerprintは型・基底・interface・field・属性・正規化IL・生成型を対象とする。witnessはusage、他シーン、item picker、素材列挙、描画設定、controller、動画ソース生成等の前提を参照するコードも収集する。対象の変更を小さく見せるためにwitnessを削らない。
 
@@ -24,12 +24,14 @@ fingerprintは型・基底・interface・field・属性・正規化IL・生成�
 
 | 版 | 使う機能 |
 | --- | --- |
-| 4.55.0.0〜4.56.0.1 | core、preview、selection-rects、wrapped-sources、ruler-bars、MF・WIC・FFmpegの完成判定 |
+| 4.55.0.0〜4.56.0.1 | core、preview、selection-rects、wrapped-sources、ruler-bars、identity-random、MF・WIC・FFmpegの完成判定 |
 | 4.54.0.1 | 上からselection-rectsを除く |
-| 4.47.0.0〜4.54.0.0 | 上からFFmpegを除く |
+| 4.52.0.2〜4.54.0.0 | 上からFFmpegを除く |
+| 4.47.0.0〜4.52.0.1 | 上からidentity-randomを除く |
 
 読んだ違いと、その扱い:
 
+- 乱数（`identity-random`）: 4.52.0.1以前のランダム系エフェクト（`RandomEffectBase` のランダム移動・回転・拡大など）は、描画器が作るエフェクトの処理オブジェクト自身を種にする（`GetHashCode()`、`GetRandomMoveRate(this, …)`）。同じシーンでも描画器ごとに別の値になる（実ホストで、2つ目の描画器は30フレームすべてが違った）。4.52.0.2からはアイテムが種で、4.56.1.0と同じくキーに入れたモデルのオブジェクトから決まる。この機能を使わない版では、同一性を種にする乱数を持つアイテム（ランダム移動のアニメーション、ランダム系・クラッシュ・ノイズ等のエフェクト）の区間を通常描画にする。照合の部品は `RandomEffectBase` と、描画の名前空間で乱数を作る・同一性のハッシュを取るすべての型。4.52.0.2〜4.56.0.1では、クラッシュ・ランダム複製・ノイズはアイテムかパラメーター、ランダム移動のアニメーションはAnimation、テキストのランダム順の表示は描画器（以前から通常描画）が種で、`VideoItem`／`VoiceItem` のハッシュは分割時のグループ番号だけ。
 - プレビュー: 4.54.0.1以前のプレイヤーにはズーム・パンがなく（`PreviewDisplayZoom`、`PreviewViewCenter`、`GetVisibleVideoSize`、`CreatePreviewViewTransform` がない）、Drawはcontextの変換のまま出力を (幅/2, 高さ/2) に描く。`TimelineFrameCache` はこの4つがすべてない版では、viewの変換をcontextの変換だけにする（一部だけある版は契約違反として使わない）。
 - 選択枠: 4.54以前は `TimelineItemRects` の要素の型が違い、型の確認で自動的に使わない。
 - FFmpeg: 4.54.0.0以前には、シークした位置が要求時刻より後だったときに戻ってシークし直す処理（`SeekAndDecode`）がない。後のフレームが要求時刻の区間として残り、どのフレームになるかがシークの履歴で変わるため、完成判定に使わない。4.52以前は `streamStartTime` もなく、形の確認で未確認になる。

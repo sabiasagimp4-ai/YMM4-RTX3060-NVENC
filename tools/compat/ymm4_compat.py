@@ -32,6 +32,7 @@ FEATURES = [
     ('selectionRects', '選択枠'),
     ('wrappedSources', '動画などの完成判定'),
     ('rulerBars', 'キャッシュバー'),
+    ('identityRandom', 'ランダム系の効果'),
     ('simpleTachie', 'シンプル立ち絵'),
     ('lipSync', '口パクの完成判定'),
     ('animationTachie', '動く立ち絵'),
@@ -44,7 +45,7 @@ DECODERS = [
 ]
 CONTRACT_NAMES = {
     'core': '描画キャッシュ本体', 'preview': 'プレビュー', 'selection-rects': '選択枠', 'wrapped-sources': '動画などの完成判定',
-    'ruler-bars': 'キャッシュバー', 'simple-tachie': 'シンプル立ち絵', 'lip-sync-readiness': '口パクの完成判定',
+    'ruler-bars': 'キャッシュバー', 'identity-random': 'ランダム系の効果', 'simple-tachie': 'シンプル立ち絵', 'lip-sync-readiness': '口パクの完成判定',
     'animation-tachie': '動く立ち絵', 'psd-tachie': 'PSD 立ち絵',
     **{'decoder:' + assembly: name for assembly, name in DECODERS},
 }
@@ -177,7 +178,8 @@ def judge(entry):
             verdict['note'] = 'NVENC: ' + status['exportProblem']
         features = status.get('features')
         if status.get('cacheAvailable') and features:
-            missing = [name for key, name in FEATURES if not features.get(key)]
+            # A feature the plugin build did not report yet (an older build) is not counted.
+            missing = [name for key, name in FEATURES if not features.get(key, True)]
             decoders = features.get('decoders')
             if decoders is not None:
                 missing += [name for assembly, name in DECODERS if assembly not in decoders]

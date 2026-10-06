@@ -59,7 +59,8 @@ internal static class FramePixelChecks
             Console.WriteLine("Render readiness coverage (verify against host code):");
             foreach (var line in FrameRenderReadiness.Coverage) Console.WriteLine("  " + line);
             const string mediaFoundation = "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation";
-            if (features.DecoderVerified(mediaFoundation))
+            // MF2 is YMM4 4.48 and later.
+            if (features.DecoderVerified(mediaFoundation) && FrameRenderReadiness.Coverage.Any(line => line.StartsWith(FrameRenderReadiness.Mf2TypeName + ":", StringComparison.Ordinal)))
                 Check(FrameRenderReadiness.Coverage.Any(line => line.Contains(": MF2 (", StringComparison.Ordinal)),
                     "No MF2 video source was recognized; video frames would never be cached");
             var timeline = new Timeline();
@@ -153,8 +154,9 @@ internal static class FramePixelChecks
                 OperationSequenceChecks.Run(host, context);
                 Check(TimelineFrameCache.GpuBytes == 0, "Operation sequences leaked global GPU reservation");
             }
-            if (features.DecoderVerified(mediaFoundation)) CheckBoundaryTimes(host, context, videoPath);
-            if (features.DecoderVerified(mediaFoundation)) CheckVideoDecodeFailureIsNotStored(host, context, videoPath);
+            bool mf2 = features.DecoderVerified(mediaFoundation) && FrameRenderReadiness.Coverage.Any(line => line.Contains(": MF2 (", StringComparison.Ordinal));
+            if (mf2) CheckBoundaryTimes(host, context, videoPath);
+            if (mf2) CheckVideoDecodeFailureIsNotStored(host, context, videoPath);
             else Console.WriteLine("Video decode-failure check skipped: the MediaFoundation reader is not trusted on this build");
         }
         finally
@@ -464,6 +466,10 @@ internal static class FramePixelChecks
         // RefreshCurrentFrameWithReload has exception filters Harmony 2.4.2 cannot rebuild; Update itself is hookable.
         var legacyUpdate = legacy.GetMethod("Update", Instance, [typeof(TimeSpan)])!;
         clearCurrentFrame = legacy.GetMethod("ClearCurrentFrame", Instance)!;
+        // Older builds (4.54 and before) have no timeout to simulate, and there Harmony cannot rebuild the legacy Update
+        // either: the plugin leaves that reader unverified, so its frames are never stored anyway.
+        bool legacyHooked = clearCurrentFrame is not null && FrameRenderReadiness.Coverage.Any(line =>
+            line.StartsWith(FrameRenderReadiness.MfLegacyTypeName + ": MF-legacy", StringComparison.Ordinal));
 
         var timeline = new Timeline();
         timeline.VideoInfo.Width = 320; timeline.VideoInfo.Height = 180; timeline.VideoInfo.FPS = 30;
@@ -493,7 +499,7 @@ internal static class FramePixelChecks
 
             var failure = new Harmony("ymm.tests.decode-failure");
             failure.Patch(tryDecode, prefix: new HarmonyMethod(typeof(FramePixelChecks), nameof(FailDecode)));
-            failure.Patch(legacyUpdate, prefix: new HarmonyMethod(typeof(FramePixelChecks), nameof(FailLegacyUpdate)));
+            if (legacyHooked) failure.Patch(legacyUpdate, prefix: new HarmonyMethod(typeof(FramePixelChecks), nameof(FailLegacyUpdate)));
             try
             {
                 TimelineFrameCache.Clear();

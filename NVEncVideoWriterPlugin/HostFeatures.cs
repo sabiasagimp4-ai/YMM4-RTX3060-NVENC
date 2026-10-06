@@ -9,6 +9,8 @@ internal sealed record HostFeatures(string Basis, bool Preview, bool SelectionRe
     IReadOnlySet<string>? VerifiedDecoders)
 {
     internal bool SimpleTachie { get; init; }
+    // Identity-seeded randomness is drawn from the model objects the key names (HostContracts "identity-random").
+    internal bool IdentityRandom { get; init; }
     internal bool LipSync { get; init; }
     internal bool AnimationTachie { get; init; }
     internal bool PsdTachie { get; init; }
@@ -34,7 +36,7 @@ internal sealed record HostFeatures(string Basis, bool Preview, bool SelectionRe
     {
         if (ReferenceEquals(decidedHost, host) && decided is { } features) return features;
         return host.ManifestModule.ModuleVersionId == ReadBuild
-            ? new("4.56.1.0", true, true, true, true, null) { SimpleTachie = true, LipSync = true, AnimationTachie = true, PsdTachie = true }
+            ? new("4.56.1.0", true, true, true, true, null) { IdentityRandom = true, SimpleTachie = true, LipSync = true, AnimationTachie = true, PsdTachie = true }
             // 4.55.1.1 also wraps every video source, but its selection rects and ruler bars are not enabled.
             : new(host.GetName().Version?.ToString() ?? "?", true, false,
                 host.ManifestModule.ModuleVersionId == OlderWrappedBuild, false, null);

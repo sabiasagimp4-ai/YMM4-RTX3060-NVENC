@@ -46,4 +46,14 @@ internal static class HostCompat
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void SetBackgroundColor(VideoInfo info, Color color) => info.BackgroundColor = color;
+
+    // The control tags that name a font for the text between them: <@name>…<@> (YMM4 4.52 and later) or
+    // <s,name>…<s> (4.51). Null before 4.51, which has no control tags.
+    internal static (string Open, string Close)? FontTag(string name)
+    {
+        var parser = typeof(Animation).Assembly.GetType("YukkuriMovieMaker.Commons.ControlTagParser");
+        if (parser is null) return null;
+        return parser.GetMethod("TryParseFontFamilyTag", BindingFlags.NonPublic | BindingFlags.Static) is not null
+            ? ($"<@{name}>", "<@>") : ($"<s,{name}>", "<s>");
+    }
 }

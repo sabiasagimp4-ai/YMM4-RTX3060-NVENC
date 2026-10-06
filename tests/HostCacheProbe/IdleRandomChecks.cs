@@ -44,6 +44,20 @@ internal static class IdleRandomChecks
             // The idle pre-renderer's live renderer is another source over the same scene: it must draw the same values.
             second = Create(host, context, scene);
             int sameSecond = Same(Render(second, timeline, dc, viewport), baseline);
+            if (!HostFeatures.For(host).IdentityRandom)
+            {
+                // Before 4.52.0.2 the random effect seeds with its renderer's own object: the frames are never stored.
+                Check(sameSecond < Frames, "Another renderer drew the same random values on a build marked as seeding with its renderer");
+                TimelineFrameCache.Enabled = true;
+                TimelineFrameCache.Clear();
+                long storedHits = TimelineFrameCache.Hits;
+                Render(player, timeline, dc, viewport);
+                var shown = Render(player, timeline, dc, viewport);
+                Check(TimelineFrameCache.Hits == storedHits && Same(shown, baseline) == Frames,
+                    "Frames with renderer-seeded randomness were shown from the cache");
+                Console.WriteLine($"Random move: another renderer differs in {Frames - sameSecond} of {Frames} frames on this build; its frames render normally");
+                return;
+            }
             Check(sameSecond == Frames, $"Another renderer of the same scene drew other random values ({Frames - sameSecond} of {Frames} frames differ)");
             var copyTimeline = YukkuriMovieMaker.Json.Json.LoadFromText<Timeline>(YukkuriMovieMaker.Json.Json.GetJsonText(timeline))!;
             var copyScenes = HostCompat.NewScenes(); copyScenes.AddScene(copyTimeline);
