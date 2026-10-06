@@ -446,7 +446,7 @@ def issue(data_path, version):
     print(f'| NVENC 出力（取消保護の接続） | {nvenc} |')
     print(f'| 描画キャッシュ | {cache} |')
     print(f'| 備考 | {note or "—"} |')
-    print(f'| この版に対するビルド・キー検査・実ホスト検査 | {word.get(tests.get("build"), tests.get("build"))}・{word.get(tests.get("keys"), tests.get("keys"))}・{word.get(tests.get("probe"), tests.get("probe"))} |')
+    print(f'| リリースと同じビルド・この版でのキー検査・実ホスト検査 | {word.get(tests.get("build"), tests.get("build"))}・{word.get(tests.get("keys"), tests.get("keys"))}・{word.get(tests.get("probe"), tests.get("probe"))} |')
     contracts = (entry.get('scan') or {}).get('contracts') or {}
     if contracts.get('off'):
         print()
