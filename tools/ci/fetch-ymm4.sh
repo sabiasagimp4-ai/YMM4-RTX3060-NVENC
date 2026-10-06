@@ -10,7 +10,8 @@
 #          (not Resources and other subfolders, which hold voice data and dictionaries); --scan: the top-level
 #          YukkuriMovieMaker*.dll and the runtime configuration (tools/compat); --app: what starting YMM4 needs (all
 #          but the FFmpeg and rhubarb programs, the SoundFont and the speech recognition libraries of other
-#          platforms and accelerators, about 350 of 960 MB); --match: files whose path matches
+#          platforms and accelerators, about 350 of 960 MB); --app-ffmpeg: --app and the FFmpeg libraries (not its
+#          programs, about 200 MB more; for reading video with FFmpeg); --match: files whose path matches
 # Prints the resolved version on the last line. For CI only; the binaries are never committed.
 set -euo pipefail
 BASE=${YMM4_UPDATE_BASE:-https://manjubox.net/Install/YukkuriMovieMaker_v4_Lite}
@@ -27,6 +28,7 @@ filter='.'
 [ "${3:-}" = --dlls ] && filter='^YukkuriMovieMaker[^\\\\]*\.dll$'
 [ "${3:-}" = --top ] && filter='^[^\\\\]+$'
 [ "${3:-}" = --app ] && filter='^(?!Resources\\bin\\x64\\(ffmpeg|rhubarb)\\|Resources\\SoundFonts\\|runtimes\\(?!win-x64\\))'
+[ "${3:-}" = --app-ffmpeg ] && filter='^(?!Resources\\bin\\x64\\(ffmpeg\\[^\\]*\.exe$|rhubarb\\)|Resources\\SoundFonts\\|runtimes\\(?!win-x64\\))'
 [ "${3:-}" = --scan ] && filter='^((YukkuriMovieMaker|Vortice\.|SharpGen\.)[^\\\\]*\.dll|Newtonsoft\.Json\.dll|YukkuriMovieMaker\.runtimeconfig\.json)$'
 [ "${3:-}" = --match ] && filter=${4:?regex}
 [ "$version" = latest ] && version=$(versions | head -1)

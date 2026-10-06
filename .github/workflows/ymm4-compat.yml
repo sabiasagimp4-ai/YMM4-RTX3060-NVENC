@@ -283,7 +283,7 @@ jobs:
         shell: bash
         env:
           YMM4_FETCH_PRUNE: '1'
-        run: tools/ci/fetch-ymm4.sh "${{ matrix.version }}" app --app
+        run: tools/ci/fetch-ymm4.sh "${{ matrix.version }}" app --app-ffmpeg
       - name: Media Foundation and test video
         continue-on-error: true
         run: |

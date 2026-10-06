@@ -38,6 +38,18 @@ internal static class FFmpegReaderChecks
             Console.WriteLine("FFmpeg reader check skipped: the FFmpeg reader is not trusted on this build");
             return;
         }
+        // YMM4 finds its FFmpeg libraries next to the running program (AppDirectories, Environment.ProcessPath), which
+        // here is the probe: point FFmpeg at the app's folder first, as YMM4 does at its own (the first call wins).
+        string libraries = Path.Combine(directory, "Resources", "bin", "x64", "ffmpeg");
+        if (!Directory.Exists(libraries) || !Directory.EnumerateFiles(libraries, "avformat-*.dll").Any())
+        {
+            Console.WriteLine("FFmpeg reader check skipped: no FFmpeg libraries in " + libraries);
+            return;
+        }
+        const string Interop = "YukkuriMovieMaker.Interop.FFmpeg";
+        var module = (AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == Interop)
+            ?? Assembly.LoadFrom(Path.Combine(directory, Interop + ".dll"))).GetType("YukkuriMovieMaker.Plugin.FileSource.FFmpeg.Utilities.FFmpegModule", true)!;
+        module.GetMethod("EnsureInitialized", [typeof(string)])!.Invoke(null, [libraries]);
         reader = (IVideoFileSourcePlugin)Activator.CreateInstance(pluginType, nonPublic: true)!;
         var harmony = new Harmony("ymm.tests.ffmpeg-reader");
         harmony.Patch(typeof(VideoFileSourceFactory).GetMethod(nameof(VideoFileSourceFactory.Create))!,
