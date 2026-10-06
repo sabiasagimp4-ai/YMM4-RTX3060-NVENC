@@ -73,27 +73,29 @@ internal static class DrawOrderChecks
                 Check(frames.For(10).Content == swappedFrames.For(10).Content, "Draw order: the key of a frame without a tie names the list order");
 
                 // Cached: each order shows its own picture, also after the other order's frame was stored, and comes back
-                // from the store when the list returns to it. A new renderer's first frames render normally while the
-                // font file is fingerprinted, so each order renders until a frame is restored.
+                // from the store when the list returns to it. One renderer draws them all (a new renderer starts by
+                // fingerprinting the font file, rendering normally meanwhile), each order until a frame is reused.
                 TimelineFrameCache.Enabled = true;
                 TimelineFrameCache.Clear();
-                byte[] Restored(string order)
+                using var cached = NewSource(host, context, scene);
+                var time = scene.Timeline.VideoInfo.GetTimeFrom(30);
+                byte[] Reused(string order, Func<long> counter)
                 {
-                    byte[]? pixels = null;
                     Check(SpinWait.SpinUntil(() =>
                     {
-                        long hits = TimelineFrameCache.RamHits;
-                        pixels = Render(host, context, scene, 30);
-                        return TimelineFrameCache.RamHits > hits;
-                    }, TimeSpan.FromSeconds(10)), $"Draw order ({layers}): frame 30 of the {order} order was not restored from the store: {TimelineFrameCache.Status}");
-                    return pixels!;
+                        cached.Update(time, TimelineSourceUsage.Exporting); TimelineFrameCache.CompletePendingStore(cached);
+                        long before = counter();
+                        cached.Update(time, TimelineSourceUsage.Exporting);
+                        return counter() > before;
+                    }, TimeSpan.FromSeconds(10)), $"Draw order ({layers}): frame 30 of the {order} order was not reused: {TimelineFrameCache.Status}");
+                    return TimelineFrameCache.Capture(context.DeviceContext, cached.Output, Width, Height, new Vector2(-Width / 2f, -Height / 2f))!;
                 }
-                var restored = Restored("first");
+                var reused = Reused("first", () => TimelineFrameCache.Hits);
                 Order(swapped: true);
-                var restoredSwapped = Restored("swapped");
+                var reusedSwapped = Reused("swapped", () => TimelineFrameCache.Hits);
                 Order(swapped: false);
-                var restoredAgain = Restored("first");
-                Check(restored.AsSpan().SequenceEqual(reference) && restoredSwapped.AsSpan().SequenceEqual(swapped) && restoredAgain.AsSpan().SequenceEqual(reference),
+                var restored = Reused("first (from the store)", () => TimelineFrameCache.RamHits);
+                Check(reused.AsSpan().SequenceEqual(reference) && reusedSwapped.AsSpan().SequenceEqual(swapped) && restored.AsSpan().SequenceEqual(reference),
                     $"Draw order ({layers}): a cached frame differs from the host's render of its order");
             }
             if (aligned) Console.WriteLine("Draw order: ties drawn in item-list order in every renderer, keyed by the order, cached per order OK");
@@ -101,12 +103,14 @@ internal static class DrawOrderChecks
         finally { TimelineFrameCache.Enabled = enabled; TimelineFrameCache.Clear(); }
     }
 
+    private static ITimelineSource NewSource(Assembly host, IGraphicsDevicesAndContext context, Scene scene) =>
+        (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [context, scene, null], null)!;
+
     // Frame `frame` of a new renderer that first drew the frames `before`.
     private static byte[] Render(Assembly host, IGraphicsDevicesAndContext context, Scene scene, int frame, params int[] before)
     {
-        var source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [context, scene, null], null)!;
-        using (source)
+        using (var source = NewSource(host, context, scene))
         {
             foreach (int at in before) source.Update(scene.Timeline.VideoInfo.GetTimeFrom(at), TimelineSourceUsage.Exporting);
             source.Update(scene.Timeline.VideoInfo.GetTimeFrom(frame), TimelineSourceUsage.Exporting);
