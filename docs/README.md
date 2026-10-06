@@ -23,6 +23,7 @@
 | [実機検証の手順](RTX3060_HARDWARE_CHECK.md) | GitHub Actions と RTX 3060 の PC での検証の分担と手順 |
 | [実ホスト検証の実行方法](../tests/HostCacheProbe/README.md) | 実際の YMM4 を使う検査（HostCacheProbe）の動かし方 |
 | [リリースノート](release-notes/) | 各リリースの変更点（GitHub の Releases と同じ内容） |
+| [立ち絵とアイテムの重なりの対応計画](TACHIE_PLAN_2026-10-06.md) | グループ制御・シーン・差分合成・付属 INI・同じレイヤーの重なり・まばたき・古い版の立ち絵の計画（進行中） |
 
 自動で作るもの: `YMM4_VERSIONS.md` と `compat/ymm4-versions.json` は ymm4-compat ワークフロー（`tools/compat/ymm4_compat.py`）が、`assets/readme/` は `tools/readme-assets.py` が書きます。手で編集しないでください。
 
