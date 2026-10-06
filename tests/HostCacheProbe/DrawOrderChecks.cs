@@ -73,21 +73,28 @@ internal static class DrawOrderChecks
                 Check(frames.For(10).Content == swappedFrames.For(10).Content, "Draw order: the key of a frame without a tie names the list order");
 
                 // Cached: each order shows its own picture, also after the other order's frame was stored, and comes back
-                // from the store when the list returns to it.
+                // from the store when the list returns to it. A new renderer's first frames render normally while the
+                // font file is fingerprinted, so each order renders until a frame is restored.
                 TimelineFrameCache.Enabled = true;
                 TimelineFrameCache.Clear();
-                long ramHits = TimelineFrameCache.RamHits;
-                var cached = Render(host, context, scene, 30);
-                var restored = Render(host, context, scene, 30);
-                Check(TimelineFrameCache.RamHits > ramHits, $"Draw order ({layers}): frame 30 was not restored from the store: {TimelineFrameCache.Status}");
+                byte[] Restored(string order)
+                {
+                    byte[]? pixels = null;
+                    Check(SpinWait.SpinUntil(() =>
+                    {
+                        long hits = TimelineFrameCache.RamHits;
+                        pixels = Render(host, context, scene, 30);
+                        return TimelineFrameCache.RamHits > hits;
+                    }, TimeSpan.FromSeconds(10)), $"Draw order ({layers}): frame 30 of the {order} order was not restored from the store: {TimelineFrameCache.Status}");
+                    return pixels!;
+                }
+                var restored = Restored("first");
                 Order(swapped: true);
-                var cachedSwapped = Render(host, context, scene, 30);
+                var restoredSwapped = Restored("swapped");
                 Order(swapped: false);
-                ramHits = TimelineFrameCache.RamHits;
-                var restoredAgain = Render(host, context, scene, 30);
-                Check(cached.AsSpan().SequenceEqual(reference) && restored.AsSpan().SequenceEqual(reference) && cachedSwapped.AsSpan().SequenceEqual(swapped)
-                    && restoredAgain.AsSpan().SequenceEqual(reference), $"Draw order ({layers}): a cached frame differs from the host's render of its order");
-                Check(TimelineFrameCache.RamHits > ramHits, $"Draw order ({layers}): the first order's frame did not come back from the store: {TimelineFrameCache.Status}");
+                var restoredAgain = Restored("first");
+                Check(restored.AsSpan().SequenceEqual(reference) && restoredSwapped.AsSpan().SequenceEqual(swapped) && restoredAgain.AsSpan().SequenceEqual(reference),
+                    $"Draw order ({layers}): a cached frame differs from the host's render of its order");
             }
             if (aligned) Console.WriteLine("Draw order: ties drawn in item-list order in every renderer, keyed by the order, cached per order OK");
         }
