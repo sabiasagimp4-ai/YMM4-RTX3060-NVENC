@@ -76,7 +76,13 @@ internal static class IdleRandomChecks
             Console.WriteLine($"Random move: {moving} of {Frames - 1} frames move; a second renderer of the scene draws the same pixels, "
                 + $"a copy of the project differs in {Frames - sameCopy} of {Frames} frames");
 
-            // The idle pre-renderer's batch, frame by frame through its own code, then the paused player.
+            // The idle pre-renderer's batch, frame by frame through its own code, then the paused player (YMM4 4.49 and
+            // later: the pre-renderer needs Scenes(bool) to clone the project).
+            if (!HostCompat.ScenesTakeUndoFlag)
+            {
+                Console.WriteLine("Idle random move skipped: this YMM4 has no idle pre-render");
+                return;
+            }
             TimelineFrameCache.Enabled = true;
             TimelineFrameCache.Clear();
             using var liveTracker = new KeyDependencyTracker(scene);

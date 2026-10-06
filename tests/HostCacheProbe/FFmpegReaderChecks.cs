@@ -140,7 +140,13 @@ internal static class FFmpegReaderChecks
         {
             Console.WriteLine($"{Path.GetFileName(file)}, second pass (frame: shown, the reader's currentTime +currentDuration (streamStartTime), cache status):");
             foreach (string line in trace) Console.WriteLine(line);
-            throw new InvalidOperationException($"{Path.GetFileName(file)}: no FFmpeg frame was ever stored: " + TimelineFrameCache.Status);
+            // MPEG-TS on YMM4 4.54.0.0 (no re-seek): every interval a seek produced begins at the requested time and lasts
+            // past the frames read after it (the host shows other frames there), so none is verifiable. An MP4 always is.
+            if (Path.GetExtension(file) != ".m2ts")
+                throw new InvalidOperationException($"{Path.GetFileName(file)}: no FFmpeg frame was ever stored: " + TimelineFrameCache.Status);
+            Console.WriteLine($"FFmpeg reader ({Path.GetExtension(file)}): none of {order.Length * 4} seek-order frames was verifiable, none stored"
+                + $" (the host drew {hostDiffers} other frames after seeks)");
+            return;
         }
         Console.WriteLine($"FFmpeg reader ({Path.GetExtension(file)}): {served} of {order.Length * 4} seek-order frames from the cache, all equal to the in-order render"
             + (hostDiffers == 0 ? "" : $"; the host itself drew {hostDiffers} other frames after seeks (not stored)"));
