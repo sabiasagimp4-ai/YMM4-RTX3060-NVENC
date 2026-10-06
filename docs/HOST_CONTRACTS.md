@@ -40,7 +40,11 @@ fingerprintは型・基底・interface・field・属性・正規化IL・生成�
 - 文字の制御タグ: 4.50以前にはない（アイテム自身の装飾だけで描く）。4.51の `ControlTagParser.Parse` は字間の引数がなく、`HostApi` がreflectionで呼ぶ。
 - 停止中の先読み: 複製に使う `Scenes(bool)` は4.49から。4.48以前は先読みしない。`VideoInfo.BackgroundColor`（4.52から）は、ある版だけ複製へ写す。
 - フレーム時刻の丸めは4.52.0.8以前で違うが、キーも描画もその版の `VideoInfo` の変換を使うので一致する。
-- 立ち絵: 同梱の立ち絵のMVIDが4.56.1.0と違うため、どの古い版でも使わない（4.55.0.1以前は `LipSyncEnvelopeSession` もない）。起動時の報告も、同梱の立ち絵が読んだものでなければ立ち絵を使わない機能に数える。
+- 立ち絵（2026-10-06）: 契約は同梱の立ち絵のDLLを丸ごと照合するので、照合で確かめたコードと同じと分かったその版のファイル（MVID）を、4.56.1.0のものと同じように受け入れる（`HostFeatures.TachieAssemblies`）。
+  - 4.56.0.0〜4.56.0.1: シンプル・動く・PSD立ち絵とTachieSourceは4.56.1.0と同じ。`lip-sync-readiness` の違いは音声の `EffectedItemSource` が再標本化前の倍率に上限（192000/元のHz）を付けたことだけで、完成判定と決定性は変わらない。4機能を確かめた。
+  - 4.55.1.0〜4.55.1.1: シンプル立ち絵と口パクは4.56.0.xと同じ。動く立ち絵・PSD立ち絵の違いは編集画面の部品（フォルダー・ファイルの選択ボタン、パスの表示変換）だけ。4機能を確かめた。
+  - 4.54.0.1: シンプル立ち絵のDLLは4.55.1.0と同じ、表情の選び方（TimelineSource）も同じ。TachieSourceは音量を描画中に音声から同期で読むが、シンプル立ち絵はボイスの有無（ボイスがないときだけ-1）にしか使わない。Characterに備考が増え、TachieFaceItemのGetAnimatablesが変わったが、描画しない。シンプル立ち絵だけを確かめた。
+  - 使わない版: 4.55.0.0〜4.55.0.1は音量を非同期に計算し、計算が終わるまでボイスがあっても-1（無音）を返す（sessionがない）。4.54.0.1以前の動く・PSD立ち絵は、口パクの音量を描画中に音声から読み、連続した読み出しとシークで読み方が変わり得る。4.54.0.0以前のシンプル立ち絵は表情の画像の選び方（`SimpleTachieSource.GetTachieFilePath`）が違う。
 
 記録を作り直すときは、確かめた版をすべて渡す（`HostContracts.Rules` を変えたときも同じ）。
 
@@ -50,7 +54,7 @@ dotnet run --project tools/HostFingerprint -- reviewed NVEncVideoWriterPlugin/Ho
 
 ## デコード完成判定
 
-シンプル立ち絵の `simple-tachie` はcoreとwrapped-sourcesに依存し、同梱SimpleTachie全体、TachieSource、Character、TachieItem、TachieFaceItem、IFaceItemを追加で照合する。ホストのpickerをそのまま呼んで可視表情を選ぶ。4.56.1.0のSimpleTachieは音量の-1だけを非表示に使い、characterのDirectoryは編集UIでしか読まない。型・同梱配置・MVID `be62ee72-e935-4cca-9bba-eb9de4a27cde` も確認する。既定・ボイス・上の表情の画像は実際に選ばれる区間に入れ、使われないfaceのファイルはそのボイス／faceアイテム自身の描画依存から外す。共通の字幕・音声エフェクトが同じファイルを使う場合はそちらの依存を維持する。番号付き画像とグループの時間対応は未確認のため対象外にする。新しいHarmonyフックは追加していないが、記録済み4.56.1.0の全基準をHostFingerprintで再生成している。
+シンプル立ち絵の `simple-tachie` はcoreとwrapped-sourcesに依存し、同梱SimpleTachie全体、TachieSource、Character、TachieItem、TachieFaceItem、IFaceItemを追加で照合する。ホストのpickerをそのまま呼んで可視表情を選ぶ。4.56.1.0のSimpleTachieは音量の-1だけを非表示に使い、characterのDirectoryは編集UIでしか読まない。型・同梱配置・MVID `be62ee72-e935-4cca-9bba-eb9de4a27cde` も確認する。既定・ボイス・上の表情の画像は実際に選ばれる区間に入れ、使われないfaceのファイルはそのボイス／faceアイテム自身の描画依存から外す。共通の字幕・音声エフェクトが同じファイルを使う場合はそちらの依存を維持する。番号付き画像は対象外にする。グループ制御・合成グループ・シーンの中の立ち絵は、合成グループの内側の描画器も同じフレームの表情を選ぶ（`CompositeItemPicker` はグループの終わりで時刻を止めるが、グループが表示中のフレームでは同じ）ので対象にする。新しいHarmonyフックは追加していないが、記録済み4.56.1.0の全基準をHostFingerprintで再生成している。
 
 `TimelineSource.Update` をAsyncLocal scopeで囲み、要求時刻と実際の動画ソースの状態を検査する。例外なしのreturnだけで完成とは判定しない。
 
@@ -117,7 +121,7 @@ emitでは渡さなかった既存版を保持するが、HostContracts.Rulesを
 
 `lip-sync-readiness` はCoreの `TachieSource` 全体、音量計算・公開session・取消slot・待機timeout latch、音声source、CharacterとVoiceItemを照合する。新しいHarmony対象は `TachieSource.Update`（呼び出し元の立ち絵を識別）と `ReadVolumeAfterRequiredWait`（消費した値の完成確認）。公開済みsampleとのbit一致、現在のsession／task、取消、終了したsessionの全sample公開を確認する。ホストは失敗を吸収するためTaskの正常終了だけでは許可しない。未完成は既存のreadiness scopeから親のsceneまで失敗を伝える。
 
-`animation-tachie` はその規則に依存し、AnimationTachie DLLの全型とTachieItem／FaceItem／IFaceItemを照合する。追加規則の基準値は、記録済みの全版（現在4.56.1.0のみ）について `tools/HostFingerprint emit` で再生成した。実行時にもAnimationTachieのMVIDと同梱場所を確認する。未知の版／外部の型は通常描画。
+`animation-tachie` はその規則に依存し、AnimationTachie DLLの全型とTachieItem／FaceItem／IFaceItemを照合する。追加規則の基準値は、記録済みの全版（現在4.56.1.0のみ）について `tools/HostFingerprint emit` で再生成した。実行時にもAnimationTachieのMVID（4.56.1.0のもの、または照合で確かめた版のファイルのもの）と同梱場所を確認する。まばたきの種を固定する `BlinkSeedAlignment` は、`AnimationTachieSource.Update` と `PsdTachieSource.ApplyAnimation` の本体に `Object::GetHashCode` の呼び出しがちょうど1つあるときだけ、それを置き換える。未知の版／外部の型は通常描画。
 
 PNGのみ・付属INIなしを対象とし、全候補部品と番号付き／母音部品を依存にする。一覧の変化は同期確認して再起動まで対象外にする。INI削除後もホストのLayerConfigが残るため、キャッシュの参照と保存の両方で実ソースの13layerの設定と目／口の既存parts countを確認する。既定まばたきはパスの起動ごとのhashを使うので、この段階ではprocess nonceとitem同一性を含むSessionキーを採用する。計算式の複製と起動間の共有は未対応。
 
@@ -127,13 +131,13 @@ AnimationTachie の一覧は参照可能な部品名の `stem*` を同期で列�
 
 ## PSD立ち絵の共有設定と保持状態（2c）
 
-`psd-tachie` は `lip-sync-readiness` に依存し、同梱Tachie.Psd、FileSource.Psd、PsdParserの全型、TachieItem／FaceItem／IFaceItemを照合する。口パクのHarmony対象は2bの2メソッドを共有し、新しいhookは追加しない。全記録済み版（現在4.56.1.0のみ）の基準をemitで再生成した。実行時にも3つの読込moduleのMVIDと同梱配置を確認し、契約キャッシュの識別にPsdParser.dllも含める。
+`psd-tachie` は `lip-sync-readiness` に依存し、同梱Tachie.Psd、FileSource.Psd、PsdParserの全型、TachieItem／FaceItem／IFaceItemを照合する。口パクのHarmony対象は2bの2メソッドを共有し、新しいhookは追加しない。全記録済み版（現在4.56.1.0のみ）の基準をemitで再生成した。実行時にも3つの読込moduleのMVID（4.56.1.0のもの、または照合で確かめた版のファイルのもの）と同梱配置を確認し、契約キャッシュの識別にPsdParser.dllも含める。
 
 PSDファイルをlease／指紋／HostContentの依存にする。`PsdFileSettings.LoadFromPsdFilePath` が返す共有オブジェクトの実JSONをキーのresourceに含め、PropertyChangedを購読する。通知されない子要素の変更も、記述時と同じJSONの弱いmodel witnessを参照前・採用前に照合し、古いcaptureを無効にする。キーとwitnessは同じ設定snapshotを使う。設定検査は4,096node、深さ5、1list 1,024要素、文字合計65,536・各4,096、JSON262,144文字に制限し、未知の型や非有限数は対象外。
 
 さらに、実ソースのPSD／root／共有設定の同一性と、正規化済み設定を共有設定のreadonly `ResolveAgainst(root)` の結果と比較する。子要素を直接書き換えたときにホストが古いnormalized設定を保持する場合は、通常描画に戻し保存しない。CPU合成失敗時の空bitmapも、PSDのcanvas寸法との不一致から拒否する。未読込・非表示でrootを解放したソースも保守的に通常描画。正規化確認のroot参照はweakであり、非表示後のPSD画像データを保持しない。通知付きlist置換でホストが正規化を更新した後に再利用できる。
 
-sidecarの再読込を追加しない。ホストは起動中の同一パスで共有設定を保持するため、sidecarの外部上書きだけでは通常の新規sourceでも設定は変わらない。キーはsidecarの生bytesではなく、ホストが実際に使う共有設定に従う。既定まばたきにはSessionキーを用い、PSD 立ち絵の表示区間の停止中先読みは追加の音量計算を始めず見送る。表示区間外は先読みする。group、表情の同一layer競合、入れ子scene、外部立ち絵は対象外。
+sidecarの再読込を追加しない。ホストは起動中の同一パスで共有設定を保持するため、sidecarの外部上書きだけでは通常の新規sourceでも設定は変わらない。キーはsidecarの生bytesではなく、ホストが実際に使う共有設定に従う。既定まばたきの種は `BlinkSeedAlignment` で固定し（置き換えられないときはSessionキー）、停止中の先読みはそのキャラのボイスが重なる区間だけ見送る（追加の音量計算を始めない）。グループ・シーンの中、同じレイヤーの表情は動く立ち絵と同じ扱い。外部立ち絵は対象外。
 
 PSDをキャッシュ有効化前に読み込んでいた場合も、parserが保持するreadonly bytesのSHA-256（parsed file ごとに一度、背景 task・buffer コピーなし）と capture の lease 指紋を比較する。完了前・失敗時は通常描画で保存・再利用しない。不一致ならHostContentを再起動まで対象外にし、古い画素を新しいファイルのキーへ保存しない。元のstreamや配列の所有権は変更しない。
 

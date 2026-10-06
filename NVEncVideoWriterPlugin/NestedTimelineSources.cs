@@ -34,7 +34,8 @@ internal static class NestedTimelineSources
                 || !TryRead(source, "timelineResources", out var value) || value is not IDictionary resources) return false;
             foreach (DictionaryEntry entry in resources)
             {
-                if (!TryRead(entry.Value!, "Source", out var core) || core is null) return false;
+                if (!TryRead(entry.Value!, "Source", out var core)) return false;
+                if (core is null) continue; // draws nothing
                 switch (core.GetType().FullName)
                 {
                     case Items + "TachieSource":
