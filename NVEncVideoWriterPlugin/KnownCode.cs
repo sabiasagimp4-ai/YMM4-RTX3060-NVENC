@@ -21,7 +21,7 @@ internal sealed class KnownCode
     // drawn before. CameraShake, RectangleGlitchNoise, StripeGlitchNoise and WaveClipping seed with the effect's
     // identity and are keyed by it (FrameCacheKey.IdentitySeeds). Left out: AfterImage, MotionBlur and CircularBlur
     // (draw from the frames drawn before; CircularBlur's edges, found by trial renders in
-    // docs/EXTERNAL_PLUGINS_2026-10-04.md), AudioVolume (audio), ArrangeGroupItems, RadialArrangeGroupItems,
+    // docs/history/EXTERNAL_PLUGINS_2026-10-04.md), AudioVolume (audio), ArrangeGroupItems, RadialArrangeGroupItems,
     // TilingGroupItems, Container and the Scene brush (other items or scenes), OpenFx (external binaries), Lut and
     // GradientMap (files not reported), and DirectionalColorKey, FillSameground, FillSametype, ParticleOutput, Particlize,
     // PuppetDeformation, VectorFieldWarp and Pen (not read in full). ShuffleText and ShuffleTextInOut draw random

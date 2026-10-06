@@ -49,7 +49,7 @@ CacheOnLoadSuiteは起動時のプラグインロードの扱いであり、フ�
 
 `TimelineFrameCache.MakeKey` は正確な時刻とviewport内のScene／Timeline IDを含む。同じ絵となる別時刻や複製timelineでも一般的な内容再利用はしない。時刻・IDを消すだけでは乱数、履歴、シーン依存を混同する。中間計算のcontent identityと表示要求のdelivery identityを分け、状態が同一と証明できる供給元だけで共有する。
 
-`FrameCacheStore.Put` はサイズと予算を主に検査し、軽いrenderを採用から除外しない。軽いfixtureでcache OFFよりRAM復元が遅かった [既存測定](GPU_FRAME_RETENTION_RESULTS_2026-10-01.md) と整合する。GPU hitの高速化だけでこの差は消えない。
+`FrameCacheStore.Put` はサイズと予算を主に検査し、軽いrenderを採用から除外しない。軽いfixtureでcache OFFよりRAM復元が遅かった [既存測定](history/GPU_FRAME_RETENTION_RESULTS_2026-10-01.md) と整合する。GPU hitの高速化だけでこの差は消えない。
 
 ## AE本体の公開仕様との照合
 

@@ -77,7 +77,7 @@ identityは概念的に `H(schema, renderer/environment, output specification, e
 | effect DAG／stage cache＋MFR | 最小依存・thread safety・checkout契約が必要 | 高い再利用余地と大きい複雑性 | host契約取得まで全面導入しない |
 | 観測画素や型名から将来の安全性を推定 | hidden state・履歴・外部変化を証明できない | 見掛けのhit率は上がる | 不採用 |
 
-AE比較は公開仕様とSDK APIの契約に限定する。RAM／diskの公開説明、Compute Cacheのkey・receipt・共有計算、MFRのcallbackとlockの制約を比較材料とした。AEの内部scheduler、record形式、価値算式は推測しない。[Adobe memory/storage](https://helpx.adobe.com/after-effects/using/memory-storage1.html)、[Compute Cache API](https://ae-plugins.docsforadobe.dev/effect-details/compute-cache-api/)、[MFR guide](https://ae-plugins.docsforadobe.dev/effect-details/multi-frame-rendering-in-ae/)、既存[SDK比較](AE_CACHE_CONTRACTS.md)を参照。
+AE比較は公開仕様とSDK APIの契約に限定する。RAM／diskの公開説明、Compute Cacheのkey・receipt・共有計算、MFRのcallbackとlockの制約を比較材料とした。AEの内部scheduler、record形式、価値算式は推測しない。[Adobe memory/storage](https://helpx.adobe.com/after-effects/using/memory-storage1.html)、[Compute Cache API](https://ae-plugins.docsforadobe.dev/effect-details/compute-cache-api/)、[MFR guide](https://ae-plugins.docsforadobe.dev/effect-details/multi-frame-rendering-in-ae/)、既存[SDK比較](../AE_CACHE_CONTRACTS.md)を参照。
 
 ## 4. mainとの差・根本原因・実変更
 

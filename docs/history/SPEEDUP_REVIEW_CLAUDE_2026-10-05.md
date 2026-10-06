@@ -1,6 +1,6 @@
 # 高速化 PR（#5〜#13）のレビュー（Claude、2026-10-05）
 
-対象は [ChatGPT の引継ぎ](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/blob/codex/speedup-2c-psd-tachie/docs/SPEEDUP_HANDOFF_CHATGPT_2026-10.md) にある積み重ねの draft PR #5〜#13。各 PR の差分（前の PR との差）のうち製品コードを全部読み、検査の変更と CI の設定も確かめた。PR #13 の最新 head の CI（run 37263482785）は通常の 3 ジョブとも成功している。
+対象は [ChatGPT の引継ぎ](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/blob/codex/speedup-2c-psd-tachie/docs/history/SPEEDUP_HANDOFF_CHATGPT_2026-10.md) にある積み重ねの draft PR #5〜#13。各 PR の差分（前の PR との差）のうち製品コードを全部読み、検査の変更と CI の設定も確かめた。PR #13 の最新 head の CI（run 37263482785）は通常の 3 ジョブとも成功している。
 
 ## 全体の評価
 
@@ -76,7 +76,7 @@
 
 ## 対応の確認（2026-10-05 追記）
 
-ChatGPT の [対応の記録](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/blob/codex/speedup-2c-psd-tachie/docs/SPEEDUP_REVIEW_RESPONSE_2026-10-05.md) と、変わったコードを読んで確かめた。PR #14 と #13 の最新 head の CI は通常の 3 ジョブとも成功。
+ChatGPT の [対応の記録](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/blob/codex/speedup-2c-psd-tachie/docs/history/SPEEDUP_REVIEW_RESPONSE_2026-10-05.md) と、変わったコードを読んで確かめた。PR #14 と #13 の最新 head の CI は通常の 3 ジョブとも成功。
 
 | レビューの項目 | 対応 | 確認の結果 |
 | --- | --- | --- |

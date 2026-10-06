@@ -2,7 +2,7 @@
 
 指定の依頼文・計画に従い、main `8aa03b2` に対応したレビュー修正PR #5の上に、1 → 4 → 2a → 6 → 8 → 5 → 2b → 2cのdraft PRを積み重ねました。全PRの宛先はmainです。merge、mainへのpush、release、tag、force push、他者のブランチへのpushは行っていません。3・7・9は対象外です。
 
-全計測はWindows CI・WARPです。RTX3060や実GUIの音声／Presentを含む速度ではありません。任意RTX jobは未選択のためskipであり、全通常job成功とは区別します。前後の数値は、下記の計測runの同じWindows jobで各2回得たものです。少数の観測から安定した実機性能を保証しません。詳しい条件と失敗の記録は [SPEEDUP_RESULTS_2026-10.md](SPEEDUP_RESULTS_2026-10.md)、実装仕様は [CACHE_BEHAVIOR.md](CACHE_BEHAVIOR.md)、ホスト監査は [HOST_CONTRACTS.md](HOST_CONTRACTS.md) にあります。
+全計測はWindows CI・WARPです。RTX3060や実GUIの音声／Presentを含む速度ではありません。任意RTX jobは未選択のためskipであり、全通常job成功とは区別します。前後の数値は、下記の計測runの同じWindows jobで各2回得たものです。少数の観測から安定した実機性能を保証しません。詳しい条件と失敗の記録は [SPEEDUP_RESULTS_2026-10.md](SPEEDUP_RESULTS_2026-10.md)、実装仕様は [CACHE_BEHAVIOR.md](../CACHE_BEHAVIOR.md)、ホスト監査は [HOST_CONTRACTS.md](../HOST_CONTRACTS.md) にあります。
 
 ## 2026-10-05 のレビュー対応
 

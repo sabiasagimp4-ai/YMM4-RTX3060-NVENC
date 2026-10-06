@@ -1,13 +1,14 @@
 #!/bin/bash
-# Replaces the ci/nvenc-verify branch (or $BRANCH) of a YMM4-dlls clone (DST) with the committed HEAD of this
-# repository plus the workflows in tools/ci, then commits. verify.yml runs on ci/nvenc-verify, host-versions.yml on
-# ci/host-versions. Push that branch to run the Windows checks against the YMM4 zip of the
-# YMM4-dlls release (the YMM4 binaries are never added to either repository).
+# Replaces the ci/gui-smoke branch (or $BRANCH) of a YMM4-dlls clone (DST) with the committed HEAD of this repository
+# plus the workflows in tools/ci, then commits. gui-smoke.yml runs on ci/gui-smoke, cache-diagnostics-gui.yml on
+# ci/cache-diagnostics-gui (BRANCH=ci/cache-diagnostics-gui). Push that branch to start the real YMM4 GUI from the YMM4
+# zip of the YMM4-dlls release (the YMM4 binaries are never added to either repository). The other checks run in this
+# repository's own workflows (.github/workflows), which fetch YMM4 from its update server.
 set -euo pipefail
 SRC=${SRC:-$(cd "$(dirname "$0")/../.." && pwd)}
 DST=${DST:?set DST to a clone of the private YMM4-dlls repository}
 CI=$(cd "$(dirname "$0")" && pwd)
-BRANCH=${BRANCH:-ci/nvenc-verify}
+BRANCH=${BRANCH:-ci/gui-smoke}
 commit=$(git -C "$SRC" rev-parse HEAD)
 cd "$DST"
 if git rev-parse --verify -q "$BRANCH" >/dev/null; then git checkout -q "$BRANCH";

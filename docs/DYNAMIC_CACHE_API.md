@@ -69,4 +69,4 @@ portable harnessで計算共有・取消・借用寿命・purge中の完成・�
 
 実行済みの [main CI](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/36891225375) は `741df2af59dd8461c02f1804b3c969f3e3c2d1ca` で全job成功。portableとWindowsの両方で共有計算・圧縮を確認し、実YMM4 DLLのprovider検証とWARP画素一致も成功。AE本体やRTX 3060での比較計測は未実施。
 
-監査ブランチの [CI](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37161848718) は `2bb16db` でportable／host／windows成功。slot交換、record差替え、publication世代、独立root／asyncの待機循環、正常diamondと片consumer取消、65,500 interval状態、実ホストの296表示操作列も検証した。詳細と未解決の境界は [監査報告](CACHE_ARCHITECTURE_AUDIT_2026-10-04.md)。
+監査ブランチの [CI](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37161848718) は `2bb16db` でportable／host／windows成功。slot交換、record差替え、publication世代、独立root／asyncの待機循環、正常diamondと片consumer取消、65,500 interval状態、実ホストの296表示操作列も検証した。詳細と未解決の境界は [監査報告](history/CACHE_ARCHITECTURE_AUDIT_2026-10-04.md)。

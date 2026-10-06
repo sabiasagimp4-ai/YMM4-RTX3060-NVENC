@@ -7,7 +7,7 @@ RTX3060、GPU実行時間、Present/音声同期、NVENCの速度は測定して
 - [全ホスト検証・比較測定・パッケージ成功](https://github.com/sabiasagimp4-ai/YMM4-dlls/actions/runs/36875040153)
 - [実GUIの巡回・ログ採取成功](https://github.com/sabiasagimp4-ai/YMM4-dlls/actions/runs/36875046663)
 - [ソース側portable/Windows CI成功](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/36875041175)
-- 設計は [GPU_FRAME_RETENTION.md](GPU_FRAME_RETENTION.md)。生ログとJSON報告は [traces/2026-10-01-gpu](traces/2026-10-01-gpu)。
+- 設計は [GPU_FRAME_RETENTION.md](../GPU_FRAME_RETENTION.md)。生ログとJSON報告は [traces/2026-10-01-gpu](traces/2026-10-01-gpu)。
 
 ## 同じ8フレームの反復
 

@@ -90,7 +90,7 @@ Harmony 2.4.2は一部の例外フィルター付きmethodを作り直せない�
 
 `KnownCode.VerifiedCommunity` は4.56.1.0のCommunityの固定MVID `ac765de8-d44f-44f1-a094-961becf4d22e` と読込場所を確認する。型の正確な一覧と対象外理由は [KnownCode.cs](../NVEncVideoWriterPlugin/KnownCode.cs)。
 
-他アイテム／シーン・音声・未報告ファイル・時計・乱数・native／通信・可変static・前フレーム画像を読む処理を調べた。MotionBlur／AfterImage／CircularBlurの履歴依存（CircularBlurはコードを読んだ後の試し描きで判明、[EXTERNAL_PLUGINS_2026-10-04.md](EXTERNAL_PLUGINS_2026-10-04.md)）、AudioVolume、OpenFx、未報告ファイルや未監査処理は自動対象にしない。CameraShake等の同一性をseedとする処理はSessionキーとなり、idle複製は避ける。
+他アイテム／シーン・音声・未報告ファイル・時計・乱数・native／通信・可変static・前フレーム画像を読む処理を調べた。MotionBlur／AfterImage／CircularBlurの履歴依存（CircularBlurはコードを読んだ後の試し描きで判明、[EXTERNAL_PLUGINS_2026-10-04.md](history/EXTERNAL_PLUGINS_2026-10-04.md)）、AudioVolume、OpenFx、未報告ファイルや未監査処理は自動対象にしない。CameraShake等の同一性をseedとする処理はSessionキーとなり、idle複製は避ける。
 
 ShuffleText／ShuffleTextInOutは、フレーム番号（と入力の番号）だけを種にしたMersenneTwisterで文字を選ぶ。NumberTextは値を `double.ToString`（現在のカルチャ）で書式化する。3つとも `Font` の名前をYMM4と同じくフォント設定から引き（なければArial）、DirectWriteで描く。キーには `Font` から解決したフェイスとファミリーのファイル、インストール済みフォントの識別、NumberTextではカルチャの数値書式を入れる。4.56.1.0のYMM4はUIのカルチャ（`CurrentUICulture`）だけを設定し、`CurrentCulture` はOSの設定のまま。
 
@@ -137,4 +137,4 @@ sidecarの再読込を追加しない。ホストは起動中の同一パスで�
 
 PSDをキャッシュ有効化前に読み込んでいた場合も、parserが保持するreadonly bytesのSHA-256（parsed file ごとに一度、背景 task・buffer コピーなし）と capture の lease 指紋を比較する。完了前・失敗時は通常描画で保存・再利用しない。不一致ならHostContentを再起動まで対象外にし、古い画素を新しいファイルのキーへ保存しない。元のstreamや配列の所有権は変更しない。
 
-共有設定の JSON は通知の世代と全 scalar/list の bounded な witness が一致するときだけ再利用する。通知なしの子も毎回確認し、エンコードは捕えた値から行う（再読込の A/B/A で witness と JSON を取り違えない）。module の不変の監査結果は AssemblyLoad の世代で再確認し、collectible の依存 DLL を高速経路に入れない。変更・大きな素材の数値は [Claude レビュー対応（2026-10-05）](SPEEDUP_REVIEW_RESPONSE_2026-10-05.md)。
+共有設定の JSON は通知の世代と全 scalar/list の bounded な witness が一致するときだけ再利用する。通知なしの子も毎回確認し、エンコードは捕えた値から行う（再読込の A/B/A で witness と JSON を取り違えない）。module の不変の監査結果は AssemblyLoad の世代で再確認し、collectible の依存 DLL を高速経路に入れない。変更・大きな素材の数値は [Claude レビュー対応（2026-10-05）](history/SPEEDUP_REVIEW_RESPONSE_2026-10-05.md)。

@@ -31,7 +31,7 @@
   `cache-output-commit`（出力差し替え・旧出力破棄・状態登録）を別spanとして記録する。
   CopyFromMemory/command recordingはネイティブ呼出しのCPU wall time。GPU完了を意味しない。
 - GPU保持のhitでは転送・bitmap確保・RAM検索を省略する。経路を混ぜず、実行されたspanだけを集計する。
-  設計と最新の測定は [GPU_FRAME_RETENTION.md](GPU_FRAME_RETENTION.md)・[GPU_FRAME_RETENTION_RESULTS_2026-10-01.md](GPU_FRAME_RETENTION_RESULTS_2026-10-01.md)。
+  設計と最新の測定は [GPU_FRAME_RETENTION.md](GPU_FRAME_RETENTION.md)・[GPU_FRAME_RETENTION_RESULTS_2026-10-01.md](history/GPU_FRAME_RETENTION_RESULTS_2026-10-01.md)。
 - ディスクworker: 読み書き処理のwall timeとqueue滞在時間。投入元のoperation IDで関連づける。
 - 遅延readback: 次のフレームで完了しても、元のframe time/operation IDに帰属させる。
 - Processor/SourceインターフェースのUpdate/Draw/Read/GetFrame/GetFrameAsyncを実装するクラスをロード済みアセンブリから動的に発見する。
@@ -66,7 +66,7 @@ raw traceを温存して全retained samplesから集計する。CPU spanの加�
 stage/component別のサンプル数・平均・p50/p95/p99/最大、操作区間、Usage、経路、coverageを出す。
 root Updateが後で書かれてもoperation IDで子・ディスクworkerを実際の経路へ関連付ける。rootのないspanはunattributed。
 Playing/Paused/ExportingとRAM/live/renderを混ぜない。対象外理由とcoverageのメソッド別重複件数も出す。
-観測記録は [CACHE_TRACE_RESULTS_2026-10-01.md](CACHE_TRACE_RESULTS_2026-10-01.md) を参照。
+観測記録は [CACHE_TRACE_RESULTS_2026-10-01.md](history/CACHE_TRACE_RESULTS_2026-10-01.md) を参照。
 既定100万spanの読込上限、破損行、drop、OpenSpans、footerなしはComplete=false。
 
 次の実装判断は、(1)どの処理・時刻が対象外か、(2)未完成decodeや他の待ちが何回出るか、
@@ -105,5 +105,5 @@ python tools/analyze-stress-trace.py dist/gui-trace.jsonl --projects dist --outp
 プロジェクトの同梱版は `prepare-stress-project.ps1` で展開先の絶対素材パスへ書き換えてから開く。
 CIの基本adapter／ソフトウェア描画の時間をRTX3060実機のFPSとして報告しない。
 
-256MiB／64MiBでの実測と完全なraw traceは [STRESS_GUI_RESULTS_2026-10-02.md](STRESS_GUI_RESULTS_2026-10-02.md)。
+256MiB／64MiBでの実測と完全なraw traceは [STRESS_GUI_RESULTS_2026-10-02.md](history/STRESS_GUI_RESULTS_2026-10-02.md)。
 再生・編集・消去に加え、RAM・GPU・ディスクからの復元を確認した。全900フレームのwarm化やRTX3060実機のFPSは未検証。

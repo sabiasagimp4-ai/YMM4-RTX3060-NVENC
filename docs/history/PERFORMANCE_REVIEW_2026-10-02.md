@@ -9,8 +9,8 @@
 | 種類 | 内容 | 注意 |
 | --- | --- | --- |
 | コード | 現行 `main` の実装。`ファイル:行` で示す | 行番号は `23e4fdb` |
-| CIトレース | `docs/traces/**/*.jsonl.gz` を再集計（集計スクリプトはこの調査で作成） | GitHub Windows runner、**WARP（ソフトウェアD3D）・論理CPU 2**。GPU処理がCPU時間に入る。RTX 3060の値ではない |
-| RTX 3060実測 | `docs/preview-performance-rtx3060.json`（`e60c455`、実 `TimelineSource.Update` + 代替Draw、100図形+Arial文字、1080p、disk無効） | 古いcommitだが `FileDependencyLease.cs` は現行と差分なし。readbackは当時同期 |
+| CIトレース | `docs/history/traces/**/*.jsonl.gz` を再集計（集計スクリプトはこの調査で作成） | GitHub Windows runner、**WARP（ソフトウェアD3D）・論理CPU 2**。GPU処理がCPU時間に入る。RTX 3060の値ではない |
+| RTX 3060実測 | `docs/history/preview-performance-rtx3060.json`（`e60c455`、実 `TimelineSource.Update` + 代替Draw、100図形+Arial文字、1080p、disk無効） | 古いcommitだが `FileDependencyLease.cs` は現行と差分なし。readbackは当時同期 |
 | 推定 | コードから費用構造が確定していて、大きさだけ未測定のもの | 「要計測」と明記 |
 
 YMM4本体のバイナリはこの環境から取得できなかった（更新サーバーへの接続がproxyで拒否）。ホスト側の挙動は、リポジトリ内のILSpy調査記録（`docs/HOST_CONTRACTS.md` とコードコメント）に依拠している。
@@ -177,7 +177,7 @@ CPU（syscall、ウイルス対策のminifilter）、同期（`cacheGate`・trac
 `BeginPreviewReadback` は host の出力 command list を viewportサイズのtargetへもう一度 `DrawImage` する。playerの `Draw` も同じ出力を描くため、保存対象フレームでは合成グラフ（エフェクト・文字・動画テクスチャ）が2回評価される。さらに毎フレーム、D2D targetとD3D11 stagingを新規に生成・破棄する。
 
 **【Evidence】**
-`TimelineFrameCache.cs:1207`（`CreateBitmap`）、`:1217`（`DrawImage(output)`）、`EndDraw`、`:1233`（`CreateTexture2D`）、`:1235-1236`（`CopyResource`／`Flush`）。hit時に表示へ使う `UploadPreview`（`:1512-1568`）は「viewport画素のbitmapを逆変換で1:1に描くcommand list」で、画素一致が検証済み（`FramePixelChecks`、`docs/NONBLOCKING_READBACK_RESULTS_2026-10-02.md`）。idle（`CapturePreview`）と出力キャッシュ（`Capture`、`:1132`）も同じ再描画をする。
+`TimelineFrameCache.cs:1207`（`CreateBitmap`）、`:1217`（`DrawImage(output)`）、`EndDraw`、`:1233`（`CreateTexture2D`）、`:1235-1236`（`CopyResource`／`Flush`）。hit時に表示へ使う `UploadPreview`（`:1512-1568`）は「viewport画素のbitmapを逆変換で1:1に描くcommand list」で、画素一致が検証済み（`FramePixelChecks`、`docs/history/NONBLOCKING_READBACK_RESULTS_2026-10-02.md`）。idle（`CapturePreview`）と出力キャッシュ（`Capture`、`:1132`）も同じ再描画をする。
 
 **【Execution frequency】**
 採否判定を通った保存フレームごと。GPUが速ければ、再生中のmissはほぼ毎フレーム該当する。idleは全フレーム。

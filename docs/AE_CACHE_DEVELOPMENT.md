@@ -30,7 +30,7 @@
 
 ## 次の課題
 
-2026-10-04 時点の具体的な実装計画（ボイスのキャッシュ、立ち絵、素材の確認、差分記述、GPU 保持、並列描画。再生前にまとめて描く機能は作らない）は [SPEEDUP_PLAN_2026-10-04.md](SPEEDUP_PLAN_2026-10-04.md)。
+2026-10-04 時点の具体的な実装計画（ボイスのキャッシュ、立ち絵、素材の確認、差分記述、GPU 保持、並列描画。再生前にまとめて描く機能は作らない）は [SPEEDUP_PLAN_2026-10-04.md](history/SPEEDUP_PLAN_2026-10-04.md)。
 
 2026-10-02のSDK再調査で、計算値の登録、cached-only lookup、時間範囲の依存、先読みの二段階価値判断にも差を確認した。[AE SDKとの契約差](AE_CACHE_CONTRACTS.md) を参照。下表の速度最適化と並行して、元の描画費用と復元費用の記録・採用判断、および外部処理が依存を報告する契約を優先する。未実装の再生schedulerを完成扱いにしない。
 
@@ -49,10 +49,10 @@
 
 D2D `Map(Read)` にDoNotWaitはなく、1フレーム遅延やreadbackリングだけで非ブロックとは言えない。ライブプレビューは実際のD2D targetのDXGI surfaceからD3D11 deviceを取得し、EndDraw後にstagingへコピー、Flushで提出してDoNotWait Mapで完了をpollする方式へ変更した。保留はsourceごとに1枚、処理中の追加保存は省略する。現在のGPU保持は復元画像が対象であり、cold renderの描画・GPUコピー・CPU memcpy費用は残る。
 
-30秒・動画120／文字300／音声1の [実GUI負荷試験](STRESS_GUI_RESULTS_2026-10-02.md) では、ホストの動画更新とMap待ちが支配的だった。
+30秒・動画120／文字300／音声1の [実GUI負荷試験](history/STRESS_GUI_RESULTS_2026-10-02.md) では、ホストの動画更新とMap待ちが支配的だった。
 フレーム落ちで2回目にも未描画時刻を要求するため、キー生成の軽量化だけでは再生を速くできない。
 同じ時刻への再訪ではRAM／ディスク／GPU復元が動き、64MiBのRAM上限も確認した。
-非待機readbackの検証は [NONBLOCKING_READBACK_RESULTS_2026-10-02.md](NONBLOCKING_READBACK_RESULTS_2026-10-02.md) に記録する。非待機readbackの回帰・実測を続け、重い動画の次の重点は音声時計を含むCache Before Playbackと安全な段階別再利用。CIの結果をRTX3060のFPSとして扱わない。
+非待機readbackの検証は [NONBLOCKING_READBACK_RESULTS_2026-10-02.md](history/NONBLOCKING_READBACK_RESULTS_2026-10-02.md) に記録する。非待機readbackの回帰・実測を続け、重い動画の次の重点は音声時計を含むCache Before Playbackと安全な段階別再利用。CIの結果をRTX3060のFPSとして扱わない。
 
 SingleFlightではidleが不要になってもlive／exportのjobを巻き添えにしない。保存価値と画像の有効性を分け、容量不足だけで要求された有効結果を捨てない。採用直前の依存・取消・世代・予算確認から公開まで既存guardを使う。同じTimelineSourceや描画contextを複数Taskから同時UpdateするだけのMFRは行わない。
 
@@ -63,10 +63,10 @@ SingleFlightではidleが不要になってもlive／exportのjobを巻き添え
 性能は対象commit、素材、解像度、adapter、warmup、pass順序、サンプル数、p50／p95、drop／coverageを記録する。親子spanを加算せず、Update／DrawのCPU経過時間をPresent・音声・GPU実行時間や全体FPSとして扱わない。詳細traceのON／OFF比較も別に行う。
 
 - [実ホストprobeと実行コマンド](../tests/HostCacheProbe/README.md)
-- [動的計測の実測と生ログ](CACHE_TRACE_RESULTS_2026-10-01.md)
-- [GPU保持の実測と生ログ](GPU_FRAME_RETENTION_RESULTS_2026-10-01.md)
-- [30秒・421アイテムの実GUI検証と生ログ](STRESS_GUI_RESULTS_2026-10-02.md)
-- [統合前のRTX 3060 source-only測定](preview-performance-rtx3060.json): `e60c4552` 時点、100フレーム、1080p、shape＋Arial、disk無効。GUI／audio／Present／pacingを含まない歴史的データ
+- [動的計測の実測と生ログ](history/CACHE_TRACE_RESULTS_2026-10-01.md)
+- [GPU保持の実測と生ログ](history/GPU_FRAME_RETENTION_RESULTS_2026-10-01.md)
+- [30秒・421アイテムの実GUI検証と生ログ](history/STRESS_GUI_RESULTS_2026-10-02.md)
+- [統合前のRTX 3060 source-only測定](history/preview-performance-rtx3060.json): `e60c4552` 時点、100フレーム、1080p、shape＋Arial、disk無効。GUI／audio／Present／pacingを含まない歴史的データ
 
 ユーザーのRTX 3060上の最新ビルドでのGUI・実プロジェクト速度・長時間NVENC出力は未確認。VFR、実device loss、実disk full、UI操作から表示までのp50／p95・frame dropの検証も残る。CI成功や過去のNVENC smokeをこれらの代用にしない。
 
@@ -80,4 +80,4 @@ SingleFlightではidleが不要になってもlive／exportのjobを巻き添え
 - [Multi-Frame Rendering](https://helpx.adobe.com/after-effects/desktop/render-and-export/multi-frame-rendering/multi-frame-rendering.html)
 - [Lossless Compressed Playback](https://helpx.adobe.com/after-effects/desktop/view-and-preview/preview-video-and-audio/lossless-compressed-playback.html)
 
-`YMM4-dlls` は実ホスト・GUI検証用。`tools/ci/cache-development-release.yml` と `cache-diagnostics-gui.yml` は同リポジトリへミラーするCIテンプレートで、ソースrepoのactive workflowとは区別する。
+`YMM4-dlls` は実GUIの検証用。`tools/ci/gui-smoke.yml` と `cache-diagnostics-gui.yml` は同リポジトリへミラーするCIテンプレート（`tools/ci/sync-to-dlls.sh`）で、このリポジトリのworkflow（`.github/workflows`）とは区別する。それ以外の実ホスト検証は、このリポジトリのworkflowがYMM4を更新サーバーから取得して行う。

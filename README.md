@@ -110,7 +110,7 @@ YMM4 の更新サーバーで公開されている版（とコードを読んだ
 | シンプル立ち絵 | ○ | 停止中の先読みでも描きます |
 | 動く立ち絵 | △ | PNG の部品だけ。まばたきが起動ごとに変わるため、その起動の間だけ使います。停止中の先読みでは描かず、再生したときに保存します |
 | PSD 立ち絵 | △ | 動く立ち絵と同じく、その起動の間だけ使い、再生したときに保存します |
-| 上記以外の立ち絵、グループ・入れ子の中、表情が同じレイヤーで重なるものなど | × | 完成を確かめる方法をまだ用意していません（[調査](docs/LIPSYNC_RESEARCH_2026-10-04.md)） |
+| 上記以外の立ち絵、グループ・入れ子の中、表情が同じレイヤーで重なるものなど | × | 完成を確かめる方法をまだ用意していません（[調査](docs/history/LIPSYNC_RESEARCH_2026-10-04.md)） |
 
 ### プラグイン
 
@@ -122,7 +122,7 @@ YMM4 の更新サーバーで公開されている版（とコードを読んだ
 | 外部プラグイン | △ | 設定で個別に「信頼」したものだけ。プラグインを更新するとキーが変わります |
 | OpenFX・VST3 | × | 外部のネイティブのプログラムで、中身を確かめられません |
 
-理由と今後の予定は [自動対象の範囲](docs/AUTOMATIC_COVERAGE_2026-10-03.md)、外部プラグインを自動で判定する案は [外部プラグインの判定](docs/EXTERNAL_PLUGINS_2026-10-04.md)、保存条件・上限・乱数の扱いは [キャッシュ仕様](docs/CACHE_BEHAVIOR.md) を参照してください。
+理由と今後の予定は [自動対象の範囲](docs/AUTOMATIC_COVERAGE_2026-10-03.md)、外部プラグインを自動で判定する案は [外部プラグインの判定](docs/history/EXTERNAL_PLUGINS_2026-10-04.md)、保存条件・上限・乱数の扱いは [キャッシュ仕様](docs/CACHE_BEHAVIOR.md) を参照してください。
 
 ## 設定
 
@@ -176,13 +176,11 @@ README のバッジは `python tools/readme-assets.py` で描き直せます（�
 
 ## 開発・検証資料
 
-開発の基準は `main` です。Windows CI でビルド・実ホスト・画素一致・GPU 保持を検証し、別の CI では実 YMM4 の GUI を操作してログを採取しています。AE に近い挙動を目標にしており、再生前キャッシュ、音声と同期したレンダー待機、MFR は未実装です。
+資料の一覧は [docs/README.md](docs/README.md) にあります。開発の基準は `main` です。Windows CI でビルド・実ホスト・画素一致・GPU 保持を検証し、YMM4 の公開されている全版での動作も自動で確かめています。AE に近い挙動を目標にしており、再生前キャッシュ、音声と同期したレンダー待機、MFR は未実装です。
 
-- 仕様: [キャッシュ仕様](docs/CACHE_BEHAVIOR.md)・[自動対象の範囲](docs/AUTOMATIC_COVERAGE_2026-10-03.md)・[ホスト契約と更新手順](docs/HOST_CONTRACTS.md)・[GPU 保持の設計](docs/GPU_FRAME_RETENTION.md)
-- 開発: [開発状況・次の課題](docs/AE_CACHE_DEVELOPMENT.md)・[アーキテクチャ監査](docs/CACHE_ARCHITECTURE_AUDIT_2026-10-04.md)・[AE SDK との契約差](docs/AE_CACHE_CONTRACTS.md)・[動的な計算共有などの契約](docs/DYNAMIC_CACHE_API.md)
-- 高速化: [計画](docs/SPEEDUP_PLAN_2026-10-04.md)・[結果](docs/SPEEDUP_RESULTS_2026-10.md)・[レビュー](docs/SPEEDUP_REVIEW_CLAUDE_2026-10-05.md)
-- 計測: [処理ログ](docs/CACHE_TRACE_RESULTS_2026-10-01.md)・[GPU 保持](docs/GPU_FRAME_RETENTION_RESULTS_2026-10-01.md)・[30 秒・421 アイテムの実 YMM4 負荷試験](docs/STRESS_GUI_RESULTS_2026-10-02.md)・[性能調査](docs/PERFORMANCE_REVIEW_2026-10-02.md)・[修正前後の測定](docs/PERFORMANCE_RESULTS_2026-10-02.md)
-- 調査・手順: [立ち絵の口パク](docs/LIPSYNC_RESEARCH_2026-10-04.md)・[外部プラグインの判定](docs/EXTERNAL_PLUGINS_2026-10-04.md)・[詳細ログの採取と集計](docs/CACHE_DIAGNOSTICS.md)・[実ホスト検証の実行方法](tests/HostCacheProbe/README.md)
+- 仕様: [キャッシュ仕様](docs/CACHE_BEHAVIOR.md)・[自動対象の範囲](docs/AUTOMATIC_COVERAGE_2026-10-03.md)・[ホスト契約と更新手順](docs/HOST_CONTRACTS.md)・[YMM4 の版ごとの対応](docs/YMM4_VERSIONS.md)・[GPU 保持の設計](docs/GPU_FRAME_RETENTION.md)
+- 開発: [開発状況・次の課題](docs/AE_CACHE_DEVELOPMENT.md)・[AE SDK との契約差](docs/AE_CACHE_CONTRACTS.md)・[動的な計算共有などの契約](docs/DYNAMIC_CACHE_API.md)・[詳細ログの採取と集計](docs/CACHE_DIAGNOSTICS.md)・[実機検証の手順](docs/RTX3060_HARDWARE_CHECK.md)・[実ホスト検証の実行方法](tests/HostCacheProbe/README.md)
+- 過去の調査・計測・レビューの記録: [docs/history](docs/history/)（一覧は [docs/README.md](docs/README.md#過去の記録)）
 
 ## 由来とライセンス
 

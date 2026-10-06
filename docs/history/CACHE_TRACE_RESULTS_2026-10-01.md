@@ -1,7 +1,7 @@
 # 実YMM4の観測結果と次の実装判断
 
 GPU保持の導入前に取得した観測記録。対象commitと測定値は当時のものを保持する。
-この測定から派生したGPU保持は実装済みで、現在の結果は [GPU_FRAME_RETENTION_RESULTS_2026-10-01.md](GPU_FRAME_RETENTION_RESULTS_2026-10-01.md)、残る課題は [AE_CACHE_DEVELOPMENT.md](AE_CACHE_DEVELOPMENT.md) を参照。
+この測定から派生したGPU保持は実装済みで、現在の結果は [GPU_FRAME_RETENTION_RESULTS_2026-10-01.md](GPU_FRAME_RETENTION_RESULTS_2026-10-01.md)、残る課題は [AE_CACHE_DEVELOPMENT.md](../AE_CACHE_DEVELOPMENT.md) を参照。
 
 ## 測定条件と保存先
 
@@ -107,6 +107,6 @@ OFF/cold/RAM/trace-ONを固定順に各1回測った結果だけでは、計測�
 保存済みログの再集計例（Pythonのみで展開可能）:
 
 ```sh
-python -c "import gzip,pathlib; p=pathlib.Path('docs/traces/2026-10-01/performance-trace.jsonl.gz'); pathlib.Path('performance-trace.jsonl').write_bytes(gzip.decompress(p.read_bytes()))"
+python -c "import gzip,pathlib; p=pathlib.Path('docs/history/traces/2026-10-01/performance-trace.jsonl.gz'); pathlib.Path('performance-trace.jsonl').write_bytes(gzip.decompress(p.read_bytes()))"
 python tools/analyze-cache-trace.py performance-trace.jsonl --output performance-summary.json
 ```

@@ -1,6 +1,6 @@
 # Claude レビューへの対応（2026-10-05）
 
-対象: `claude/ymm4-nvenc-perf-analysis-5h1aik` の `docs/SPEEDUP_REVIEW_CLAUDE_2026-10-05.md`。main は変更せず、全 PR を Draft・未マージのまま維持する。
+対象: `claude/ymm4-nvenc-perf-analysis-5h1aik` の `docs/history/SPEEDUP_REVIEW_CLAUDE_2026-10-05.md`。main は変更せず、全 PR を Draft・未マージのまま維持する。
 
 ## 独立した修正
 

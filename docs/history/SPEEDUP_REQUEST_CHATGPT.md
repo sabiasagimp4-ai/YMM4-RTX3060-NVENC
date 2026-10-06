@@ -6,14 +6,14 @@ GitHub のリポジトリを読み書きでき、GitHub Actions を動かせる 
 
 ## 依頼文
 
-あなたは、YMM4（ゆっくりMovieMaker4 Lite）用プラグイン「YMM4-RTX3060-NVENC」の描画キャッシュを速くする実装の担当です。計画はリポジトリの `docs/SPEEDUP_PLAN_2026-10-04.md` にあります。計画を読み、項目ごとに実装・検査・計測・文書の更新までを自分で行い、draft PR にしてください。判断に迷う点は、この依頼文と計画に従い、それでも決まらないときは安全な側（キャッシュしない・通常描画に戻す側）を選んで、報告に書いてください。
+あなたは、YMM4（ゆっくりMovieMaker4 Lite）用プラグイン「YMM4-RTX3060-NVENC」の描画キャッシュを速くする実装の担当です。計画はリポジトリの `docs/history/SPEEDUP_PLAN_2026-10-04.md` にあります。計画を読み、項目ごとに実装・検査・計測・文書の更新までを自分で行い、draft PR にしてください。判断に迷う点は、この依頼文と計画に従い、それでも決まらないときは安全な側（キャッシュしない・通常描画に戻す側）を選んで、報告に書いてください。
 
 ### 対象
 
 - リポジトリ: `https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC`
 - 起点のブランチ: `claude/ymm4-nvenc-perf-analysis-5h1aik`（この文書を含む commit 以降。`main` に計画と依頼文を足したもの）
 - 基準のホスト: YMM4 Lite 4.56.1.0
-- 先に読むもの: `docs/SPEEDUP_PLAN_2026-10-04.md`（計画）、`docs/CACHE_BEHAVIOR.md`（今の仕様）、`docs/HOST_CONTRACTS.md`（ホストへの依存の決まり）、`docs/PERFORMANCE_RESULTS_2026-10-02.md`（計測の方法と読み方）、`docs/LIPSYNC_RESEARCH_2026-10-04.md`（2 の調査）
+- 先に読むもの: `docs/history/SPEEDUP_PLAN_2026-10-04.md`（計画）、`docs/CACHE_BEHAVIOR.md`（今の仕様）、`docs/HOST_CONTRACTS.md`（ホストへの依存の決まり）、`docs/history/PERFORMANCE_RESULTS_2026-10-02.md`（計測の方法と読み方）、`docs/history/LIPSYNC_RESEARCH_2026-10-04.md`（2 の調査）
 
 ### 進め方
 
@@ -43,7 +43,7 @@ GitHub のリポジトリを読み書きでき、GitHub Actions を動かせる 
 - 計画の「検査」を、CI で毎回動く検査として実装した（`tests/CacheChecks`、`tests/HostCacheProbe` などの既存の仕組みに足す）。
 - 最後の commit で `cache-development` の全ジョブが成功した。
 - 計画の「測定と合格基準」を、前後それぞれ同じ CI ジョブで 2 回ずつ測り、合格基準を満たした（満たさない場合は、その理由と、それでも出す価値があるかを書く）。
-- `docs/CACHE_BEHAVIOR.md`（仕様が変わった所）、`docs/SPEEDUP_PLAN_2026-10-04.md`（その項目に「済」と PR の番号を書く）、`docs/SPEEDUP_RESULTS_2026-10.md`（新しく作り、項目ごとに結果を足す）を更新した。
+- `docs/CACHE_BEHAVIOR.md`（仕様が変わった所）、`docs/history/SPEEDUP_PLAN_2026-10-04.md`（その項目に「済」と PR の番号を書く）、`docs/history/SPEEDUP_RESULTS_2026-10.md`（新しく作り、項目ごとに結果を足す）を更新した。
 - PR の説明に、変更・検査・前後の数値（run の URL 付き）・計画からの変更点・残った危険を書いた。
 
 ### 計画の前提が崩れたとき
@@ -56,7 +56,7 @@ GitHub のリポジトリを読み書きでき、GitHub Actions を動かせる 
 - **ローカルではビルドが通らないことがある**: YMM4 の DLL はリポジトリにない。`bash tools/ci/fetch-ymm4.sh 4.56.1.0 <フォルダー> --top` で取得できるが、最終的な判定は CI で行う。
 - **CI の時間制限**: Windows のジョブは 30 分で止まる。新しい検査がハングすると、そのジョブ全体が失われる。たくさんの処理を順に試す検査は、1 件ずつ別スレッド・別の描画デバイスで動かし、時間制限（例: 30 秒）を付ける。
 - **同じブランチの CI は新しい方が古い方を取り消す**（`concurrency`）。結果を待っている間に同じブランチへ push しない。
-- **ランナーの速さは毎回違う**: 計測は、キャッシュを切った `off` を速度計にして比べる（`docs/PERFORMANCE_RESULTS_2026-10-02.md` の §2）。
+- **ランナーの速さは毎回違う**: 計測は、キャッシュを切った `off` を速度計にして比べる（`docs/history/PERFORMANCE_RESULTS_2026-10-02.md` の §2）。
 - **同梱の Community プラグインのシェーダー**は WPF の `pack://` の URI で読み込まれる。検査のプロセスで描くときは、`System.IO.Packaging.PackUriHelper.UriSchemePack` に触れて URI の形式を登録し、`System.Windows.Application` を作っておく。
 - **同一性を種にした乱数**（ランダム移動など）のフレームは、その起動中・そのオブジェクトに限ったキー（Session）になる。停止中の先読みでは、そのフレームだけ実物のシーンを描く描画器で描く（`IdleFramePreRenderer.PrimeBatchFrame`）。8 で描画器を増やすときは、実物のシーンを描く描画器は 1 本だけにする。
 - **前のフレームに依存する処理**（残像、モーションブラー、CircularBlur）は対象外。動くアイテムでしか差が出ないので、検査は動くアイテムで行う。
