@@ -17,7 +17,7 @@ internal static class SimpleTachieKeyChecks
             // Another YMM4 build (ymm4-compat) whose features were not decided: its frames render normally.
             Check(!HostFeatures.For(typeof(Scene).Assembly).SimpleTachie || plugin.GetType().Assembly.ManifestModule.ModuleVersionId != SimpleTachieDependencies.ReadBuild,
                 "The read simple tachie was not verified");
-            Console.WriteLine("Simple tachie keys skipped: the bundled plugin is not the read one (its frames are not cached)");
+            Console.WriteLine("Simple tachie keys skipped: the simple tachie is not enabled for this build here (HostCacheProbe --unread checks its frames)");
             return;
         }
         Check(SimpleTachieDependencies.Verified(plugin.GetType()), "The bundled simple plugin was not verified");
