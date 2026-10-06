@@ -20,7 +20,7 @@ internal static class ShapeRules
                 FindField(type, "decodedFrame") is { } frame && !frame.FieldType.IsValueType
                 && HasTime(frame.FieldType, "SampleTime") && HasTime(frame.FieldType, "SampleDuration") ? "MF2" : "unverified",
             "YukkuriMovieMaker.Plugin.FileSource.MediaFoundation.MFVideoFileSource" => StreamClock(type, false) ? "MF-legacy" : "unverified",
-            "YukkuriMovieMaker.Plugin.FileSource.FFmpeg.FFmpegVideoFileSource" => StreamClock(type, true) ? "FFmpeg" : "unverified",
+            "YukkuriMovieMaker.Plugin.FileSource.FFmpeg.FFmpegVideoFileSource" => FFmpegClock(type) ? "FFmpeg" : "unverified",
             "YukkuriMovieMaker.Plugin.FileSource.WIC.WICGifVideoSource" or "YukkuriMovieMaker.Plugin.FileSource.WIC.WICWebpVideoSource" => "WIC",
             "YukkuriMovieMaker.Plugin.FileSource.WIC.WICSequentialImageVideoSource" => Sequence(type) ? "image" : "unverified",
             "YukkuriMovieMaker.Plugin.CachedVideoFileSource" => WrappedSource(type, videoSource) is not null ? "wrapper" : "unverified",
@@ -56,6 +56,19 @@ internal static class ShapeRules
     private static bool StreamClock(Type type, bool needsDuration) =>
         HasTime(type, "currentTime") && HasTime(type, "currentDuration") && HasTime(type, "streamStartTime")
         && (!needsDuration || HasTime(type, "Duration"));
+
+    // The stream clock with the stream start optional (YMM4 4.52 has none), and one SeekTo(TimeSpan, ...) to hook.
+    private static bool FFmpegClock(Type type) =>
+        HasTime(type, "currentTime") && HasTime(type, "currentDuration") && HasTime(type, "Duration")
+        && (HasTime(type, "streamStartTime") || FindField(type, "streamStartTime") is null && !HasProperty(type, "streamStartTime"))
+        && type.GetMethods(Instance | BindingFlags.DeclaredOnly).Count(method => method.Name == "SeekTo" && !method.IsAbstract
+            && method.GetParameters() is [{ ParameterType.FullName: "System.TimeSpan" }, ..]) == 1;
+
+    private static bool HasProperty(Type type, string name)
+    {
+        try { return type.GetProperty(name, Instance) is not null; }
+        catch (AmbiguousMatchException) { return true; }
+    }
 
     // A field of that name decides alone; otherwise a readable, non-indexed property is accepted.
     private static bool HasTime(Type type, string name)

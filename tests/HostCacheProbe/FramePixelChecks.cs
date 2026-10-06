@@ -159,7 +159,9 @@ internal static class FramePixelChecks
             bool mf2 = features.DecoderVerified(mediaFoundation) && FrameRenderReadiness.Coverage.Any(line => line.Contains(": MF2 (", StringComparison.Ordinal));
             if (mf2) CheckBoundaryTimes(host, context, videoPath);
             if (mf2) CheckVideoDecodeFailureIsNotStored(host, context, videoPath);
-            else Console.WriteLine("Video decode-failure check skipped: the MediaFoundation reader is not trusted on this build");
+            else Console.WriteLine("Video decode-failure check skipped: no trusted MF2 reader on this build");
+            FFmpegReaderChecks.Run(host, context, videoPath, features);
+            Check(TimelineFrameCache.GpuBytes == 0, "FFmpeg reader checks leaked global GPU reservation");
         }
         finally
         {

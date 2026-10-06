@@ -26,6 +26,7 @@ internal static class Program
         typeof(MFVideoFileSource2).GetMethod(nameof(MFVideoFileSource2.Update))!,
         typeof(MFVideoFileSource).GetMethod(nameof(MFVideoFileSource.Update))!,
         typeof(FFmpegVideoFileSource).GetMethod(nameof(FFmpegVideoFileSource.Update))!,
+        typeof(FFmpegVideoFileSource).GetMethod("SeekTo", BindingFlags.Instance | BindingFlags.NonPublic)!,
         typeof(WICGifVideoSource).GetMethod(nameof(WICGifVideoSource.Update))!,
         typeof(WICSequentialImageVideoSource).GetMethod(nameof(WICSequentialImageVideoSource.Update))!,
         typeof(CachedVideoFileSource).GetMethod(nameof(CachedVideoFileSource.Update))!,
@@ -151,7 +152,7 @@ internal static class Program
         Check(info.Prefixes.Count == 1 && info.Prefixes[0].PatchMethod.DeclaringType == typeof(CacheLike)
             && info.Postfixes.Count == 1 && info.Finalizers.Count == 0, $"Readiness patches left on Update after {stage}");
         foreach (var decoder in decoders)
-            Check(Harmony.GetPatchInfo(decoder) is not { } decoderInfo || decoderInfo.Finalizers.Count == 0,
+            Check(Harmony.GetPatchInfo(decoder) is not { } decoderInfo || decoderInfo.Finalizers.Count == 0 && decoderInfo.Prefixes.Count == 0,
                 $"Readiness patches left on {decoder.DeclaringType?.Name}.{decoder.Name} after {stage}");
     }
 
@@ -284,6 +285,28 @@ internal static class Program
         Check(!FrameRenderReadiness.WasLastUpdateReady(bad, Frame * 20), "Concurrent failing render reported ready");
     }
 
+    // FFmpeg: the interval a seek produced starting exactly at t may be a later frame shown from t on (a seek that landed
+    // after t); it is not ready until another frame is decoded. Frames decoded on in order are.
+    private static void CheckFFmpegSeekWatch()
+    {
+        foreach (var start in new[] { TimeSpan.Zero, Frame * 2 })
+        {
+            var source = new FFmpegVideoFileSource { StreamStart = start, Behavior = VideoMode.LateSeek };
+            var root = Scene(decoders: 0);
+            root.Sources.Add(source);
+            bool ReadyAt(TimeSpan time) { Render(root, time); return CacheLike.Last(root) == true && FrameRenderReadiness.WasLastUpdateReady(root, time); }
+            Check(!ReadyAt(Frame * 40) && source.Seeks == 1, "The interval a seek began at t reported ready");
+            Check(!ReadyAt(Frame * 41) && source.Seeks == 1, "A later time inside the interval a seek began at t reported ready");
+            Check(ReadyAt(Frame * 42) && source.Seeks == 1, "A frame decoded on in order after the seek was not ready");
+            Check(ReadyAt(Frame * 43), "Frames decoded on in order were not ready");
+            Check(!ReadyAt(Frame * 10) && source.Seeks == 2, "The interval a backward seek began at t reported ready");
+            // A seek outside any frame's scope (prefetch, idle) is watched too.
+            source.Update(Frame * 80);
+            Check(source.Seeks == 3 && !ReadyAt(Frame * 81), "An interval a seek outside a frame began at t reported ready");
+            Check(ReadyAt(Frame * 82), "Decoding on after an unattributed seek was not ready");
+        }
+    }
+
     private static void CheckHostCoverage()
     {
         var coverage = FrameRenderReadiness.Coverage;
@@ -309,7 +332,8 @@ internal static class Program
             Check(ShapeRules.Predict(type, typeof(IVideoFileSource)) == kind, $"Shape report predicts {ShapeRules.Predict(type, typeof(IVideoFileSource))} for {line}");
         }
         foreach (var method in VideoSourceUpdates)
-            Check(Harmony.GetPatchInfo(method)?.Finalizers.Count == 1, $"{method.DeclaringType?.Name}.Update was not hooked exactly once");
+            Check(method.Name == "SeekTo" ? Harmony.GetPatchInfo(method)?.Prefixes.Count == 1 : Harmony.GetPatchInfo(method)?.Finalizers.Count == 1,
+                $"{method.DeclaringType?.Name}.{method.Name} was not hooked exactly once");
     }
 
     private static void CheckHostVideoSources()
@@ -357,6 +381,7 @@ internal static class Program
             "A sample on the item clock instead of the stream clock (t + streamStartTime) reported ready");
         Check(!Ready(() => [new FFmpegVideoFileSource()], s => Mode(s[0], VideoMode.Stretch)),
             "FFmpeg frame stretched to the stream end after an early stop reported ready");
+        CheckFFmpegSeekWatch();
         Check(!Ready(() => [new WICGifVideoSource()], s => Mode(s[0], VideoMode.Throw)), "WIC decode exception reported ready");
         // An image sequence holds t while the image of GetFrameIndex(t) is loaded; the image the key names must be the one
         // shown. Images shown besides (a source read ahead for a later item) do not matter.
@@ -577,7 +602,7 @@ namespace YukkuriMovieMaker.Plugin.FileSource
         void Update(TimeSpan time);
     }
 
-    internal enum VideoMode { Decode, Stale, Clear, Throw, Stretch, Unshifted }
+    internal enum VideoMode { Decode, Stale, Clear, Throw, Stretch, Unshifted, LateSeek }
 
     // Hook-shape fakes without a pinned name: always unverified, but still hooked.
     internal abstract class VideoSourceBase : IVideoFileSource
@@ -663,22 +688,38 @@ namespace YukkuriMovieMaker.Plugin.FileSource.MediaFoundation
 
 namespace YukkuriMovieMaker.Plugin.FileSource.FFmpeg
 {
-    // Like the host, plus the early-stop fallback that stretches the last frame up to the stream end.
+    // Like the host, plus the early-stop fallback that stretches the last frame up to the stream end. It seeks like the
+    // host (first, backwards or far ahead) and decodes on otherwise; LateSeek: a seek lands after t, and the first
+    // frame decoded (one frame later) is shown from t on.
     internal sealed class FFmpegVideoFileSource : IVideoFileSource
     {
         internal VideoMode Behavior;
         private TimeSpan currentTime = TimeSpan.FromTicks(-1), currentDuration, streamStartTime;
         public TimeSpan Duration { get; init; } = TimeSpan.FromSeconds(10);
         internal TimeSpan StreamStart { init => streamStartTime = value; }
+        internal int Seeks;
+        private bool sought;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private void SeekTo(TimeSpan time)
+        {
+            Seeks++;
+            sought = true;
+        }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         public void Update(TimeSpan time)
         {
             Thread.Sleep(1);
             time += streamStartTime;
+            if (currentDuration > TimeSpan.Zero && currentTime <= time && time < currentTime + currentDuration) return;
+            sought = false;
+            if (currentDuration == TimeSpan.Zero || time < currentTime || currentTime + currentDuration + global::Program.Frame * 10 < time) SeekTo(time);
             switch (Behavior)
             {
                 case VideoMode.Decode: currentTime = time; currentDuration = global::Program.Frame; break;
+                case VideoMode.LateSeek when sought: currentTime = time; currentDuration = global::Program.Frame * 2; break;
+                case VideoMode.LateSeek: currentTime = time; currentDuration = global::Program.Frame; break;
                 case VideoMode.Unshifted: currentTime = time - streamStartTime; currentDuration = global::Program.Frame; break;
                 case VideoMode.Stretch: currentTime = time - global::Program.Frame; currentDuration = streamStartTime + Duration - currentTime; break;
                 case VideoMode.Clear: currentTime = time; currentDuration = TimeSpan.Zero; break;

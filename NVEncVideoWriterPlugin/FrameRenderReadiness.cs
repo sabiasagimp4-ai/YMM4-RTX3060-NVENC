@@ -33,8 +33,10 @@ internal static class FrameRenderReadiness
     // Shown: the file a source that holds its frame shows (an image sequence's current image), or null. A frame is
     // only ready for a caller whose key names images that were all shown in it. (Not the converse: TimelineSource
     // also updates the sources of items that start within a second, in the frame's scope, to read them ahead.)
+    // Seeks: methods hooked to tell that an Update sought (SeekPrefix); Observe: called after every Update of the
+    // source, in or out of a frame's scope, before HoldsFrame (the seek watch of FFmpeg).
     internal sealed record DecoderCheck(string Name, MethodBase Update, Func<object, TimeSpan, bool> HoldsFrame, Action? Unhookable = null,
-        Func<object, string?>? Shown = null);
+        Func<object, string?>? Shown = null, MethodBase[]? Seeks = null, Action<object, TimeSpan>? Observe = null);
 
     private sealed class Scope(object source, TimeSpan time, Scope? parent, int epoch)
     {
@@ -68,12 +70,19 @@ internal static class FrameRenderReadiness
         internal readonly ConcurrentDictionary<Type, Func<object, TimeSpan, bool>> Verified = new();
         internal readonly ConcurrentDictionary<Type, Func<object, TimeSpan, bool>> Classifiers = new();
         internal readonly ConcurrentDictionary<Type, Func<object, string?>> ShownFiles = new();
+        internal readonly ConcurrentDictionary<Type, MethodInfo> SeekMethods = new();
+        internal readonly ConcurrentDictionary<Type, Action<object, TimeSpan>> Observers = new();
         internal readonly List<string> Coverage = [];
 
         internal bool HoldsFrame(object instance, TimeSpan time) =>
             Classifiers.TryGetValue(instance.GetType(), out var holds) && holds(instance, time);
 
         internal string? ShownFile(object instance) => ShownFiles.TryGetValue(instance.GetType(), out var shown) ? shown(instance) : null;
+
+        internal void Observe(object instance, TimeSpan time)
+        {
+            if (Observers.TryGetValue(instance.GetType(), out var observe)) observe(instance, time);
+        }
     }
 
     internal static bool Installed => Volatile.Read(ref installed) != 0;
@@ -181,8 +190,7 @@ internal static class FrameRenderReadiness
             added.Add((timelineUpdate, finalizer));
             var decoderFinalizer = Method(nameof(DecoderFinalizer));
             foreach (var check in checks)
-                if (TryPatchDecoder(harmony, check, decoderFinalizer))
-                { added.Add((check.Update, Method(nameof(DecoderTracePrefix)))); added.Add((check.Update, decoderFinalizer)); }
+                if (TryPatchDecoder(harmony, check, decoderFinalizer) is { } patches) added.AddRange(patches);
             lock (patchGate) installedPatches = [.. added];
             Volatile.Write(ref installed, 1);
             reason = string.Empty;
@@ -200,17 +208,32 @@ internal static class FrameRenderReadiness
 
     // Harmony 2.4.2 cannot rebuild some method bodies at all (an exception filter that continues a loop, as in
     // the DirectShow reader of YMM4 4.56.1.0, fails with "Incorrect code generation for exception block").
-    private static bool TryPatchDecoder(Harmony harmony, DecoderCheck check, MethodInfo finalizer)
+    // The patches added (null when the source could not be hooked and its fallback rejects it instead). The seek
+    // hooks go first: an Update hooked without them would not tell that it sought.
+    private static (MethodBase Target, MethodInfo Patch)[]? TryPatchDecoder(Harmony harmony, DecoderCheck check, MethodInfo finalizer)
     {
+        var added = new List<(MethodBase Target, MethodInfo Patch)>();
         try
         {
+            var seekPrefix = Method(nameof(SeekPrefix));
+            foreach (var seek in check.Seeks ?? [])
+            {
+                EnsureNoExternalHarmonyOwners(seek, harmony.Id);
+                harmony.Patch(seek, prefix: new HarmonyMethod(seekPrefix, Priority.First));
+                added.Add((seek, seekPrefix));
+            }
             harmony.Patch(check.Update, prefix: new HarmonyMethod(Method(nameof(DecoderTracePrefix))), finalizer: new HarmonyMethod(finalizer, Priority.Last));
-            return true;
+            added.Add((check.Update, Method(nameof(DecoderTracePrefix))));
+            added.Add((check.Update, finalizer));
+            return [.. added];
         }
-        catch (Exception error) when (check.Unhookable is { } fallback && error is not OutOfMemoryException)
+        catch (Exception error) when (error is not OutOfMemoryException)
         {
+            for (int i = added.Count - 1; i >= 0; i--)
+                try { harmony.Unpatch(added[i].Target, added[i].Patch); } catch { }
+            if (check.Unhookable is not { } fallback) throw;
             fallback();
-            return false;
+            return null;
         }
     }
 
@@ -275,6 +298,10 @@ internal static class FrameRenderReadiness
             if (__exception is not null) { __state.Outcome = "exception"; __state.Detail = __exception.GetType().Name; }
             __state.Dispose();
         }
+        // The seek watch follows every Update of the source, also those that prove nothing for any frame.
+        if (__args is [TimeSpan observed] && Volatile.Read(ref decoders).TryGetValue(__originalMethod.MethodHandle, out var observing)
+            && observing.Observe is { } observe)
+            try { observe(__instance, observed); } catch { }
         var scope = current.Value;
         // TimelineSource.Update prefetches items about a second ahead with Task.Run, which captures the
         // current scope; that decode can finish after the frame completed. The frame that later adopts the
@@ -349,8 +376,8 @@ internal static class FrameRenderReadiness
                     {
                         [check.Update.MethodHandle] = check,
                     });
-                    if (TryPatchDecoder(hostBinding.Harmony, check, patch))
-                        lock (patchGate) installedPatches = [.. installedPatches, (check.Update, Method(nameof(DecoderTracePrefix))), (check.Update, patch)];
+                    if (TryPatchDecoder(hostBinding.Harmony, check, patch) is { } patches)
+                        lock (patchGate) installedPatches = [.. installedPatches, .. patches];
                 }
             }
             catch (Exception error) when (error is not OutOfMemoryException)
@@ -402,6 +429,8 @@ internal static class FrameRenderReadiness
             {
                 hostBinding.Verified[type] = verified.Holds;
                 if (verified.Shown is { } shown) hostBinding.ShownFiles[type] = shown;
+                if (verified.Seek is { } seek) hostBinding.SeekMethods[type] = seek;
+                if (verified.Observe is { } observe) hostBinding.Observers[type] = observe;
                 names[type] = verified.Name;
             }
         foreach (var type in types)
@@ -427,7 +456,10 @@ internal static class FrameRenderReadiness
             .Select(group => new DecoderCheck(string.Join(", ", group.Select(type => type.FullName)), group.Key, hostBinding.HoldsFrame,
                 // The wrapper itself must always be hooked; any other source it holds is then rejected by it.
                 wrapped && group.All(type => type.FullName != WrapperTypeName) ? () => Demote(hostBinding, group) : null,
-                hostBinding.ShownFile))
+                hostBinding.ShownFile,
+                group.Select(type => hostBinding.SeekMethods.TryGetValue(type, out var seek) ? seek : null).OfType<MethodInfo>()
+                    .Distinct(MethodHandleComparer.Instance).ToArray(),
+                hostBinding.Observe))
             .ToList();
     }
 
@@ -439,6 +471,7 @@ internal static class FrameRenderReadiness
             {
                 hostBinding.Verified.TryRemove(type, out _);
                 hostBinding.ShownFiles.TryRemove(type, out _);
+                hostBinding.Observers.TryRemove(type, out _);
                 hostBinding.Classifiers[type] = static (_, _) => false;
                 int line = hostBinding.Coverage.FindIndex(entry => entry.StartsWith(type.FullName + ": ", StringComparison.Ordinal));
                 string text = $"{type.FullName}: unverified (its Update cannot be hooked; CachedVideoFileSource never accepts it)";
@@ -501,6 +534,12 @@ internal static class FrameRenderReadiness
         return null;
     }
 
+    private static bool HasProperty(Type type, string name)
+    {
+        try { return type.GetProperty(name, Instance) is not null; }
+        catch (AmbiguousMatchException) { return true; }
+    }
+
     private static bool Covers(TimeSpan start, TimeSpan duration, TimeSpan time) =>
         duration > TimeSpan.Zero && start <= time && time < start + duration;
 
@@ -514,13 +553,14 @@ internal static class FrameRenderReadiness
     internal const string WicSequenceTypeName = "YukkuriMovieMaker.Plugin.FileSource.WIC.WICSequentialImageVideoSource";
     internal const string WrapperTypeName = "YukkuriMovieMaker.Plugin.CachedVideoFileSource";
 
-    private sealed record Verified(string Name, Func<object, TimeSpan, bool> Holds, Func<object, string?>? Shown = null);
+    private sealed record Verified(string Name, Func<object, TimeSpan, bool> Holds, Func<object, string?>? Shown = null,
+        MethodInfo? Seek = null, Action<object, TimeSpan>? Observe = null);
 
     private static Verified? DescribeVerified(Type type) => type.FullName switch
     {
         Mf2TypeName => Plain(DescribeMf2(type)),
         MfLegacyTypeName => Plain(DescribeStreamClock(type, "MF-legacy", excludeStretchedToEnd: false)),
-        FFmpegTypeName => Plain(DescribeStreamClock(type, "FFmpeg", excludeStretchedToEnd: true)),
+        FFmpegTypeName => DescribeFFmpeg(type),
         // Synchronous WIC decode: failures throw (the decoder finalizer fails the frame). The only swallowed
         // GIF error clears the frame deterministically for that file.
         WicGifTypeName or WicWebpTypeName => new("WIC (synchronous decode; an exception fails the frame)", static (_, _) => true),
@@ -561,10 +601,14 @@ internal static class FrameRenderReadiness
     // [currentTime, currentTime + currentDuration); timeouts, errors and out-of-range times set a zero duration.
     // FFmpeg also stretches the last decoded frame up to the stream end when decoding stops early (end of
     // file or a read error), which cannot be told apart from a transient failure, so that is rejected.
-    private static (string Name, Func<object, TimeSpan, bool> Holds)? DescribeStreamClock(Type type, string label, bool excludeStretchedToEnd)
+    // The FFmpeg reader of YMM4 4.52 has no streamStartTime and uses t as it is (startOptional).
+    private static (string Name, Func<object, TimeSpan, bool> Holds)? DescribeStreamClock(Type type, string label, bool excludeStretchedToEnd,
+        bool startOptional = false)
     {
-        if (TimeReader(type, "currentTime") is not { } start || TimeReader(type, "currentDuration") is not { } duration
-            || TimeReader(type, "streamStartTime") is not { } streamStart) return null;
+        if (TimeReader(type, "currentTime") is not { } start || TimeReader(type, "currentDuration") is not { } duration) return null;
+        var streamStart = TimeReader(type, "streamStartTime");
+        if (streamStart is null && (!startOptional || FindField(type, "streamStartTime") is not null || HasProperty(type, "streamStartTime"))) return null;
+        streamStart ??= static _ => TimeSpan.Zero;
         Func<object, TimeSpan>? length = null;
         if (excludeStretchedToEnd && (length = TimeReader(type, "Duration")) is null) return null;
         return ($"{label} (currentTime/currentDuration contains t + streamStartTime{(length is null ? string.Empty : ", not stretched to the end")})",
@@ -573,6 +617,57 @@ internal static class FrameRenderReadiness
                 TimeSpan from = start(instance), span = duration(instance), offset = streamStart(instance);
                 return Covers(from, span, time + offset) && (length is null || from + span < offset + length(instance));
             });
+    }
+
+    // FFmpegVideoFileSource seeks to a key frame before t and decodes on until the frame that holds t. When the seek
+    // lands after t, the first frame decoded starts later, and the reader shows it from t on (currentTime = t) until
+    // another frame is decoded; which frame t shows then depends on where decoding came from. YMM4 4.54.0.1 and later
+    // seek again further back in that case, unless even the stream start does not reach t; 4.52.0.0 to 4.54.0.0 do not.
+    // So an interval that an Update which sought produced starting exactly at t + streamStartTime is not ready, until
+    // the interval changes (sequential decoding shows frames in order, exactly). A frame that truly starts at t loses
+    // only its own interval after a seek. The reader's SeekTo is hooked to tell that an Update sought.
+    private sealed class SeekState
+    {
+        internal bool Sought;
+        internal (TimeSpan From, TimeSpan Span)? Suspect;
+    }
+
+    private static readonly ConditionalWeakTable<object, SeekState> seekStates = new();
+
+    private static void SeekPrefix(object __instance)
+    {
+        var state = seekStates.GetValue(__instance, static _ => new());
+        lock (state) state.Sought = true;
+    }
+
+    private static Verified? DescribeFFmpeg(Type type)
+    {
+        if (DescribeStreamClock(type, "FFmpeg", excludeStretchedToEnd: true, startOptional: true) is not { } clock) return null;
+        var seek = type.GetMethods(Instance | BindingFlags.DeclaredOnly).Where(method => method.Name == "SeekTo" && !method.IsAbstract
+            && method.GetParameters() is [{ ParameterType: var first }, ..] && first == typeof(TimeSpan)).ToArray();
+        if (seek is not [var seekTo]) return null;
+        Func<object, TimeSpan> start = TimeReader(type, "currentTime")!, duration = TimeReader(type, "currentDuration")!;
+        Func<object, TimeSpan> streamStart = TimeReader(type, "streamStartTime") ?? (static _ => TimeSpan.Zero);
+        return new(clock.Name + ", not the interval a seek began at t", (instance, time) =>
+        {
+            if (!clock.Holds(instance, time)) return false;
+            if (!seekStates.TryGetValue(instance, out var state)) return true;
+            var interval = (start(instance), duration(instance));
+            lock (state) return state.Suspect != interval;
+        }, Seek: seekTo, Observe: (instance, time) =>
+        {
+            var state = seekStates.GetValue(instance, static _ => new());
+            TimeSpan from = start(instance), span = duration(instance);
+            lock (state)
+            {
+                if (state.Sought)
+                {
+                    state.Sought = false;
+                    state.Suspect = span > TimeSpan.Zero && from == time + streamStart(instance) ? (from, span) : null;
+                }
+                else if (state.Suspect is { } suspect && (suspect.From != from || suspect.Span != span)) state.Suspect = null;
+            }
+        });
     }
 
     // CachedVideoFileSource (the factory wraps every video source in it) delegates Update and Output to
