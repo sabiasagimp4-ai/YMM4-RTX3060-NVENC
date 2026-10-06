@@ -76,7 +76,10 @@ internal static class HostIntegration
                 ["features"] = features is null ? null : new Dictionary<string, object?>
                 {
                     ["basis"] = features.Basis, ["preview"] = features.Preview, ["selectionRects"] = features.SelectionRects,
-                    ["wrappedSources"] = features.WrappedSources, ["rulerBars"] = features.RulerBars, ["identityRandom"] = features.IdentityRandom,
+                    ["wrappedSources"] = features.WrappedSources, ["rulerBars"] = features.RulerBars,
+                    // Keyed where the values come from the model: YMM4's code or the plugin's alignment (RandomSeedAlignment).
+                    ["identityRandom"] = features.IdentityRandom && RandomSeedAlignment.EffectsByModel(host),
+                    ["randomTextOrder"] = features.IdentityRandom && RandomSeedAlignment.TextOrderByItem,
                     ["simpleTachie"] = features.SimpleTachie, ["lipSync"] = features.LipSync,
                     ["animationTachie"] = features.AnimationTachie, ["psdTachie"] = features.PsdTachie,
                     ["decoders"] = features.VerifiedDecoders?.Order(StringComparer.Ordinal).ToArray(),

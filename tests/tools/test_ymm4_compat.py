@@ -19,7 +19,7 @@ def scan(net='10.0.0', **extra):
             'plugin': PLUGIN, 'contracts': {'baseline': '4.56.1.0', 'features': ['core'], 'off': {}}, **extra}
 
 
-ALL_FEATURES = {'basis': '4.56.1.0', 'preview': True, 'selectionRects': True, 'wrappedSources': True, 'rulerBars': True, 'identityRandom': True,
+ALL_FEATURES = {'basis': '4.56.1.0', 'preview': True, 'selectionRects': True, 'wrappedSources': True, 'rulerBars': True, 'identityRandom': True, 'randomTextOrder': True,
                 'simpleTachie': True, 'lipSync': True, 'animationTachie': True, 'psdTachie': True, 'decoders': None}
 
 

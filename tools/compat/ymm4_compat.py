@@ -33,6 +33,7 @@ FEATURES = [
     ('wrappedSources', '動画などの完成判定'),
     ('rulerBars', 'キャッシュバー'),
     ('identityRandom', 'ランダム系の効果'),
+    ('randomTextOrder', '文字のランダム順の表示'),
     ('simpleTachie', 'シンプル立ち絵'),
     ('lipSync', '口パクの完成判定'),
     ('animationTachie', '動く立ち絵'),

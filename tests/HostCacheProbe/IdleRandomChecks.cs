@@ -7,12 +7,15 @@ using NVEncVideoWriterPlugin;
 using YukkuriMovieMaker.Commons;
 using YukkuriMovieMaker.Player.Video;
 using YukkuriMovieMaker.Project;
+using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Project.Items;
 
 // Random moves end to end on the real host: the idle pre-renderer renders frames of a random move (the animation type
 // and the effect, both seeded by object identities) through its own per-frame code (PrimeBatchFrame), and the paused
 // player then shows every one of them from the cache with the pixels it renders itself. Also shows why the clone cannot
-// render them: a copy of the project draws other random values.
+// render them: a copy of the project draws other random values. Before that, each kind of identity-seeded randomness
+// alone: another renderer of the same scene draws the same values (with RandomSeedAlignment where YMM4 seeds with the
+// renderer), a copy of the project draws others, and the frames are keyed by those objects.
 internal static class IdleRandomChecks
 {
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -20,6 +23,8 @@ internal static class IdleRandomChecks
 
     internal static void Run(Assembly host, IGraphicsDevicesAndContext context)
     {
+        Console.WriteLine("Random seeds: " + string.Join("; ", RandomSeedAlignment.Coverage));
+        foreach (var (name, item, rendererSeeded) in Kinds(host)) CheckKind(host, context, name, item, rendererSeeded);
         string root = Path.Combine(Path.GetTempPath(), "ymm-idle-random-" + Guid.NewGuid().ToString("N"));
         var store = new FrameCacheStore(root, 64L << 20, 0);
         TimelineFrameCache.UseStore(store);
@@ -44,7 +49,7 @@ internal static class IdleRandomChecks
             // The idle pre-renderer's live renderer is another source over the same scene: it must draw the same values.
             second = Create(host, context, scene);
             int sameSecond = Same(Render(second, timeline, dc, viewport), baseline);
-            if (!HostFeatures.For(host).IdentityRandom)
+            if (!(HostFeatures.For(host).IdentityRandom && RandomSeedAlignment.EffectsByModel(host)))
             {
                 // Before 4.52.0.2 the random effect seeds with its renderer's own object: the frames are never stored.
                 Check(sameSecond < Frames, "Another renderer drew the same random values on a build marked as seeding with its renderer");
@@ -116,6 +121,90 @@ internal static class IdleRandomChecks
             TimelineFrameCache.UseStore(new FrameCacheStore(root + "-after", 256L << 20, 0));
             try { Directory.Delete(root, recursive: true); } catch (IOException) { }
             GC.KeepAlive(timeline);
+        }
+    }
+
+    // Each kind of randomness YMM4 seeds with an object's identity, on its own item; rendererSeeded: YMM4 seeds it with
+    // the renderer's own object (RandomSeedAlignment seeds it with the model instead).
+    private static IEnumerable<(string Name, IItem Item, bool RendererSeeded)> Kinds(Assembly host)
+    {
+        bool oldEffects = host.GetType(RandomSeedAlignment.EffectBaseName) is { } generic
+            && generic.GetMethod("GetRandomValue", Instance | BindingFlags.DeclaredOnly) is { } method
+            && HarmonyLib.PatchProcessor.GetOriginalInstructions(method).Zip(HarmonyLib.PatchProcessor.GetOriginalInstructions(method).Skip(1))
+                .Any(pair => pair.First.opcode == System.Reflection.Emit.OpCodes.Ldarg_0 && pair.Second.operand is MethodInfo { Name: "GetHashCode" });
+        // The random rotation with no span: a new value every frame (MersenneTwister seeded by the hash).
+        var rotate = (YukkuriMovieMaker.Plugin.Effects.IVideoEffect)Activator.CreateInstance(
+            host.GetType("YukkuriMovieMaker.Project.Effects.RandomRotateEffect", true)!, nonPublic: true)!;
+        ((Animation)rotate.GetType().GetProperty("Span")!.GetValue(rotate)!).SetFirst(0);
+        var rotating = new ShapeItem { Frame = 0, Length = Frames, Layer = 0 };
+        rotating.VideoEffects = rotating.VideoEffects.Add(rotate);
+        yield return ("random rotation", rotating, oldEffects);
+        yield return ("random text order", new TextItem { Frame = 0, Length = Frames, Layer = 0, Text = "ABCDEFGHIJKL", Font = "Arial",
+            DisplayInterval = 50, DisplayDirection = TypewriterAnimationDirection.Random }, true);
+        foreach (string type in new[] { "Delaunay", "Voronoi" })
+        {
+            var mosaic = new YukkuriMovieMaker.Project.Effects.MosaicEffect { MosaicType = Enum.Parse<YukkuriMovieMaker.Project.Effects.MosaicType>(type) };
+            mosaic.MosaicParameter = (YukkuriMovieMaker.Project.Effects.MosaicParameters.MosaicParameterBase)Activator.CreateInstance(
+                host.GetType($"YukkuriMovieMaker.Project.Effects.MosaicParameters.{type}MosaicParameter", true)!, nonPublic: true)!;
+            var shape = new ShapeItem { Frame = 0, Length = Frames, Layer = 0 };
+            shape.VideoEffects = shape.VideoEffects.Add(mosaic);
+            yield return ($"{type} mosaic", shape, false);
+        }
+    }
+
+    private static void CheckKind(Assembly host, IGraphicsDevicesAndContext context, string name, IItem item, bool rendererSeeded)
+    {
+        var dc = context.DeviceContext;
+        var timeline = new Timeline();
+        timeline.VideoInfo.Width = Width; timeline.VideoInfo.Height = Height; timeline.VideoInfo.FPS = 30;
+        timeline.Items = timeline.Items.Add(item);
+        timeline.RefreshTimelineLengthAndMaxLayer();
+        var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
+        var scene = new Scene(timeline, scenes, []);
+        var viewport = new TimelineFrameCache.PreviewViewport(Width, Height, Matrix3x2.Identity, new Vector2(Width / 2f, Height / 2f), 96, 96,
+            new Vortice.DCommon.PixelFormat(Vortice.DXGI.Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),
+            dc.AntialiasMode, dc.TextAntialiasMode, dc.PrimitiveBlend, dc.UnitMode, scene.ID, timeline.ID, Stopwatch.GetTimestamp(), false);
+        var copyTimeline = YukkuriMovieMaker.Json.Json.LoadFromText<Timeline>(YukkuriMovieMaker.Json.Json.GetJsonText(timeline))!;
+        var copyScenes = HostCompat.NewScenes(); copyScenes.AddScene(copyTimeline);
+        bool enabled = TimelineFrameCache.Enabled;
+        TimelineFrameCache.Enabled = false;
+        var renderers = new List<ITimelineSource>();
+        try
+        {
+            ITimelineSource New(Scene s) { var source = Create(host, context, s); renderers.Add(source); return source; }
+            var baseline = Render(New(scene), timeline, dc, viewport);
+            int moving = Enumerable.Range(1, Frames - 1).Count(frame => !baseline[frame].SequenceEqual(baseline[frame - 1]));
+            int sameSecond = Same(Render(New(scene), timeline, dc, viewport), baseline);
+            int sameCopy = Same(Render(New(new Scene(copyTimeline, copyScenes, [])), copyTimeline, dc, viewport), baseline);
+            // A third renderer after the others ran (their code recompiled by .NET by then): still the same values.
+            int sameThird = Same(Render(New(scene), timeline, dc, viewport), baseline);
+            bool identity = HostFeatures.For(host).IdentityRandom && RandomSeedAlignment.EffectsByModel(host);
+            bool keyed = identity && (!rendererSeeded || item is not TextItem || RandomSeedAlignment.TextOrderByItem);
+            using var tracker = new KeyDependencyTracker(scene);
+            bool sessionKeyed = SpinWait.SpinUntil(() =>
+            {
+                if (tracker.TryCapture(0, out var capture, out _)) capture!.Dispose();
+                return Enumerable.Range(0, Frames).All(tracker.IsSessionKeyed);
+            }, TimeSpan.FromSeconds(keyed ? 20 : 2));
+            string summary = $"{name}: {moving} of {Frames - 1} frames change, another renderer draws {Frames - sameSecond} other frames "
+                + $"(a third {Frames - sameThird}), a copy of the project {Frames - sameCopy}";
+            Check(sameCopy < Frames, summary + "; the copy should draw other values (identity-seeded)");
+            if (keyed)
+            {
+                Check(sameSecond == Frames && sameThird == Frames, summary + "; renderers of the same scene must draw the same values");
+                Check(sessionKeyed, summary + "; the frames were not keyed by their objects");
+                Console.WriteLine(summary + "; keyed by its objects for this session");
+            }
+            else
+            {
+                Check(!sessionKeyed && Enumerable.Range(0, Frames).All(tracker.RendersNormally), summary + "; a frame with randomness that is not aligned was keyed");
+                Console.WriteLine(summary + "; rendered normally on this build");
+            }
+        }
+        finally
+        {
+            foreach (var renderer in renderers) renderer.Dispose();
+            TimelineFrameCache.Enabled = enabled;
         }
     }
 

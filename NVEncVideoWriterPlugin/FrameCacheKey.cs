@@ -98,7 +98,11 @@ internal static class FrameCacheKey
             var rootItems = scene.Timeline.Items.ToArray();
             var rootDependencies = new List<ItemDependencies>(rootItems.Length);
             bool nestedUncacheable = false, nestedSession = false, nestedCulture = false, audioForeign = false;
-            bool identityRandom = HostFeatures.For(typeof(Scene).Assembly).IdentityRandom;
+            // Identity-seeded randomness is keyed where YMM4 draws it from the model objects (HostFeatures.IdentityRandom),
+            // with the Random*Effect processors seeded by their effects (RandomSeedAlignment before 4.52.0.2); random text
+            // order where the plugin seeds it with the item (RandomSeedAlignment).
+            bool identityRandom = HostFeatures.For(typeof(Scene).Assembly).IdentityRandom && RandomSeedAlignment.EffectsByModel(typeof(Scene).Assembly);
+            bool textOrder = identityRandom && RandomSeedAlignment.TextOrderByItem;
             if (sourceReaders.Length != 3) return Bypass("読み込みプラグインの状態を確認できません。", out reason);
             // Files are read by the file source readers (fonts by DirectWrite). With a reader whose code was not
             // read, the items that read files are rendered normally.
@@ -227,8 +231,13 @@ internal static class FrameCacheKey
                         // outside YMM4's own assemblies (DrawnText).
                         var drawn = new DrawnText();
                         var seeds = IdentitySeeds(item, out bool randomOrder, drawn);
-                        uncacheable |= randomOrder;
-                        // Keyed by those objects only where YMM4 draws the values from them (HostFeatures.IdentityRandom).
+                        if (randomOrder && textOrder)
+                        {
+                            seeds.Add(RuntimeHelpers.GetHashCode(item));
+                            seeds.Sort();
+                        }
+                        else uncacheable |= randomOrder;
+                        // Keyed by those objects only where YMM4 draws the values from them (identityRandom).
                         if (seeds.Count != 0 && !identityRandom) uncacheable = true;
                         else if (seeds.Count != 0)
                         {
@@ -413,10 +422,11 @@ internal static class FrameCacheKey
     // YMM4 seeds some randomness with an object's identity hash (GetHashCode is not overridden, 4.56.1.0): random-move
     // animations (Animation.GetValue), the Random*Effect family (RandomEffectBase) and the RandomDuplicator, Crash,
     // InOutCrash, RandomLine, InOutRandomLine and Noise (unique seed) effects, and the Community effects listed below.
-    // They draw otherwise in another process, after the project is loaded again, and in the idle pre-renderer's clone:
-    // the item's key holds those objects' identity hashes (its frames are keyed for these objects only). Text revealed
-    // or hidden in random order is seeded by YMM4's text source, created again when the item comes back into the frame
-    // (TextSource, JimakuSource): those items render normally (randomOrder).
+    // The Delaunay and Voronoi mosaics seed with their parameter objects. They draw otherwise in another process, after
+    // the project is loaded again, and in the idle pre-renderer's clone: the item's key holds those objects' identity
+    // hashes (its frames are keyed for these objects only). Text revealed or hidden in random order is seeded by YMM4's
+    // text source, created again when the item comes back into the frame (TextSource, JimakuSource; randomOrder): keyed
+    // by the item where the plugin seeds the source with it (RandomSeedAlignment), rendered normally otherwise.
     internal static List<int> IdentitySeeds(IItem item, out bool randomOrder, DrawnText? drawn = null)
     {
         randomOrder = item switch
@@ -565,6 +575,8 @@ internal static class FrameCacheKey
         "YukkuriMovieMaker.Project.Effects.RandomLineEffect",
         "YukkuriMovieMaker.Project.Effects.InOutRandomLineEffect",
         "YukkuriMovieMaker.Project.Effects.NoiseEffect",
+        "YukkuriMovieMaker.Project.Effects.MosaicParameters.DelaunayMosaicParameter",
+        "YukkuriMovieMaker.Project.Effects.MosaicParameters.VoronoiMosaicParameter",
         "YukkuriMovieMaker.Plugin.Community.Effect.Video.CameraShake.CameraShakeEffect",
         "YukkuriMovieMaker.Plugin.Community.Effect.Video.RectangleGlitchNoise.RectangleGlitchNoiseEffect",
         "YukkuriMovieMaker.Plugin.Community.Effect.Video.StripeGlitchNoise.StripeGlitchNoiseEffect",

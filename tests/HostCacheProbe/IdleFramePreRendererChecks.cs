@@ -17,8 +17,9 @@ internal static class IdleFramePreRendererChecks
         CheckClonedSceneIsIndependent();
         CheckCancelledJobCannotCommit();
         CheckUnverifiableFramePassed();
-        // Identity-seeded frames are keyed only where their randomness comes from the model (HostContracts identity-random).
-        bool identityRandom = HostFeatures.For(typeof(Scene).Assembly).IdentityRandom;
+        // Identity-seeded frames are keyed only where their randomness comes from the model (HostContracts identity-random,
+        // with RandomSeedAlignment installed where YMM4 seeds the random effects with their processors).
+        bool identityRandom = HostFeatures.For(typeof(Scene).Assembly).IdentityRandom && RandomSeedAlignment.EffectsByModel(typeof(Scene).Assembly);
         if (identityRandom) CheckSessionFrameRenderedLive();
         Console.WriteLine("Idle pre-render: independent scene clone, cancelled commit guard, unverifiable frames passed over"
             + (identityRandom ? " and identity-random frames rendered from the live scene OK" : " OK (identity-random frames render normally on this build)"));

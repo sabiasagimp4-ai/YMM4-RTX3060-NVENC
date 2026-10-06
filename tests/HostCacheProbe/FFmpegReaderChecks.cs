@@ -20,6 +20,8 @@ internal static class FFmpegReaderChecks
     private const int Width = 320, Height = 180, Length = 120;
     private static IVideoFileSourcePlugin? reader;
     private static string[] files = [];
+    // The FFmpeg sources this check created, newest last (for the trace when nothing was stored).
+    private static readonly List<object> created = [];
 
     internal static void Run(Assembly host, IGraphicsDevicesAndContext context, string? videoPath, HostFeatures features)
     {
@@ -67,11 +69,23 @@ internal static class FFmpegReaderChecks
         if (reader is null || !files.Contains(Path.GetFullPath(filePath), StringComparer.OrdinalIgnoreCase)) return true;
         var context = devices.CreateContext();
         var source = reader.CreateVideoFileSource(context, filePath) ?? throw new InvalidOperationException("FFmpeg could not open " + filePath);
+        lock (created) created.Add(source);
         const BindingFlags any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         var resource = Activator.CreateInstance(typeof(CachedVideoFileSource).Assembly.GetType("YukkuriMovieMaker.Plugin.VideoResource", true)!,
             any, null, [context, source], null)!;
         __result = (IVideoFileSource)Activator.CreateInstance(typeof(CachedVideoFileSource), any, null, [filePath, resource], null)!;
         return false;
+    }
+
+    // The newest FFmpeg source's clock, as FrameRenderReadiness reads it.
+    private static string Clock()
+    {
+        object? source;
+        lock (created) source = created.LastOrDefault();
+        if (source is null) return "?";
+        const BindingFlags any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        string Read(string name) => source.GetType().GetField(name, any)?.GetValue(source) is TimeSpan value ? value.TotalSeconds.ToString("0.0000") : "-";
+        return $"{Read("currentTime")} +{Read("currentDuration")} ({Read("streamStartTime")})";
     }
 
     private static void Check(Assembly host, IGraphicsDevicesAndContext context, string file)
@@ -102,6 +116,7 @@ internal static class FFmpegReaderChecks
         TimelineFrameCache.Enabled = true;
         TimelineFrameCache.Clear();
         int served = 0, hostDiffers = 0;
+        var trace = new List<string>();
         for (int pass = 0; pass < 4; pass++)
         {
             using var source = NewSource();
@@ -110,6 +125,7 @@ internal static class FFmpegReaderChecks
                 long hits = TimelineFrameCache.Hits;
                 var pixels = Render(source, frame);
                 bool fromCache = TimelineFrameCache.Hits > hits;
+                if (pass == 1 && trace.Count < order.Length) trace.Add($"  {frame}: {(fromCache ? "cache" : pixels.SequenceEqual(reference[frame]) ? "host" : "host, other pixels")} {Clock()} {TimelineFrameCache.Status}");
                 if (fromCache)
                 {
                     served++;
@@ -120,7 +136,12 @@ internal static class FFmpegReaderChecks
             }
             if (pass == 0) Thread.Sleep(500); // the clip is fingerprinted in the background before its frames are stored
         }
-        if (served == 0) throw new InvalidOperationException($"{Path.GetFileName(file)}: no FFmpeg frame was ever stored: " + TimelineFrameCache.Status);
+        if (served == 0)
+        {
+            Console.WriteLine($"{Path.GetFileName(file)}, second pass (frame: shown, the reader's currentTime +currentDuration (streamStartTime), cache status):");
+            foreach (string line in trace) Console.WriteLine(line);
+            throw new InvalidOperationException($"{Path.GetFileName(file)}: no FFmpeg frame was ever stored: " + TimelineFrameCache.Status);
+        }
         Console.WriteLine($"FFmpeg reader ({Path.GetExtension(file)}): {served} of {order.Length * 4} seek-order frames from the cache, all equal to the in-order render"
             + (hostDiffers == 0 ? "" : $"; the host itself drew {hostDiffers} other frames after seeks (not stored)"));
     }

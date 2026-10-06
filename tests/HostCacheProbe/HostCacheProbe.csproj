@@ -44,6 +44,7 @@
     <Compile Include="..\..\NVEncVideoWriterPlugin\CacheBarLayout.cs" Link="CacheBarLayout.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameCacheStore.cs" Link="FrameCacheStore.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameCacheKey.cs" Link="FrameCacheKey.cs" />
+    <Compile Include="..\..\NVEncVideoWriterPlugin\RandomSeedAlignment.cs" Link="RandomSeedAlignment.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\HostApi.cs" Link="HostApi.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\SimpleTachieDependencies.cs" Link="SimpleTachieDependencies.cs" />
     <Compile Include="..\..\NVEncVideoWriterPlugin\FrameVoiceCloneState.cs" Link="FrameVoiceCloneState.cs" />

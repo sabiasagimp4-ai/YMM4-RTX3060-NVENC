@@ -262,11 +262,14 @@ internal static partial class TimelineFrameCache
             readinessAdded = true;
             if (!NativeTachieReadiness.TryInstall(host, harmony, out reason))
                 throw new NotSupportedException(reason);
+            // Randomness seeded by the renderer's own objects is drawn from the model where the code was reviewed.
+            if (features.IdentityRandom) RandomSeedAlignment.TryInstall(host, harmony);
             reason = string.Empty;
             return true;
         }
         catch (Exception error)
         {
+            RandomSeedAlignment.Uninstall(harmony);
             if (readinessAdded) FrameRenderReadiness.Uninstall(harmony);
             foreach (var target in patched)
                 try { harmony.Unpatch(target, HarmonyPatchType.All, harmony.Id); } catch { }

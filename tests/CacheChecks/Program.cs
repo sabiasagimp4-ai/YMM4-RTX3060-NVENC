@@ -748,24 +748,34 @@ internal static class Program
         shaken.VideoEffects = shaken.VideoEffects.Add(randomMove);
         var randomText = new TextItem { Frame = 180, Length = 30, Layer = 3, Text = "abc", Font = "Arial", DisplayInterval = 100,
             DisplayDirection = TypewriterAnimationDirection.Random };
-        timeline.Items = timeline.Items.Add(still).Add(shaking).Add(shaken).Add(randomText);
+        // The Delaunay mosaic seeds with its parameter object.
+        var mosaicked = new ShapeItem { Frame = 240, Length = 30, Layer = 4 };
+        var mosaic = new YukkuriMovieMaker.Project.Effects.MosaicEffect { MosaicType = YukkuriMovieMaker.Project.Effects.MosaicType.Delaunay };
+        mosaic.MosaicParameter = (YukkuriMovieMaker.Project.Effects.MosaicParameters.MosaicParameterBase)Activator.CreateInstance(
+            typeof(Scene).Assembly.GetType("YukkuriMovieMaker.Project.Effects.MosaicParameters.DelaunayMosaicParameter", true)!, nonPublic: true)!;
+        mosaicked.VideoEffects = mosaicked.VideoEffects.Add(mosaic);
+        timeline.Items = timeline.Items.Add(still).Add(shaking).Add(shaken).Add(randomText).Add(mosaicked);
         var scene = new Scene(timeline, scenes, []);
         using var tracker = new KeyDependencyTracker(scene);
-        if (!HostFeatures.For(typeof(Scene).Assembly).IdentityRandom)
+        if (!(HostFeatures.For(typeof(Scene).Assembly).IdentityRandom && RandomSeedAlignment.EffectsByModel(typeof(Scene).Assembly)))
         {
             // A build where identity-seeded randomness is not known to come from the model (before 4.52.0.2 the random
             // effects seeded with their renderer's objects): those frames render normally.
             WaitForFrameKey(tracker, 10);
-            Check(!tracker.TryCapture(70, out _, out _) && !tracker.TryCapture(130, out _, out _) && !tracker.TryCapture(190, out _, out _),
+            Check(!tracker.TryCapture(70, out _, out _) && !tracker.TryCapture(130, out _, out _) && !tracker.TryCapture(190, out _, out _)
+                && !tracker.TryCapture(250, out _, out _),
                 "A frame with identity-seeded randomness was keyed on a build that does not draw it from the model");
             Console.WriteLine("Identity-seeded randomness: not keyed on this build (its frames render normally)");
             return;
         }
         string stillKey = WaitForFrameKey(tracker, 10), shakingKey = WaitForFrameKey(tracker, 70), shakenKey = WaitForFrameKey(tracker, 130);
-        Check(!tracker.RendersNormally(10) && tracker.RendersNormally(70) && tracker.RendersNormally(130),
+        string mosaicKey = WaitForFrameKey(tracker, 250);
+        Check(!tracker.RendersNormally(10) && tracker.RendersNormally(70) && tracker.RendersNormally(130) && tracker.RendersNormally(250),
             "Frames keyed by object identities were not told apart (the idle pre-renderer must pass them)");
-        Check(!tracker.TryCapture(190, out _, out _), "Text revealed in random order was cached");
-        Check(WaitForFrameKey(tracker, 70) == shakingKey && WaitForFrameKey(tracker, 130) == shakenKey, "The same objects changed their keys");
+        // Without RandomSeedAlignment (installed with the cache), YMM4's text source seeds the order with itself.
+        Check(!RandomSeedAlignment.TextOrderByItem && !tracker.TryCapture(190, out _, out _), "Text revealed in random order was cached");
+        Check(WaitForFrameKey(tracker, 70) == shakingKey && WaitForFrameKey(tracker, 130) == shakenKey && WaitForFrameKey(tracker, 250) == mosaicKey,
+            "The same objects changed their keys");
         var copyTimeline = YukkuriMovieMaker.Json.Json.LoadFromText<Timeline>(YukkuriMovieMaker.Json.Json.GetJsonText(timeline))!;
         var copyScenes = HostCompat.NewScenes();
         copyScenes.AddScene(copyTimeline);
@@ -773,10 +783,30 @@ internal static class Program
         Check(WaitForFrameKey(copy, 10) == stillKey, "A copy of the project changed a frame without randomness");
         Check(WaitForFrameKey(copy, 70) != shakingKey, "A random move kept its key in a copy of the project");
         Check(WaitForFrameKey(copy, 130) != shakenKey, "A random effect kept its key in a copy of the project");
+        Check(WaitForFrameKey(copy, 250) != mosaicKey, "A Delaunay mosaic kept its key in a copy of the project");
+        // With the alignment the text source seeds the order with the item: keyed by it for this session.
+        var harmony = new Harmony("ymm.cachechecks.random-seeds");
+        try
+        {
+            RandomSeedAlignment.TryInstall(typeof(Scene).Assembly, harmony);
+            Check(RandomSeedAlignment.TextOrderByItem, "Random text order was not aligned: " + string.Join("; ", RandomSeedAlignment.Coverage));
+            using var aligned = new KeyDependencyTracker(scene);
+            string textKey = WaitForFrameKey(aligned, 190);
+            Check(aligned.RendersNormally(190) && WaitForFrameKey(aligned, 190) == textKey, "Random text order was not keyed by its item");
+            using var alignedCopy = new KeyDependencyTracker(new Scene(copyTimeline, copyScenes, []));
+            Check(WaitForFrameKey(alignedCopy, 190) != textKey, "Random text order kept its key in a copy of the project");
+            Console.WriteLine("Random seeds: " + string.Join("; ", RandomSeedAlignment.Coverage));
+        }
+        finally
+        {
+            RandomSeedAlignment.Uninstall(harmony);
+            harmony.UnpatchAll(harmony.Id);
+        }
         shaking.X.AnimationType = YukkuriMovieMaker.Commons.AnimationType.なし;
         WaitForFrameKey(tracker, 70);
         Check(!tracker.RendersNormally(70), "A frame without randomness any more stayed keyed by its objects");
-        Console.WriteLine("Identity-seeded randomness: random moves and effects keyed by their objects (a copy differs), random text order not cached");
+        Console.WriteLine("Identity-seeded randomness: random moves, effects and mosaics keyed by their objects (a copy differs), random text order "
+            + "keyed by its item with the alignment and not cached without it");
     }
 
     // The bundled Community plugin's namespaces read for 4.56.1.0 are keyed without trusting it; the others render
