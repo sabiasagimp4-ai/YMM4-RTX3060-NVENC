@@ -111,7 +111,7 @@ internal static class HostIntegration
                 }
                 installed = true;
                 string features = string.Empty;
-                if (host.ManifestModule.ModuleVersionId != HostFeatures.ReadBuild)
+                if (!verified || host.ManifestModule.ModuleVersionId != HostFeatures.ReadBuild)
                 {
                     // A build that was not read: the cache only where its code is that of a read build or of a build
                     // whose differences from it were reviewed (a known build keeps its own features otherwise).

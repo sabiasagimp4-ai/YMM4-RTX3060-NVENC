@@ -76,7 +76,7 @@ internal static class HostIntegrationChecks
             Console.WriteLine("Host integration: a build whose code differs from the read builds keeps the protected export, without the cache");
 
             Check(HostIntegration.Install(host, verified: false, version: string.Empty), HostIntegration.Status);
-            Check(HostIntegration.CacheAvailable && HostIntegration.Status.Contains("4.56.1.0 と同じ", StringComparison.Ordinal), HostIntegration.Status);
+            Check(HostIntegration.CacheAvailable && HostIntegration.Status.Contains("（4.56.1.0）と同じ", StringComparison.Ordinal), HostIntegration.Status);
             Check(HostFeatures.For(host) is { Basis: "4.56.1.0", Preview: true, SelectionRects: true, WrappedSources: true, RulerBars: true },
                 "Decided features: " + HostFeatures.For(host));
             Check(Hooked(export, HostIntegration.PatchId) && Hooked(update, HostIntegration.PatchId + ".cache"), "The matched build did not get both hooks");
