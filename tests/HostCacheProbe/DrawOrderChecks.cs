@@ -28,8 +28,9 @@ internal static class DrawOrderChecks
                 bool tie = blueLayer == 1;
                 string layers = tie ? "same layer" : "different layers";
                 TimelineFrameCache.Enabled = false; // the host's own pictures
-                var (timeline, scene) = Fixture(blueLayer, swapped: false);
-                var (swappedTimeline, swappedScene) = Fixture(blueLayer, swapped: true);
+                // One project whose item list is [red, blue], or [blue, red] when swapped.
+                var (timeline, scene, red, blue) = Fixture(blueLayer);
+                void Order(bool swapped) => timeline.Items = swapped ? [blue, red] : [red, blue];
                 var reference = Render(host, context, scene, 30);
                 var variants = new List<(string Name, byte[] Pixels)>
                 {
@@ -40,12 +41,14 @@ internal static class DrawOrderChecks
                     ("after 59..31 backwards", Render(host, context, scene, 30, Enumerable.Range(31, 29).Reverse().ToArray())),
                 };
                 for (int i = 0; i < 10; i++) variants.Add(($"new source #{i + 2}", Render(host, context, scene, 30)));
-                var swapped = Render(host, context, swappedScene, 30);
+                Order(swapped: true);
+                var swapped = Render(host, context, scene, 30);
                 var swappedVariants = new List<(string Name, byte[] Pixels)>
                 {
-                    ("swapped, after frame 10", Render(host, context, swappedScene, 30, 10)),
-                    ("swapped, after 59..31 backwards", Render(host, context, swappedScene, 30, Enumerable.Range(31, 29).Reverse().ToArray())),
+                    ("swapped, after frame 10", Render(host, context, scene, 30, 10)),
+                    ("swapped, after 59..31 backwards", Render(host, context, scene, 30, Enumerable.Range(31, 29).Reverse().ToArray())),
                 };
+                Order(swapped: false);
                 var differing = variants.Where(variant => !variant.Pixels.AsSpan().SequenceEqual(reference))
                     .Concat(swappedVariants.Where(variant => !variant.Pixels.AsSpan().SequenceEqual(swapped))).Select(variant => variant.Name).ToArray();
                 bool swapChanges = !swapped.AsSpan().SequenceEqual(reference);
@@ -61,23 +64,30 @@ internal static class DrawOrderChecks
                 // The keys: frame 30 is cacheable in both orders and keyed by the order where the items tie; frame 10
                 // (red alone) does not change.
                 var frames = Describe(scene);
-                var swappedFrames = Describe(swappedScene);
+                Order(swapped: true);
+                var swappedFrames = Describe(scene);
+                Order(swapped: false);
                 Check(frames.For(30).Cacheable && swappedFrames.For(30).Cacheable, $"Draw order ({layers}): frame 30 is not cacheable");
                 Check((frames.For(30).Content != swappedFrames.For(30).Content) == tie,
                     tie ? "Draw order: the key does not name the order of a tie" : "Draw order: the key of different layers names the list order");
                 Check(frames.For(10).Content == swappedFrames.For(10).Content, "Draw order: the key of a frame without a tie names the list order");
 
-                // Cached: each order shows its own picture, also after the other order's frame was stored.
+                // Cached: each order shows its own picture, also after the other order's frame was stored, and comes back
+                // from the store when the list returns to it.
                 TimelineFrameCache.Enabled = true;
                 TimelineFrameCache.Clear();
                 long ramHits = TimelineFrameCache.RamHits;
                 var cached = Render(host, context, scene, 30);
                 var restored = Render(host, context, scene, 30);
                 Check(TimelineFrameCache.RamHits > ramHits, $"Draw order ({layers}): frame 30 was not restored from the store: {TimelineFrameCache.Status}");
-                var cachedSwapped = Render(host, context, swappedScene, 30);
-                Check(cached.AsSpan().SequenceEqual(reference) && restored.AsSpan().SequenceEqual(reference) && cachedSwapped.AsSpan().SequenceEqual(swapped),
-                    $"Draw order ({layers}): a cached frame differs from the host's render of its order");
-                GC.KeepAlive(timeline); GC.KeepAlive(swappedTimeline);
+                Order(swapped: true);
+                var cachedSwapped = Render(host, context, scene, 30);
+                Order(swapped: false);
+                ramHits = TimelineFrameCache.RamHits;
+                var restoredAgain = Render(host, context, scene, 30);
+                Check(cached.AsSpan().SequenceEqual(reference) && restored.AsSpan().SequenceEqual(reference) && cachedSwapped.AsSpan().SequenceEqual(swapped)
+                    && restoredAgain.AsSpan().SequenceEqual(reference), $"Draw order ({layers}): a cached frame differs from the host's render of its order");
+                Check(TimelineFrameCache.RamHits > ramHits, $"Draw order ({layers}): the first order's frame did not come back from the store: {TimelineFrameCache.Status}");
             }
             if (aligned) Console.WriteLine("Draw order: ties drawn in item-list order in every renderer, keyed by the order, cached per order OK");
         }
@@ -105,8 +115,8 @@ internal static class DrawOrderChecks
     }
 
     // Red from frame 0 and blue from frame 20, both until 60, overlapping on screen; blue on layer `blueLayer`. The item
-    // list is [red, blue], or [blue, red] when swapped.
-    private static (Timeline Timeline, Scene Scene) Fixture(int blueLayer, bool swapped)
+    // list is [red, blue].
+    private static (Timeline Timeline, Scene Scene, TextItem Red, TextItem Blue) Fixture(int blueLayer)
     {
         var timeline = new Timeline();
         timeline.VideoInfo.Width = Width; timeline.VideoInfo.Height = Height; timeline.VideoInfo.FPS = 30;
@@ -120,8 +130,8 @@ internal static class DrawOrderChecks
         }
         var red = Square(0, 1, -12, System.Windows.Media.Colors.Red);
         var blue = Square(20, blueLayer, 12, System.Windows.Media.Colors.Blue);
-        timeline.Items = swapped ? [blue, red] : [red, blue];
-        return (timeline, new Scene(timeline, scenes, []));
+        timeline.Items = [red, blue];
+        return (timeline, new Scene(timeline, scenes, []), red, blue);
     }
 
     private static void Check(bool value, string message) { if (!value) throw new InvalidOperationException(message); }
