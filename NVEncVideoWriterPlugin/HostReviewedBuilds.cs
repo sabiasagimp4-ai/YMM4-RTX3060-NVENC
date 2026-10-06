@@ -77,6 +77,7 @@ internal static partial class HostContracts
             ["wrapped-sources"] = "0D80927F28BD6DFE9EC4DC3F2B24DFBF",
             ["ruler-bars"] = "539B25AB83003DED12F749BE4F8C5612",
             ["identity-random"] = "FEFD5E1512122C91974F8D253E26AF15",
+            ["simple-tachie"] = "AA7AF6F4E080CD62A913403026CF72D2",
             ["decoder:YukkuriMovieMaker.Plugin.FileSource.FFmpeg"] = "FF602E3ECA6733B7A648788152BADD1B",
             ["decoder:YukkuriMovieMaker.Plugin.FileSource.MediaFoundation"] = "033C00F0E8B2F7168266662A3DB7D0F1",
             ["decoder:YukkuriMovieMaker.Plugin.FileSource.WIC"] = "7C2A96A5FD7BF05CEEEDAAAE63CB55C8",
