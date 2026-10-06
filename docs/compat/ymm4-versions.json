@@ -1,10 +1,10 @@
 {
  "versions": {
   "4.56.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -92,9 +92,9 @@
    "start": {
     "fileVersion": "4.56.1.0",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.56.1.0",
      "verified": true,
      "installed": true,
@@ -117,8 +117,7 @@
     },
     "exitCode": null,
     "windows": [
-     "[YMM4SplashWindow] Starting YukkuriMovieMaker 4 ...",
-     "[HwndWrapper[YukkuriMovieMaker;;5487f9e6-5470-40fc-8e2d-38871a94486d]] YukkuriMovieMaker v4.56.1.0 Lite"
+     "[YMM4SplashWindow] Starting YukkuriMovieMaker 4 ..."
     ],
     "dialogs": []
    },
@@ -134,10 +133,10 @@
    }
   },
   "4.56.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -225,9 +224,9 @@
    "start": {
     "fileVersion": "4.56.0.1",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.56.0.1",
      "verified": false,
      "installed": true,
@@ -253,9 +252,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;e42b9d03-7b8d-4de5-bd01-4926cd7c82aa]] Check for updates",
-     "[YMM4SplashWindow] Starting YukkuriMovieMaker 4 ...",
-     "[HwndWrapper[YukkuriMovieMaker;;5e586773-9832-4887-b2f7-d772ca57b324]] YukkuriMovieMaker v4.56.0.1 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;c36d79f7-2993-4183-88a8-76ce60055272]] Check for updates",
+     "[YMM4SplashWindow] Starting YukkuriMovieMaker 4 ..."
     ],
     "dialogs": []
    },
@@ -276,10 +274,10 @@
    }
   },
   "4.56.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -367,9 +365,9 @@
    "start": {
     "fileVersion": "4.56.0.0",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.56.0.0",
      "verified": false,
      "installed": true,
@@ -395,9 +393,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;0f6bd4ef-6de3-40ff-88d3-ee7151dda43f]] Check for updates",
-     "[YMM4SplashWindow] Starting YukkuriMovieMaker 4 ...",
-     "[HwndWrapper[YukkuriMovieMaker;;8a70e5ec-60d1-43e3-83fa-bc41864202e3]] YukkuriMovieMaker v4.56.0.0 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;5505d89f-95af-469c-bb8a-a04312c09cb4]] Check for updates",
+     "[YMM4SplashWindow] Starting YukkuriMovieMaker 4 ..."
     ],
     "dialogs": []
    },
@@ -418,10 +415,10 @@
    }
   },
   "4.55.1.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -508,9 +505,9 @@
    "start": {
     "fileVersion": "4.55.1.1",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.55.1.1",
      "verified": true,
      "installed": true,
@@ -533,9 +530,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;3510bae6-4264-426d-a823-1fa5ea896136]] Check for updates",
-     "[YMM4SplashWindow] Starting YukkuriMovieMaker 4 ...",
-     "[HwndWrapper[YukkuriMovieMaker;;d8761ca1-f8be-44f3-ac23-6e2be2874b7e]] YukkuriMovieMaker v4.55.1.1 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;09a9a051-0179-4bd8-ba22-663ec1b94434]] Check for updates",
+     "[YMM4SplashWindow] Starting YukkuriMovieMaker 4 ..."
     ],
     "dialogs": []
    },
@@ -558,10 +554,10 @@
    }
   },
   "4.55.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -648,9 +644,9 @@
    "start": {
     "fileVersion": "4.55.1.0",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.55.1.0",
      "verified": false,
      "installed": true,
@@ -662,9 +658,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;2e86807f-d8eb-4f5a-8e33-baa5121d822c]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;6b01c2b0-bd4e-4e68-bf1a-7610e5a4c908]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;1aed33d1-304e-4f59-bb18-b7aa2b28293e]] YukkuriMovieMaker v4.55.1.0 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;0a9ef0bb-d8ec-4d9c-be3b-dca03fcdec78]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;26b935db-0c2e-468c-94e1-f8d6cd97f9ba]] "
     ],
     "dialogs": []
    },
@@ -680,10 +675,10 @@
    }
   },
   "4.55.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -770,9 +765,9 @@
    "start": {
     "fileVersion": "4.55.0.1",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.55.0.1",
      "verified": false,
      "installed": true,
@@ -784,9 +779,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;13fbc15b-b521-40bb-a779-d01bb721ff79]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;5a30b6a6-dffd-486b-9c09-6eef9444cb0f]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;b687dfa3-0630-441e-9ba1-7eee2ae5350f]] YukkuriMovieMaker v4.55.0.1 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;df9baad3-ded1-4faa-9b23-0624dc49184d]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;7bddaeaf-06b8-4b11-9f31-ded2583319a0]] "
     ],
     "dialogs": []
    },
@@ -802,10 +796,10 @@
    }
   },
   "4.55.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -892,9 +886,9 @@
    "start": {
     "fileVersion": "4.55.0.0",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.55.0.0",
      "verified": false,
      "installed": true,
@@ -906,9 +900,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;dcf30b93-7e68-4bbb-9f21-23f4145d0112]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;f63eeed6-7473-4b0a-b5f5-0230a1399110]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;52637d28-cb8e-41c6-ac32-8f2d30b2cace]] YukkuriMovieMaker v4.55.0.0 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;721cec10-d748-40dc-b72f-683006953c1b]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;9431bc55-bc90-4800-aacc-6b9266a79161]] "
     ],
     "dialogs": []
    },
@@ -924,10 +917,10 @@
    }
   },
   "4.54.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -1014,9 +1007,9 @@
    "start": {
     "fileVersion": "4.54.0.1",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.54.0.1",
      "verified": false,
      "installed": true,
@@ -1028,9 +1021,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;274fb1f7-cbe4-413e-9ffc-03593d6f1b79]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;f0234259-acf1-4119-9676-63493d5f579d]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;b099b91f-110f-44c2-985f-634dd75ae3be]] YukkuriMovieMaker v4.54.0.1 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;9de25225-931f-4732-90ce-38963d3a1b52]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;cdec9c63-a428-46cf-b959-bca8c5f228af]] "
     ],
     "dialogs": []
    },
@@ -1046,10 +1038,10 @@
    }
   },
   "4.54.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -1136,9 +1128,9 @@
    "start": {
     "fileVersion": "4.54.0.0",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.54.0.0",
      "verified": false,
      "installed": true,
@@ -1150,9 +1142,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;5f34696f-7873-45ec-94dc-008d103fc7e4]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;40f35dbb-9933-48b6-88bc-6e0de8c0f586]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;07b6a069-ebd1-4939-8d41-e00b2bc98897]] YukkuriMovieMaker v4.54.0.0 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;c49a7fe6-4f90-4957-873d-39d0cf9c1be8]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;8fcaa547-be29-4292-a77b-c94b2d921bb9]] "
     ],
     "dialogs": []
    },
@@ -1168,10 +1159,10 @@
    }
   },
   "4.53.0.9": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -1258,9 +1249,9 @@
    "start": {
     "fileVersion": "4.53.0.9",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.53.0.9",
      "verified": false,
      "installed": true,
@@ -1272,9 +1263,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;44824460-a26b-4123-b31f-a734e8efe5c8]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;a9e3512c-f670-41ba-b92d-edc38bee6682]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;4acba09d-f443-4e03-a64a-74845f4816f4]] YukkuriMovieMaker v4.53.0.9 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;94b95222-a90a-4f45-9e93-f6160e87e57d]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;3231934b-b5b7-4e59-b20f-5201292621b7]] "
     ],
     "dialogs": []
    },
@@ -1290,10 +1280,10 @@
    }
   },
   "4.53.0.8": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -1380,9 +1370,9 @@
    "start": {
     "fileVersion": "4.53.0.8",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.53.0.8",
      "verified": false,
      "installed": true,
@@ -1394,9 +1384,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;ff76dbda-403c-4858-9fb5-1682424e3dd1]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;5add3c04-9d02-49c4-8328-ae95507e384b]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;a1d456c4-4f15-421f-a0e1-1bd56ac0fbb9]] YukkuriMovieMaker v4.53.0.8 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;d6fbabe6-8d87-4af5-94a0-29eaa2811ed6]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;5552f42f-9628-4963-93b7-64eff3cc8786]] "
     ],
     "dialogs": []
    },
@@ -1412,10 +1401,10 @@
    }
   },
   "4.53.0.7": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -1502,9 +1491,9 @@
    "start": {
     "fileVersion": "4.53.0.7",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.53.0.7",
      "verified": false,
      "installed": true,
@@ -1516,9 +1505,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;4cfef788-3fc5-4be4-a70b-d4b33f2421b0]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;42348df1-7e0d-48c1-8a20-6d18024bd624]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;d0138979-df90-4372-b50c-18b7a2930465]] YukkuriMovieMaker v4.53.0.7 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;8af41179-95fd-4b1d-b64e-3bb57f089417]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;b2302171-a3cb-41e3-9c8b-293b1dfdd80f]] "
     ],
     "dialogs": []
    },
@@ -1534,10 +1522,10 @@
    }
   },
   "4.53.0.6": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -1624,9 +1612,9 @@
    "start": {
     "fileVersion": "4.53.0.6",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.53.0.6",
      "verified": false,
      "installed": true,
@@ -1638,10 +1626,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;078bc5e8-83e9-4efe-8de4-9d5259bbadfb]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;40a5ae52-f05b-480c-99e7-e4d2f73b7d66]] ",
-     "[MessageWindowClass+2694acfd-6d78-4937-bb92-7200b9773a12] ",
-     "[HwndWrapper[YukkuriMovieMaker;;bd8edf51-ae2e-4cb5-8287-ed3401500f81]] YukkuriMovieMaker v4.53.0.6 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;4325581c-e7c6-4377-b4b0-d023ce243511]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;b43fe1aa-7f55-4842-88bf-c8e2843b8704]] "
     ],
     "dialogs": []
    },
@@ -1657,10 +1643,10 @@
    }
   },
   "4.53.0.5": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -1747,9 +1733,9 @@
    "start": {
     "fileVersion": "4.53.0.5",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.53.0.5",
      "verified": false,
      "installed": true,
@@ -1761,9 +1747,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;5ddbb8ef-4bde-4a7c-a4c0-49aed0fc969a]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;53290b7f-7f66-45f6-a996-a2fbaaa82ec1]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;fd35c81d-7174-40e1-834f-a96674398714]] YukkuriMovieMaker v4.53.0.5 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;2f13e7ed-0115-43f9-92d2-92d3468c45f1]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;753f9896-782c-48c7-b5bf-a6062f625c3e]] "
     ],
     "dialogs": []
    },
@@ -1779,10 +1764,10 @@
    }
   },
   "4.53.0.4": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -1869,9 +1854,9 @@
    "start": {
     "fileVersion": "4.53.0.4",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.53.0.4",
      "verified": false,
      "installed": true,
@@ -1883,9 +1868,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;b7dcad4f-10f0-4ba0-a7ca-36a711db12ab]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;861f6342-88d4-4378-a9c8-0aee398c012f]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;9fc65a8e-db5d-4da0-96a7-9cd6d4edc412]] YukkuriMovieMaker v4.53.0.4 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;e485afd8-589f-4c56-8ae0-2d4e791faf7d]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;f2e0c14f-c2ac-4557-83f4-5ce6ff3b02e8]] "
     ],
     "dialogs": []
    },
@@ -1901,10 +1885,10 @@
    }
   },
   "4.53.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -1993,9 +1977,9 @@
    "start": {
     "fileVersion": "4.53.0.3",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.53.0.3",
      "verified": false,
      "installed": true,
@@ -2007,9 +1991,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;0d019abe-7b98-4626-a89a-25897cd27daa]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;7e1daccb-8c5d-4f6b-9cbc-6518eb5e290f]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;021041de-a0ca-471b-b96b-d7f3eb0b8490]] YukkuriMovieMaker v4.53.0.3 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;250ae04f-fa8b-4bc4-af38-82eb130d38b7]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;b8f1e1b9-93bf-4507-a884-d7dc4a9258e9]] "
     ],
     "dialogs": []
    },
@@ -2025,10 +2008,10 @@
    }
   },
   "4.53.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -2117,9 +2100,9 @@
    "start": {
     "fileVersion": "4.53.0.2",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.53.0.2",
      "verified": false,
      "installed": true,
@@ -2131,9 +2114,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;532e87f1-217a-43cc-896b-e132c22e3fe5]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;4eb78438-97e5-467f-8807-405536af1e5d]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;4ec31f28-2857-493e-a0b9-e1af7837ad54]] YukkuriMovieMaker v4.53.0.2 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;93c7f728-830c-475e-ad69-a01eccf1e52a]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;b5967437-cb8b-478a-a82e-73a1cd9a000d]] "
     ],
     "dialogs": []
    },
@@ -2149,10 +2131,10 @@
    }
   },
   "4.53.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -2241,9 +2223,9 @@
    "start": {
     "fileVersion": "4.53.0.1",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.53.0.1",
      "verified": false,
      "installed": true,
@@ -2255,9 +2237,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;9abf1060-1cd2-41d4-822b-44e24e186083]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;b300deab-8a65-49d7-bafb-c1d505032a79]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;8d69fc38-8b8d-4456-98b4-ab871646c707]] YukkuriMovieMaker v4.53.0.1 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;c26e7be6-fa5e-4792-952d-52ccc5710eed]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;4b83f614-ff83-445c-978e-104aeaa17064]] "
     ],
     "dialogs": []
    },
@@ -2273,10 +2254,10 @@
    }
   },
   "4.53.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -2365,9 +2346,9 @@
    "start": {
     "fileVersion": "4.53.0.0",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.53.0.0",
      "verified": false,
      "installed": true,
@@ -2379,9 +2360,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;a7c25fc7-96db-4457-81fe-dc04385aed9d]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;fe026659-cb64-4447-975c-9ec783fe6617]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;fbdfa549-41f0-4c2c-b692-0d3890e2628b]] YukkuriMovieMaker v4.53.0.0 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;48659c58-f7dd-48ad-82ec-99a82d33a1f3]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;396f83db-0faa-4dad-921b-c58c49b99556]] ",
+     "[MessageWindowClass+b1765703-5c3f-4333-9bf2-04839614cf18] "
     ],
     "dialogs": []
    },
@@ -2397,10 +2378,10 @@
    }
   },
   "4.52.0.8": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -2489,9 +2470,9 @@
    "start": {
     "fileVersion": "4.52.0.8",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.52.0.8",
      "verified": false,
      "installed": true,
@@ -2503,9 +2484,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;8c226362-5521-4253-97fd-f347985b8f32]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;9dbfcb13-7bbf-4a96-be83-e9dc01c151d0]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;39bd3639-b6f6-48c8-9fcc-a88af55ee05c]] YukkuriMovieMaker v4.52.0.8 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;0d6a5f88-1b73-49b9-acda-b9ccb207bd3f]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;0d81a91d-4084-4265-9329-53321ad79434]] "
     ],
     "dialogs": []
    },
@@ -2521,10 +2501,10 @@
    }
   },
   "4.52.0.7": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -2613,9 +2593,9 @@
    "start": {
     "fileVersion": "4.52.0.7",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.52.0.7",
      "verified": false,
      "installed": true,
@@ -2627,9 +2607,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;05e7d29c-d243-4e63-b4d6-f17e8eadb42b]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;b64062c2-7b90-41f7-b280-c3d1ebaf7baf]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;ab70abc1-331b-42f2-80b1-af4606f1aae1]] YukkuriMovieMaker v4.52.0.7 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;d34c4bee-cd3a-4baa-8222-9492292316cf]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;d2b64aa4-5078-4946-9297-94033ed5e80a]] "
     ],
     "dialogs": []
    },
@@ -2645,10 +2624,10 @@
    }
   },
   "4.52.0.6": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -2737,9 +2716,9 @@
    "start": {
     "fileVersion": "4.52.0.6",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.52.0.6",
      "verified": false,
      "installed": true,
@@ -2751,9 +2730,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;45170854-b9ee-4ea5-a6c5-fac66c3ca5f9]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;755354db-5a6a-4552-9f5d-3a832e2d1f76]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;7eed30b6-85e8-4289-a213-13f7c8dc0ca2]] YukkuriMovieMaker v4.52.0.6 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;70f4f7cc-232f-4814-8c44-afe10ded74cb]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;92d1925f-f5d6-4b86-b333-c9212c474cf7]] "
     ],
     "dialogs": []
    },
@@ -2769,10 +2747,10 @@
    }
   },
   "4.52.0.5": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -2861,9 +2839,9 @@
    "start": {
     "fileVersion": "4.52.0.5",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.52.0.5",
      "verified": false,
      "installed": true,
@@ -2875,9 +2853,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;bbc8b7af-bff0-429f-9281-6d1e930e87e1]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;e3cac00a-5d6b-4386-94f6-971f42a5e19b]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;a18cb688-b464-4f1e-aa83-5351fee499bf]] YukkuriMovieMaker v4.52.0.5 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;2bd6392d-dd4c-4943-88bf-956715e3d1ec]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;445810a8-5049-4c27-b62d-4ba9e4583025]] "
     ],
     "dialogs": []
    },
@@ -2893,10 +2870,10 @@
    }
   },
   "4.52.0.4": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -2985,9 +2962,9 @@
    "start": {
     "fileVersion": "4.52.0.4",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.52.0.4",
      "verified": false,
      "installed": true,
@@ -2999,9 +2976,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;d2b4fb06-2ec8-49cd-b15b-ec951c51787c]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;13c75027-a71f-4039-93fc-0d4ca8e69174]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;14bfdd6a-347a-4879-8461-c6c31f78aeaa]] YukkuriMovieMaker v4.52.0.4 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;3b018b85-d50c-4e1e-8487-10230ee6d606]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;8bb97c95-1da2-4243-b061-1e31850fd869]] "
     ],
     "dialogs": []
    },
@@ -3017,10 +2993,10 @@
    }
   },
   "4.52.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -3109,9 +3085,9 @@
    "start": {
     "fileVersion": "4.52.0.3",
     "started": true,
-    "mainWindow": true,
+    "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.52.0.3",
      "verified": false,
      "installed": true,
@@ -3123,9 +3099,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;e521e6a0-afdb-4f32-82d1-e0296f58aff0]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;e4d80ab1-9260-416f-a31c-7c5d4a92afb8]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;990883df-9e91-45b0-b57a-13455d950fbd]] YukkuriMovieMaker v4.52.0.3 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;4345f5e3-3b8c-4e06-aa82-82b6dae85a26]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;0a3d01d9-d0e2-4775-a125-e034790c59df]] "
     ],
     "dialogs": []
    },
@@ -3141,10 +3116,10 @@
    }
   },
   "4.52.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -3235,7 +3210,7 @@
     "started": true,
     "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.52.0.2",
      "verified": false,
      "installed": true,
@@ -3247,8 +3222,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;150f4871-4668-4302-9b46-7d13e0c36b6d]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;bcb7f2e7-f586-4712-b308-c534b5479018]] "
+     "[HwndWrapper[YukkuriMovieMaker;;e1a15449-2500-4b75-a26d-ade2e4c95819]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;bc13889a-49db-4098-8da9-fd81b032c87e]] "
     ],
     "dialogs": []
    },
@@ -3264,10 +3239,10 @@
    }
   },
   "4.52.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -3358,7 +3333,7 @@
     "started": true,
     "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.52.0.1",
      "verified": false,
      "installed": true,
@@ -3370,8 +3345,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;5442fcdd-9bd2-440e-9ed6-1f8f4894be23]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;ecd212d3-2004-4216-b746-be7b00b750d3]] Check for updates"
+     "[HwndWrapper[YukkuriMovieMaker;;03bbe608-bd9b-466d-b793-a17daf5e1338]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;5a17eff3-f960-4fe3-9cd5-85ee2cb0f074]] "
     ],
     "dialogs": []
    },
@@ -3387,10 +3362,10 @@
    }
   },
   "4.52.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -3481,7 +3456,7 @@
     "started": true,
     "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.52.0.0",
      "verified": false,
      "installed": true,
@@ -3493,8 +3468,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;256ca5a4-1258-486f-ac4d-2f62ad1023a8]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;2309150f-ade0-4d46-9d2e-68ea88d4b8d2]] "
+     "[HwndWrapper[YukkuriMovieMaker;;f8c72c85-4f03-455b-8d38-56ff9c1aa8df]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;9a7c7d44-5cb7-4493-b0a6-75b292b895e0]] "
     ],
     "dialogs": []
    },
@@ -3510,10 +3485,10 @@
    }
   },
   "4.51.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -3607,7 +3582,7 @@
     "started": true,
     "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.51.0.3",
      "verified": false,
      "installed": true,
@@ -3619,8 +3594,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;98866bc5-8ee6-4891-97a2-d599e19d08a3]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;e50eea52-8cf5-40e9-9e36-3974d3de0459]] "
+     "[HwndWrapper[YukkuriMovieMaker;;b31d3278-deec-49e2-b145-186c59ca634e]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;2f84d8f1-5596-49b8-a16e-72967a5c3d8c]] "
     ],
     "dialogs": []
    },
@@ -3636,10 +3611,10 @@
    }
   },
   "4.51.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -3733,7 +3708,7 @@
     "started": true,
     "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.51.0.2",
      "verified": false,
      "installed": true,
@@ -3745,8 +3720,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;647b85db-628b-4a04-a820-1fffc5b25171]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;48aa89c8-7543-4787-bbd5-bedffc8a76b8]] "
+     "[HwndWrapper[YukkuriMovieMaker;;770c8ef4-8e3e-4e4f-9590-e25b8e56387b]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;a1864278-a9c9-48e5-be0c-37b8f816ade1]] "
     ],
     "dialogs": []
    },
@@ -3762,10 +3737,10 @@
    }
   },
   "4.51.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -3859,7 +3834,7 @@
     "started": true,
     "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.51.0.1",
      "verified": false,
      "installed": true,
@@ -3871,8 +3846,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;ba059ec3-f24f-4d2f-b3ae-4267a0467599]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;2e35a8bc-5c8e-4726-a35f-9f2bb924a671]] "
+     "[HwndWrapper[YukkuriMovieMaker;;8976c906-aa33-4482-85a9-10f0fd155357]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;a0e6e915-536e-4dee-80f9-32f4c75898cd]] "
     ],
     "dialogs": []
    },
@@ -3888,10 +3863,10 @@
    }
   },
   "4.51.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -3985,7 +3960,7 @@
     "started": true,
     "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.51.0.0",
      "verified": false,
      "installed": true,
@@ -3997,8 +3972,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;e226193c-d21d-4e79-8177-94d45c189a55]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;85ee7e68-c1c1-486f-bd36-a36419d0f87f]] "
+     "[HwndWrapper[YukkuriMovieMaker;;8f200e3f-fdeb-4c46-96be-f86ece6fd526]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;f0347203-cd55-4f34-a559-60bc998a1268]] "
     ],
     "dialogs": []
    },
@@ -4014,10 +3989,10 @@
    }
   },
   "4.50.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -4111,9 +4086,9 @@
    "start": {
     "fileVersion": "4.50.0.3",
     "started": true,
-    "mainWindow": false,
+    "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.50.0.3",
      "verified": false,
      "installed": true,
@@ -4125,8 +4100,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;e05fd87c-8892-4d9a-8de4-719bebb78f72]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;969c278b-d8b6-4e5e-a126-913d74a3f557]] "
+     "[HwndWrapper[YukkuriMovieMaker;;5e074a77-6182-4551-ae2e-16901d99acf4]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;f4040164-ba99-4d6b-be0a-8124ca4f74de]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;786d3303-21d3-4d08-87e8-54c577739808]] YukkuriMovieMaker v4.50.0.3 Lite"
     ],
     "dialogs": []
    },
@@ -4142,10 +4118,10 @@
    }
   },
   "4.50.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -4241,7 +4217,7 @@
     "started": true,
     "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.50.0.2",
      "verified": false,
      "installed": true,
@@ -4253,8 +4229,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;b39c1bec-81d7-4dc6-8481-572f5017b654]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;dac2b34e-4adf-4a2d-9db7-b38bf84aa09d]] "
+     "[HwndWrapper[YukkuriMovieMaker;;801891e5-c46e-4ba5-a34a-79d09aaed304]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;9a2747b3-9694-4e72-9a45-d85dc00205be]] "
     ],
     "dialogs": []
    },
@@ -4270,10 +4246,10 @@
    }
   },
   "4.50.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -4369,7 +4345,7 @@
     "started": true,
     "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.50.0.1",
      "verified": false,
      "installed": true,
@@ -4381,8 +4357,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;519e5adb-93be-41cc-812c-33bcd15288a7]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;f7654c0a-6726-4f96-bc27-a8312fb2f06b]] "
+     "[HwndWrapper[YukkuriMovieMaker;;dc017adf-8814-4d6b-8329-b03a79b13d0f]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;6a943f20-909e-4436-89c1-4f2231cb64a3]] "
     ],
     "dialogs": []
    },
@@ -4398,10 +4374,10 @@
    }
   },
   "4.50.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -4497,7 +4473,7 @@
     "started": true,
     "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.50.0.0",
      "verified": false,
      "installed": true,
@@ -4509,8 +4485,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;4002903a-25a1-4d50-a6b3-0498453007d6]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;1875b4ba-6ed7-4109-b6cf-23cc8ddbdcb7]] "
+     "[HwndWrapper[YukkuriMovieMaker;;382cf243-f2b7-44e9-96fa-52b6af7f92cc]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;3e555632-e346-41e9-a4f6-547404edf3ae]] "
     ],
     "dialogs": []
    },
@@ -4526,10 +4502,10 @@
    }
   },
   "4.49.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -4625,7 +4601,7 @@
     "started": true,
     "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.49.1.0",
      "verified": false,
      "installed": true,
@@ -4637,8 +4613,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;62b62739-26ac-4872-824d-577c271232ee]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;00197f90-996c-43d8-888c-ca976d787b35]] "
+     "[HwndWrapper[YukkuriMovieMaker;;6b82673b-922b-4213-97e4-8b3cae583699]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;4e1c070b-ae1d-49de-a05e-8f0651b3f0aa]] "
     ],
     "dialogs": []
    },
@@ -4654,10 +4630,10 @@
    }
   },
   "4.49.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -4753,7 +4729,7 @@
     "started": true,
     "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.49.0.2",
      "verified": false,
      "installed": true,
@@ -4765,8 +4741,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;d74f16b4-f82b-4c46-a01a-72bb80b739a6]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;49ec4403-46a5-45e3-9522-5f8c1ce6e966]] "
+     "[HwndWrapper[YukkuriMovieMaker;;212a9c03-2a12-4e59-bca5-4df63fd34333]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;4ad5987d-bda3-4de1-a11b-74afb86d8560]] "
     ],
     "dialogs": []
    },
@@ -4782,10 +4758,10 @@
    }
   },
   "4.49.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -4881,7 +4857,7 @@
     "started": true,
     "mainWindow": false,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.49.0.1",
      "verified": false,
      "installed": true,
@@ -4893,8 +4869,8 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;ba3414d4-b13e-424b-b3e3-8270d6c4e993]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;5e1b78e7-52cb-4815-880f-f93be1827c33]] "
+     "[HwndWrapper[YukkuriMovieMaker;;0027a5a8-c305-4fee-9849-c67dca34b403]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;a4e6e6c8-9912-4fae-ace5-1bea9cba824d]] "
     ],
     "dialogs": []
    },
@@ -4910,10 +4886,10 @@
    }
   },
   "4.49.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -5007,9 +4983,9 @@
    "start": {
     "fileVersion": "4.49.0.0",
     "started": true,
-    "mainWindow": false,
+    "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.49.0.0",
      "verified": false,
      "installed": true,
@@ -5021,8 +4997,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;520cb247-f5a8-4471-a013-74f2ee5b482c]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;ab007c8a-3fd8-41ab-b3fc-9d591be20c5e]] "
+     "[HwndWrapper[YukkuriMovieMaker;;d0dd3fda-cc3c-4687-b9fc-bd17bd345b68]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;24cbbd86-05bd-480d-aace-73d96051a7e7]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;d8b41dc0-56cc-4d64-9478-fd046bdf306c]] YukkuriMovieMaker v4.49.0.0 Lite"
     ],
     "dialogs": []
    },
@@ -5038,10 +5015,10 @@
    }
   },
   "4.48.1.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -5138,7 +5115,7 @@
     "started": true,
     "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.48.1.2",
      "verified": false,
      "installed": true,
@@ -5150,9 +5127,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;e18b78a1-e7b4-4757-a4d9-bdf55ddc818f]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;596c2d6a-c202-4735-8525-e29dc5a9e87a]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;209634e7-d3ee-420c-9ab8-b751a12e2c53]] YukkuriMovieMaker v4.48.1.2 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;cf8f7859-d9de-45c1-8051-3bf6722b8b9f]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;d72d2ca9-c807-4a12-93d9-f13a1ca3e28d]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;2d004237-09fa-489f-8636-d5ea739152ab]] YukkuriMovieMaker v4.48.1.2 Lite"
     ],
     "dialogs": []
    },
@@ -5168,10 +5145,10 @@
    }
   },
   "4.48.1.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -5268,7 +5245,7 @@
     "started": true,
     "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.48.1.1",
      "verified": false,
      "installed": true,
@@ -5280,9 +5257,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;5edc2a5a-57cf-4f68-ac19-ff80fbd21121]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;57f07037-463a-4006-938a-ce87f0d22a88]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;aae9fb0f-4795-46ad-b388-c378bf23319c]] YukkuriMovieMaker v4.48.1.1 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;063eaa0f-4781-4974-bdd9-79aab2680f4f]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;0c0e1acc-eb0e-4ddc-80d7-8414da1b55de]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;d4e5ad59-bd88-4d1c-826f-619ba968b7e3]] YukkuriMovieMaker v4.48.1.1 Lite"
     ],
     "dialogs": []
    },
@@ -5298,10 +5275,10 @@
    }
   },
   "4.48.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -5398,7 +5375,7 @@
     "started": true,
     "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.48.1.0",
      "verified": false,
      "installed": true,
@@ -5410,9 +5387,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;eba79d59-60b0-49f1-8761-195c87d4bedd]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;914a242b-a818-45bc-b8e2-eba92a0c27f8]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;67e5bff0-03d3-4d5f-ab49-62a1ccc7ab36]] YukkuriMovieMaker v4.48.1.0 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;529993b7-98e2-4e5f-9af6-802435f04562]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;966f68a8-1dbe-409d-a4af-c97d117231ea]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;e4f46f04-5f61-4cfe-8b5d-ca2218609a7e]] YukkuriMovieMaker v4.48.1.0 Lite"
     ],
     "dialogs": []
    },
@@ -5428,10 +5405,10 @@
    }
   },
   "4.48.0.5": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -5528,7 +5505,7 @@
     "started": true,
     "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.48.0.5",
      "verified": false,
      "installed": true,
@@ -5540,9 +5517,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;3ccb1436-1068-4acc-a7f1-43aa9f4465e7]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;5d625e57-7828-4118-b32b-d31a798942a1]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;d24003d1-d8cd-45e7-9ec4-4336868b9832]] YukkuriMovieMaker v4.48.0.5 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;9aa715a3-ff9b-4bcd-98a3-4d58cd5b4624]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;89f74994-3c64-4b88-a235-07d8e4a5485c]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;3441ea81-e7bf-4db7-8fca-c8b2a2a5b0ee]] YukkuriMovieMaker v4.48.0.5 Lite"
     ],
     "dialogs": []
    },
@@ -5558,10 +5535,10 @@
    }
   },
   "4.48.0.4": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -5658,7 +5635,7 @@
     "started": true,
     "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.48.0.4",
      "verified": false,
      "installed": true,
@@ -5670,9 +5647,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;1bb3a126-834a-4afd-9f87-41a585d7665b]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;e7839f41-782d-4b52-bab2-b5cfec5cdd80]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;92448fc4-c513-43be-bf58-d1e8f9131d2d]] YukkuriMovieMaker v4.48.0.4 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;63dbd33c-5e5f-44bc-8fc1-8d0315480f70]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;6ae3471e-2bdb-4cee-bd80-eacc007831b8]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;bf09713f-d4a6-4b76-bdc4-95c86a8b6e88]] YukkuriMovieMaker v4.48.0.4 Lite"
     ],
     "dialogs": []
    },
@@ -5688,10 +5665,10 @@
    }
   },
   "4.48.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -5788,7 +5765,7 @@
     "started": true,
     "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.48.0.3",
      "verified": false,
      "installed": true,
@@ -5800,9 +5777,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;62e4f0c6-33f4-48aa-ade1-303b6192535d]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;af166664-3f1a-4698-9c4c-fe855d6f0101]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;897991f7-edb0-4e2d-b549-74eb8467bed7]] YukkuriMovieMaker v4.48.0.3 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;a63f43c0-d512-40c5-a690-523e1de3d4d1]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;455baa09-e1b1-4865-8f89-4f8360cf2dfd]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;5514549e-3816-449e-9f89-32bc9f81371f]] YukkuriMovieMaker v4.48.0.3 Lite"
     ],
     "dialogs": []
    },
@@ -5818,10 +5795,10 @@
    }
   },
   "4.48.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -5918,7 +5895,7 @@
     "started": true,
     "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.48.0.2",
      "verified": false,
      "installed": true,
@@ -5930,9 +5907,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;b0a51de8-f95c-48ae-b0a1-704133112dd0]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;cd817d34-1d20-4361-b075-f25760916aa1]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;4c15da16-ceb0-4767-83a9-d51fa92a980f]] YukkuriMovieMaker v4.48.0.2 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;9e28caf7-aae3-4bce-bdf0-994faed90b95]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;bd597967-768a-4b92-9cd6-3952c79548b0]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;1d3fd221-35e9-4ea5-953e-40bf7e2cc6b7]] YukkuriMovieMaker v4.48.0.2 Lite"
     ],
     "dialogs": []
    },
@@ -5948,10 +5925,10 @@
    }
   },
   "4.48.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -6048,7 +6025,7 @@
     "started": true,
     "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.48.0.1",
      "verified": false,
      "installed": true,
@@ -6060,9 +6037,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;802e8950-9a7d-4a37-a601-6c71b9b30dbb]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;4a37a1c5-d262-43ea-8bbb-82b7491f4f16]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;35964842-ba30-404a-beb4-48c17fdf95f1]] YukkuriMovieMaker v4.48.0.1 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;aa73b3fb-3493-445d-b04c-36f6e839e93b]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;260ec2a1-5477-4195-8d0d-2cae6123fc3e]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;8278f493-5ed5-4f6e-893f-e4eb8bd4ba4c]] YukkuriMovieMaker v4.48.0.1 Lite"
     ],
     "dialogs": []
    },
@@ -6078,10 +6055,10 @@
    }
   },
   "4.48.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -6178,7 +6155,7 @@
     "started": true,
     "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.48.0.0",
      "verified": false,
      "installed": true,
@@ -6190,9 +6167,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;78bf91f9-32c2-49b0-a6d8-30073a069bf8]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;9604dfd0-982b-4073-97da-20689af2598d]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;cfbf7451-7621-4880-a58d-98bce1e2f8ef]] YukkuriMovieMaker v4.48.0.0 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;46e8edf4-4cb8-4ed8-b783-4854720a1ef3]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;d0be90a6-8ddd-4565-b486-2f2fc80b29e2]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;56fdbc31-16e1-4bea-a724-2e70b5e9e7e8]] YukkuriMovieMaker v4.48.0.0 Lite"
     ],
     "dialogs": []
    },
@@ -6208,10 +6185,10 @@
    }
   },
   "4.47.0.5": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -6308,7 +6285,7 @@
     "started": true,
     "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.47.0.5",
      "verified": false,
      "installed": true,
@@ -6320,9 +6297,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;a5d5cb4c-429b-4a51-9536-a7235809e33d]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;06f16839-f6bd-4bfb-92f9-29854979507d]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;8789d444-3e1d-40a7-9adf-f981b48fdd84]] YukkuriMovieMaker v4.47.0.5 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;30c6c25b-5c38-449b-940e-0414a020d3aa]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;6fbca7e8-a6fa-46ba-83da-c4081627020c]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;a0b60c37-8a9f-412e-8ed5-410b6d970612]] YukkuriMovieMaker v4.47.0.5 Lite"
     ],
     "dialogs": []
    },
@@ -6338,10 +6315,10 @@
    }
   },
   "4.47.0.4": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -6438,7 +6415,7 @@
     "started": true,
     "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.47.0.4",
      "verified": false,
      "installed": true,
@@ -6450,9 +6427,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;9a455735-b838-4ee3-8d5a-f2646cb502ec]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;27dca643-fc51-4d2c-b199-2d7d8d48b562]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;7b438474-2656-4b51-ad50-ced324afebf1]] YukkuriMovieMaker v4.47.0.4 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;49a6a03f-e7b4-46d2-9a43-757f698c1506]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;814db729-96f1-4247-967b-099ade0d8985]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;ebb0a0c0-21f8-4a30-9234-3a1068e3551d]] YukkuriMovieMaker v4.47.0.4 Lite"
     ],
     "dialogs": []
    },
@@ -6468,10 +6445,10 @@
    }
   },
   "4.47.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -6568,7 +6545,7 @@
     "started": true,
     "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.47.0.3",
      "verified": false,
      "installed": true,
@@ -6580,9 +6557,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;3df4ea81-405a-4df8-bfca-7a2864fb107b]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;adad3ee7-21af-4e79-8932-9499df578301]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;8f6777e0-aaeb-4435-9d21-1837abb87f07]] YukkuriMovieMaker v4.47.0.3 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;d0f82eec-09cb-4e4d-92ca-9f8e44b828fa]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;30a91b51-6b68-4756-bb2b-e100234f5e74]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;cdc83f50-4727-44f3-8309-ab6c7dd9bef8]] YukkuriMovieMaker v4.47.0.3 Lite"
     ],
     "dialogs": []
    },
@@ -6598,10 +6575,10 @@
    }
   },
   "4.47.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -6698,7 +6675,7 @@
     "started": true,
     "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.47.0.2",
      "verified": false,
      "installed": true,
@@ -6710,9 +6687,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;d5d7efa1-4d1f-4bf2-83ff-bdafab6286d2]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;7757937d-cdf3-4c51-85d5-af82ddd79fd7]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;96cea10e-6408-4cde-b504-17dfff87a85b]] YukkuriMovieMaker v4.47.0.2 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;b8e884dd-8481-4bcc-a890-5114b9a3c3da]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;e135d5b4-0cff-49ca-98f4-0cc56e70e363]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;2349534f-6d52-447d-a285-13e62028a945]] YukkuriMovieMaker v4.47.0.2 Lite"
     ],
     "dialogs": []
    },
@@ -6728,10 +6705,10 @@
    }
   },
   "4.47.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -6828,7 +6805,7 @@
     "started": true,
     "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.47.0.1",
      "verified": false,
      "installed": true,
@@ -6840,9 +6817,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;6dc36937-cd13-4f09-8cc3-fd6caedc527d]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;38e13f77-ea2f-4067-b038-b9612b099f6e]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;7996f91b-b7e5-498a-8bbe-f90de3aa7dde]] YukkuriMovieMaker v4.47.0.1 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;85d3c15c-4a74-4238-b830-66862c90f507]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;f8f83a84-77bc-4513-a5f8-23b8373ea762]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;73301d99-88f1-405f-885a-db9e56563fff]] YukkuriMovieMaker v4.47.0.1 Lite"
     ],
     "dialogs": []
    },
@@ -6858,10 +6835,10 @@
    }
   },
   "4.47.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net10.0",
@@ -6958,7 +6935,7 @@
     "started": true,
     "mainWindow": true,
     "status": {
-     "plugin": "0.2.0-preview.3",
+     "plugin": "0.2.0-preview.4",
      "host": "4.47.0.0",
      "verified": false,
      "installed": true,
@@ -6970,9 +6947,9 @@
     },
     "exitCode": null,
     "windows": [
-     "[HwndWrapper[YukkuriMovieMaker;;ad34c589-48e0-47c5-9a8f-5e32f71aa140]] Check for updates",
-     "[HwndWrapper[YukkuriMovieMaker;;48314de8-8bb2-455d-b56d-9fdafb75ff4a]] ",
-     "[HwndWrapper[YukkuriMovieMaker;;ddbe24c6-4370-40f6-8ec7-b81c535227b3]] YukkuriMovieMaker v4.47.0.0 Lite"
+     "[HwndWrapper[YukkuriMovieMaker;;918a97a7-b49e-4f47-8a17-9dbfffa9bbe4]] Check for updates",
+     "[HwndWrapper[YukkuriMovieMaker;;e3da0c53-4955-4234-81cc-b6138bb9fa41]] ",
+     "[HwndWrapper[YukkuriMovieMaker;;34896718-9345-4131-9517-e83b5f153af8]] YukkuriMovieMaker v4.47.0.0 Lite"
     ],
     "dialogs": []
    },
@@ -6988,10 +6965,10 @@
    }
   },
   "4.46.1.7": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7018,10 +6995,10 @@
    }
   },
   "4.46.1.6": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7048,10 +7025,10 @@
    }
   },
   "4.46.1.5": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7078,10 +7055,10 @@
    }
   },
   "4.46.1.4": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7108,10 +7085,10 @@
    }
   },
   "4.46.1.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7138,10 +7115,10 @@
    }
   },
   "4.46.1.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7168,10 +7145,10 @@
    }
   },
   "4.46.1.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7198,10 +7175,10 @@
    }
   },
   "4.46.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7228,10 +7205,10 @@
    }
   },
   "4.46.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7258,10 +7235,10 @@
    }
   },
   "4.45.4.7": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7288,10 +7265,10 @@
    }
   },
   "4.45.4.6": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7318,10 +7295,10 @@
    }
   },
   "4.45.4.5": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7348,10 +7325,10 @@
    }
   },
   "4.45.4.4": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7378,10 +7355,10 @@
    }
   },
   "4.45.4.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7408,10 +7385,10 @@
    }
   },
   "4.45.4.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7438,10 +7415,10 @@
    }
   },
   "4.45.4.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7468,10 +7445,10 @@
    }
   },
   "4.45.4.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7498,10 +7475,10 @@
    }
   },
   "4.45.3.5": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7528,10 +7505,10 @@
    }
   },
   "4.45.3.4": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7558,10 +7535,10 @@
    }
   },
   "4.45.3.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7588,10 +7565,10 @@
    }
   },
   "4.45.3.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7618,10 +7595,10 @@
    }
   },
   "4.45.3.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7648,10 +7625,10 @@
    }
   },
   "4.45.3.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7678,10 +7655,10 @@
    }
   },
   "4.45.2.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7708,10 +7685,10 @@
    }
   },
   "4.45.2.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7738,10 +7715,10 @@
    }
   },
   "4.45.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7768,10 +7745,10 @@
    }
   },
   "4.45.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7798,10 +7775,10 @@
    }
   },
   "4.45.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7828,10 +7805,10 @@
    }
   },
   "4.45.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7858,10 +7835,10 @@
    }
   },
   "4.44.0.4": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7888,10 +7865,10 @@
    }
   },
   "4.44.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7918,10 +7895,10 @@
    }
   },
   "4.44.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7948,10 +7925,10 @@
    }
   },
   "4.44.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -7978,10 +7955,10 @@
    }
   },
   "4.44.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8008,10 +7985,10 @@
    }
   },
   "4.43.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8038,10 +8015,10 @@
    }
   },
   "4.43.0.6": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8068,10 +8045,10 @@
    }
   },
   "4.43.0.5": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8098,10 +8075,10 @@
    }
   },
   "4.43.0.4": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8128,10 +8105,10 @@
    }
   },
   "4.43.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8158,10 +8135,10 @@
    }
   },
   "4.43.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8188,10 +8165,10 @@
    }
   },
   "4.43.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8218,10 +8195,10 @@
    }
   },
   "4.43.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8248,10 +8225,10 @@
    }
   },
   "4.42.1.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8278,10 +8255,10 @@
    }
   },
   "4.42.1.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8308,10 +8285,10 @@
    }
   },
   "4.42.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8338,10 +8315,10 @@
    }
   },
   "4.42.0.5": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8368,10 +8345,10 @@
    }
   },
   "4.42.0.4": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8398,10 +8375,10 @@
    }
   },
   "4.42.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8428,10 +8405,10 @@
    }
   },
   "4.42.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8458,10 +8435,10 @@
    }
   },
   "4.42.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8488,10 +8465,10 @@
    }
   },
   "4.42.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8518,10 +8495,10 @@
    }
   },
   "4.41.0.6": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8548,10 +8525,10 @@
    }
   },
   "4.41.0.5": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8578,10 +8555,10 @@
    }
   },
   "4.41.0.4": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8608,10 +8585,10 @@
    }
   },
   "4.41.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8638,10 +8615,10 @@
    }
   },
   "4.41.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8668,10 +8645,10 @@
    }
   },
   "4.41.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8698,10 +8675,10 @@
    }
   },
   "4.41.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8728,10 +8705,10 @@
    }
   },
   "4.40.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8758,10 +8735,10 @@
    }
   },
   "4.40.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8788,10 +8765,10 @@
    }
   },
   "4.39.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8818,10 +8795,10 @@
    }
   },
   "4.39.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8848,10 +8825,10 @@
    }
   },
   "4.39.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8878,10 +8855,10 @@
    }
   },
   "4.39.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8908,10 +8885,10 @@
    }
   },
   "4.38.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8938,10 +8915,10 @@
    }
   },
   "4.38.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8968,10 +8945,10 @@
    }
   },
   "4.37.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -8998,10 +8975,10 @@
    }
   },
   "4.37.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9028,10 +9005,10 @@
    }
   },
   "4.37.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9058,10 +9035,10 @@
    }
   },
   "4.36.2.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9088,10 +9065,10 @@
    }
   },
   "4.36.2.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9118,10 +9095,10 @@
    }
   },
   "4.36.2.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9148,10 +9125,10 @@
    }
   },
   "4.36.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9178,10 +9155,10 @@
    }
   },
   "4.36.0.4": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9208,10 +9185,10 @@
    }
   },
   "4.36.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9238,10 +9215,10 @@
    }
   },
   "4.36.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9268,10 +9245,10 @@
    }
   },
   "4.36.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9298,10 +9275,10 @@
    }
   },
   "4.36.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9328,10 +9305,10 @@
    }
   },
   "4.35.3.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9358,10 +9335,10 @@
    }
   },
   "4.35.2.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9388,10 +9365,10 @@
    }
   },
   "4.35.1.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9418,10 +9395,10 @@
    }
   },
   "4.35.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9448,10 +9425,10 @@
    }
   },
   "4.35.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9478,10 +9455,10 @@
    }
   },
   "4.35.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net9.0",
@@ -9508,10 +9485,10 @@
    }
   },
   "4.34.2.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9538,10 +9515,10 @@
    }
   },
   "4.34.1.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9568,10 +9545,10 @@
    }
   },
   "4.34.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9598,10 +9575,10 @@
    }
   },
   "4.34.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9628,10 +9605,10 @@
    }
   },
   "4.34.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9658,10 +9635,10 @@
    }
   },
   "4.33.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9688,10 +9665,10 @@
    }
   },
   "4.33.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9718,10 +9695,10 @@
    }
   },
   "4.33.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9748,10 +9725,10 @@
    }
   },
   "4.33.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9778,10 +9755,10 @@
    }
   },
   "4.33.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9808,10 +9785,10 @@
    }
   },
   "4.32.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9838,10 +9815,10 @@
    }
   },
   "4.32.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9868,10 +9845,10 @@
    }
   },
   "4.32.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9898,10 +9875,10 @@
    }
   },
   "4.31.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9928,10 +9905,10 @@
    }
   },
   "4.30.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9958,10 +9935,10 @@
    }
   },
   "4.30.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -9988,10 +9965,10 @@
    }
   },
   "4.30.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10018,10 +9995,10 @@
    }
   },
   "4.29.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10048,10 +10025,10 @@
    }
   },
   "4.29.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10078,10 +10055,10 @@
    }
   },
   "4.29.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10108,10 +10085,10 @@
    }
   },
   "4.28.2.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10138,10 +10115,10 @@
    }
   },
   "4.28.2.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10168,10 +10145,10 @@
    }
   },
   "4.28.1.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10198,10 +10175,10 @@
    }
   },
   "4.28.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10228,10 +10205,10 @@
    }
   },
   "4.28.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10258,10 +10235,10 @@
    }
   },
   "4.28.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10288,10 +10265,10 @@
    }
   },
   "4.28.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10318,10 +10295,10 @@
    }
   },
   "4.28.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10348,10 +10325,10 @@
    }
   },
   "4.27.2.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10378,10 +10355,10 @@
    }
   },
   "4.27.1.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10408,10 +10385,10 @@
    }
   },
   "4.27.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10438,10 +10415,10 @@
    }
   },
   "4.27.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10468,10 +10445,10 @@
    }
   },
   "4.26.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10498,10 +10475,10 @@
    }
   },
   "4.26.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10528,10 +10505,10 @@
    }
   },
   "4.26.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10558,10 +10535,10 @@
    }
   },
   "4.25.0.4": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10588,10 +10565,10 @@
    }
   },
   "4.25.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10618,10 +10595,10 @@
    }
   },
   "4.25.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10648,10 +10625,10 @@
    }
   },
   "4.25.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10678,10 +10655,10 @@
    }
   },
   "4.25.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10708,10 +10685,10 @@
    }
   },
   "4.24.0.6": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10738,10 +10715,10 @@
    }
   },
   "4.24.0.5": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10768,10 +10745,10 @@
    }
   },
   "4.24.0.4": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10798,10 +10775,10 @@
    }
   },
   "4.24.0.3": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10828,10 +10805,10 @@
    }
   },
   "4.24.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10858,10 +10835,10 @@
    }
   },
   "4.24.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10888,10 +10865,10 @@
    }
   },
   "4.24.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10918,10 +10895,10 @@
    }
   },
   "4.23.0.2": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10948,10 +10925,10 @@
    }
   },
   "4.23.0.1": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -10978,10 +10955,10 @@
    }
   },
   "4.23.0.0": {
-   "checked": "2026-10-05",
-   "plugin": "0.2.0-preview.3+1720188",
-   "commit": "1720188fe9aedf7cd54e67d053f47e39ecc2689e",
-   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37334609936",
+   "checked": "2026-10-06",
+   "plugin": "0.2.0-preview.4",
+   "commit": "e34c3d9fd15b6626233e82f1f185bdea04f7affa",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37383441048",
    "scan": {
     "runtime": {
      "tfm": "net8.0",
@@ -11008,6 +10985,6 @@
    }
   }
  },
- "updated": "2026-10-05",
- "plugin": "0.2.0-preview.3+1720188"
+ "updated": "2026-10-06",
+ "plugin": "0.2.0-preview.4"
 }
