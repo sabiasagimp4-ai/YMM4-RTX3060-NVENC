@@ -82,7 +82,9 @@ internal static class VoiceCachePixelChecks
             {
                 var copies = batch.CloneScene.Timeline.Items.OfType<VoiceItem>().ToArray();
                 for (int i = 0; i < voices.Length; ++i)
-                    Check(ReferenceEquals(copies[i].VoiceCache, voices[i].VoiceCache) && copies[i].FilePath == voices[i].FilePath,
+                    // The array is shared only where the host's read-only use was read (4.56.1.0); other builds get a copy.
+                    Check(ReferenceEquals(copies[i].VoiceCache, voices[i].VoiceCache) == FrameVoiceCloneState.CanShare(voices[i])
+                        && copies[i].VoiceCache.AsSpan().SequenceEqual(voices[i].VoiceCache) && copies[i].FilePath == voices[i].FilePath,
                         "The idle clone did not receive the verified voice cache and its actual WAV path");
                 TimelineFrameCache.Enabled = true;
                 TimelineFrameCache.Clear();

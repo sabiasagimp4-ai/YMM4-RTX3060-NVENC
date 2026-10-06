@@ -33,7 +33,7 @@ fingerprintは型・基底・interface・field・属性・正規化IL・生成�
 - プレビュー: 4.54.0.1以前のプレイヤーにはズーム・パンがなく（`PreviewDisplayZoom`、`PreviewViewCenter`、`GetVisibleVideoSize`、`CreatePreviewViewTransform` がない）、Drawはcontextの変換のまま出力を (幅/2, 高さ/2) に描く。`TimelineFrameCache` はこの4つがすべてない版では、viewの変換をcontextの変換だけにする（一部だけある版は契約違反として使わない）。
 - 選択枠: 4.54以前は `TimelineItemRects` の要素の型が違い、型の確認で自動的に使わない。
 - FFmpeg: 4.54.0.0以前には、シークした位置が要求時刻より後だったときに戻ってシークし直す処理（`SeekAndDecode`）がない。後のフレームが要求時刻の区間として残り、どのフレームになるかがシークの履歴で変わるため、完成判定に使わない。4.52以前は `streamStartTime` もなく、形の確認で未確認になる。
-- 旧MF: 4.53.0.0から `streamStartTime` がある（4.52以前は形の確認で未確認）。4.54.0.1以前は同期の読み込みでtimeoutと作り直しがなく、エラー・終端でdurationを0にするのは同じ。4.54.0.0以前は断片化MP4の長さの解析がなく、4.53.0.1以前は長さから `streamStartTime` を引かない（範囲が長くなるだけで、終端の先は読めずdurationが0）。
+- 旧MF: 4.53.0.0から `streamStartTime` がある（4.52以前は形の確認で未確認）。4.54.0.1以前は同期の読み込みでtimeoutと作り直しがなく、エラー・終端でdurationを0にするのは同じ。4.54.0.0以前は断片化MP4の長さの解析がなく、4.53.0.1以前は長さから `streamStartTime` を引かない（範囲が長くなるだけで、終端の先は読めずdurationが0）。4.54.0.1ではHarmonyが `MFVideoFileSource.Update` を作り直せず、旧MFは未確認になる（wrapperが拒否する）。
 - MF2: 4.48から（4.47にはない）。完成判定の条件は4.48から同じ。
 - WIC: 4.51以前は連番の読み込みプラグインの名前の翻訳だけが違う。
 - 番号付き画像: `VideoSource.CalculateSourceTime` は4.56.0.0から。それより前は、ルートのアイテムの連番はキーにしない（通常描画）。

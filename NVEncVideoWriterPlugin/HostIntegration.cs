@@ -225,6 +225,27 @@ internal static class HostIntegration
         { SimpleTachie = evaluation.Has(HostContracts.SimpleTachie), LipSync = evaluation.Has(HostContracts.LipSync),
             AnimationTachie = evaluation.Has(HostContracts.AnimationTachie), PsdTachie = evaluation.Has(HostContracts.PsdTachie) };
 
+    // The features the contracts allow, of which the tachie ones only with the bundled tachie assembly that was read
+    // (its MVID), as their gates require. problems gets why a tachie feature the contracts allow is off.
+    internal static HostFeatures FeaturesFrom(HostContracts.Evaluation evaluation, string directory, IDictionary<string, string> problems)
+    {
+        var features = FeaturesFrom(evaluation);
+        bool Bundled(bool enabled, string feature, string assembly, Guid read)
+        {
+            if (!enabled) return false;
+            try { if (HostFingerprint.ReadMvid(Path.Combine(directory, assembly + ".dll")) == read) return true; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or BadImageFormatException or InvalidOperationException) { }
+            problems[feature] = "同梱の立ち絵が確かめたものと異なります";
+            return false;
+        }
+        return features with
+        {
+            SimpleTachie = Bundled(features.SimpleTachie, HostContracts.SimpleTachie, SimpleTachieDependencies.AssemblyName, SimpleTachieDependencies.ReadBuild),
+            AnimationTachie = Bundled(features.AnimationTachie, HostContracts.AnimationTachie, AnimationTachieDependencies.AssemblyName, AnimationTachieDependencies.ReadBuild),
+            PsdTachie = Bundled(features.PsdTachie, HostContracts.PsdTachie, PsdTachieDependencies.AssemblyName, PsdTachieDependencies.ReadBuild),
+        };
+    }
+
     // HostContracts against the read builds. The verdict is kept per set of host binaries (and plugin build), so
     // only the first start after a YMM4 update spends the few seconds of reading them.
     internal static bool TryMatchReadBuild(Assembly host, out HostFeatures features, out string detail)
@@ -245,23 +266,8 @@ internal static class HostIntegration
                     + (evaluation.Problems.TryGetValue(HostContracts.Core, out var core) ? $"（{core}）。" : "。");
                 return false;
             }
-            features = FeaturesFrom(evaluation);
-            // The tachie gates also require the bundled tachie assembly that was read (its MVID), whatever the contracts.
             var problems = new SortedDictionary<string, string>(evaluation.Problems.ToDictionary(p => p.Key, p => p.Value), StringComparer.Ordinal);
-            bool Bundled(bool enabled, string feature, string assembly, Guid read)
-            {
-                if (!enabled) return false;
-                try { if (HostFingerprint.ReadMvid(Path.Combine(directory, assembly + ".dll")) == read) return true; }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or BadImageFormatException or InvalidOperationException) { }
-                problems[feature] = "同梱の立ち絵が確かめたものと異なります";
-                return false;
-            }
-            features = features with
-            {
-                SimpleTachie = Bundled(features.SimpleTachie, HostContracts.SimpleTachie, SimpleTachieDependencies.AssemblyName, SimpleTachieDependencies.ReadBuild),
-                AnimationTachie = Bundled(features.AnimationTachie, HostContracts.AnimationTachie, AnimationTachieDependencies.AssemblyName, AnimationTachieDependencies.ReadBuild),
-                PsdTachie = Bundled(features.PsdTachie, HostContracts.PsdTachie, PsdTachieDependencies.AssemblyName, PsdTachieDependencies.ReadBuild),
-            };
+            features = FeaturesFrom(evaluation, directory, problems);
             detail = problems.Count == 0 ? string.Empty
                 : "使わない機能: " + string.Join(" / ", problems.Select(p => $"{p.Key}（{p.Value}）"));
             return true;

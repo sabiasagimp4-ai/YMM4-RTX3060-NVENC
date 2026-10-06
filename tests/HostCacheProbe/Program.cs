@@ -116,8 +116,9 @@ internal static class Program
         {
             var evaluation = HostContracts.Evaluate(HostContracts.Describe(hostDir));
             Console.WriteLine($"Contracts verdict: same code as {evaluation.Baseline ?? "no read build"}; features: {string.Join(", ", evaluation.Features.Order(StringComparer.Ordinal))}");
-            foreach (var (feature, problem) in evaluation.Problems) Console.WriteLine($"  off {feature}: {problem}");
-            features = evaluation.Baseline is null ? null : HostIntegration.FeaturesFrom(evaluation);
+            var problems = new SortedDictionary<string, string>(evaluation.Problems.ToDictionary(p => p.Key, p => p.Value), StringComparer.Ordinal);
+            features = evaluation.Baseline is null ? null : HostIntegration.FeaturesFrom(evaluation, hostDir, problems);
+            foreach (var (feature, problem) in problems) Console.WriteLine($"  off {feature}: {problem}");
             if (features is not null) HostFeatures.Decide(host, features);
         }
         else
