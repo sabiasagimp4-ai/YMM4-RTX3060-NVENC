@@ -122,7 +122,7 @@ internal static class OperationSequenceChecks
     private static void Configure(Timeline timeline, int project, Configuration config)
     {
         timeline.VideoInfo.Width = config.Width; timeline.VideoInfo.Height = config.Height; timeline.VideoInfo.FPS = config.Fps;
-        timeline.VideoInfo.BackgroundColor = project == 0 ? System.Windows.Media.Colors.DarkRed : System.Windows.Media.Colors.DarkBlue;
+        timeline.VideoInfo.SetBackground(project == 0 ? System.Windows.Media.Colors.DarkRed : System.Windows.Media.Colors.DarkBlue);
         foreach (var shape in timeline.Items.OfType<ShapeItem>())
         {
             shape.X.SetFirst(-65 + shape.Frame * 8 + (config.Edited ? 5 : 0));

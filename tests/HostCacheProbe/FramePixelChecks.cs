@@ -64,7 +64,7 @@ internal static class FramePixelChecks
                     "No MF2 video source was recognized; video frames would never be cached");
             var timeline = new Timeline();
             timeline.VideoInfo.Width = 321; timeline.VideoInfo.Height = 181;
-            timeline.VideoInfo.BackgroundColor = System.Windows.Media.Color.FromArgb(137, 123, 76, 231);
+            timeline.VideoInfo.SetBackground(System.Windows.Media.Color.FromArgb(137, 123, 76, 231));
             var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
             var shape = new ShapeItem { Frame = 0, Length = 100 };
             shape.X.SetFirst(-12.25); shape.Y.SetFirst(8.75); shape.Opacity.SetFirst(43);
@@ -103,7 +103,7 @@ internal static class FramePixelChecks
                 var cached = TimelineFrameCache.Capture(dc, source.Output, 321, 181, new(-160.5f, -90.5f))!;
                 Check(baseline.SequenceEqual(cached), "Actual background/ShapeItem source pixel parity failed");
                 CheckEditDuringLiveLookup(source, timeline, dc);
-                timeline.VideoInfo.BackgroundColor = System.Windows.Media.Colors.Red;
+                HostCompat.EditModel(timeline, System.Windows.Media.Colors.Red);
                 oldHits = TimelineFrameCache.Hits;
                 source.Update(TimeSpan.Zero, TimelineSourceUsage.Exporting);
                 Check(TimelineFrameCache.Hits == oldHits, "Background edit reused stale output");
@@ -173,7 +173,7 @@ internal static class FramePixelChecks
         TimelineFrameCache.BeforeCacheLookupForTests = () =>
         {
             TimelineFrameCache.BeforeCacheLookupForTests = null;
-            timeline.VideoInfo.BackgroundColor = System.Windows.Media.Colors.Green;
+            HostCompat.EditModel(timeline, System.Windows.Media.Colors.Green);
         };
         try
         {
@@ -241,7 +241,7 @@ internal static class FramePixelChecks
         const int Frames = 10, Width = 321, Height = 181;
         var timeline = new Timeline();
         timeline.VideoInfo.Width = Width; timeline.VideoInfo.Height = Height; timeline.VideoInfo.FPS = 30;
-        timeline.VideoInfo.BackgroundColor = System.Windows.Media.Color.FromArgb(200, 10, 120, 60);
+        timeline.VideoInfo.SetBackground(System.Windows.Media.Color.FromArgb(200, 10, 120, 60));
         var scenes = HostCompat.NewScenes(); scenes.AddScene(timeline);
         for (int i = 0; i < Frames; i++)
         {

@@ -39,8 +39,9 @@ internal static class VoiceDescriptionChecks
         var snapshot = FrameDescriptionJson.Load<Snapshot>(model)!;
         var copies = snapshot.Timelines.Single().Items.OfType<VoiceItem>().ToArray();
         for (int i = 0; i < 200; ++i)
-            Check(ReferenceEquals(copies[i].VoiceCache, voices[i].VoiceCache) && copies[i].VoiceCache.SequenceEqual(cache),
-                "The idle copy lost the live voice payload");
+            // Shared only where the host's read-only use was read (4.56.1.0); other builds get copies.
+            Check(ReferenceEquals(copies[i].VoiceCache, voices[i].VoiceCache) == FrameVoiceCloneState.CanShare(voices[i])
+                && copies[i].VoiceCache.SequenceEqual(cache), "The idle copy lost the live voice payload");
         voices[0].VoiceCache[5] ^= 1;
         bool refused = false;
         try { FrameDescriptionJson.Load<Snapshot>(model); }

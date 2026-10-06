@@ -968,7 +968,7 @@ internal static class Program
             Check(tracker.TryCapture(5, out var reentrant, out reason), reason);
             using (reentrant)
             {
-                effect.OnValidate = () => { effect.OnValidate = null; timeline.VideoInfo.BackgroundColor = System.Windows.Media.Colors.Red; };
+                effect.OnValidate = () => { effect.OnValidate = null; HostCompat.EditModel(timeline, System.Windows.Media.Colors.Red); };
                 Check(!reentrant!.Validate(files: false), "Provider re-entry edited the model but validated its old capture");
             }
             Check(tracker.TryCapture(5, out var trusted, out reason), reason);

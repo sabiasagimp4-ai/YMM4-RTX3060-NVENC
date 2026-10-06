@@ -42,7 +42,7 @@ internal static class ExportScopeChecks
         const BindingFlags instance = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
         var export = RuntimeHelpers.GetUninitializedObject(writerType);
         var timeline = Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Project.Timeline", true)!)!;
-        var scenes = Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Project.Scenes", true)!, [false])!;
+        var scenes = HostCompat.NewScenes();
         var scene = Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Project.Scene", true)!, [timeline, scenes, Array.Empty<Guid>()])!;
         writerType.GetField("scene", instance)!.SetValue(export, scene);
         var settingsField = writerType.GetField("settings", instance)!;
