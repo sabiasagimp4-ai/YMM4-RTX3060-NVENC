@@ -16,27 +16,29 @@ internal static class SimpleTachiePixelChecks
         bool preview = TimelineFrameCache.PreviewEnabled, export = TimelineFrameCache.ExportEnabled;
         var viewport = TimelineFrameCache.TestViewport;
         var store = TimelineFrameCache.StoreIfCreated;
-        foreach (var (hidden, video) in new[] { (false, false), (true, false), (false, true) })
+        // The nested layouts take the plain case through a group control, a composite group's source and another scene's.
+        foreach (var (hidden, video, layout) in new[] { (false, false, "root"), (true, false, "root"), (false, true, "root") }
+            .Concat(TachieLayouts.Nested.Select(layout => (false, false, layout))))
         {
             Exception? failure = null;
             using var finished = new ManualResetEventSlim();
             var worker = new Thread(() =>
             {
-                try { RunCase(host, hidden, video); }
+                try { RunCase(host, hidden, video, layout); }
                 catch (Exception error) { failure = error; }
                 finally { finished.Set(); }
             }) { IsBackground = true, Name = "Simple tachie pixel check" };
             worker.SetApartmentState(ApartmentState.STA); worker.Start();
-            Check(finished.Wait(TimeSpan.FromSeconds(30)), $"Simple tachie case hidden={hidden},video={video} exceeded 30 seconds");
-            if (failure is not null) throw new InvalidOperationException($"Simple tachie case hidden={hidden},video={video}", failure);
+            Check(finished.Wait(TimeSpan.FromSeconds(30)), $"Simple tachie case hidden={hidden},video={video},layout={layout} exceeded 30 seconds");
+            if (failure is not null) throw new InvalidOperationException($"Simple tachie case hidden={hidden},video={video},layout={layout}", failure);
             Check(TimelineFrameCache.PreviewEnabled == preview && TimelineFrameCache.ExportEnabled == export
                 && ReferenceEquals(TimelineFrameCache.TestViewport, viewport) && ReferenceEquals(TimelineFrameCache.StoreIfCreated, store),
                 "Simple tachie checks changed the surrounding test's cache configuration");
         }
-        Console.WriteLine("Simple tachie pixels: speech boundaries, highest face, no-speech hiding, looping GIF, idle clones and selective overwrite bypass passed.");
+        Console.WriteLine("Simple tachie pixels: speech boundaries, highest face, no-speech hiding, looping GIF, idle clones, selective overwrite bypass, groups, composite groups and scenes passed.");
     }
 
-    private static void RunCase(Assembly host, bool hidden, bool video)
+    private static void RunCase(Assembly host, bool hidden, bool video, string layout)
     {
         using var fixture = new SimpleTachieFixture(hidden);
         if (video)
@@ -55,17 +57,18 @@ internal static class SimpleTachiePixelChecks
         SimpleTachieFixture.Set(face.TachieFaceParameter, "Face", upper);
         fixture.Timeline.Items = fixture.Timeline.Items.Where(item => item is TachieItem).ToImmutableList().AddRange(voices).Add(face);
         fixture.Timeline.RefreshTimelineLengthAndMaxLayer();
+        var scene = TachieLayouts.Apply(layout, fixture.Timeline, fixture.Scene);
         using var devices = new GraphicsDevices();
         using var context = devices.CreateContext();
         var dc = context.DeviceContext;
         using var player = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!,
-            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [context, fixture.Scene, null], null)!;
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, [context, scene, null], null)!;
         var view = new TimelineFrameCache.PreviewViewport(321, 181, Matrix3x2.Identity, new Vector2(160.5f, 90.5f), 96, 96,
             new Vortice.DCommon.PixelFormat(Vortice.DXGI.Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),
             dc.AntialiasMode, dc.TextAntialiasMode, dc.PrimitiveBlend, dc.UnitMode,
-            fixture.Scene.ID, fixture.Timeline.ID, Stopwatch.GetTimestamp(), false);
+            scene.ID, scene.Timeline.ID, Stopwatch.GetTimestamp(), false);
         using var store = new FrameCacheStore(Path.Combine(fixture.Root, "store"), 64L << 20, 0);
-        using var tracker = new KeyDependencyTracker(fixture.Scene);
+        using var tracker = new KeyDependencyTracker(scene);
         var oldStore = TimelineFrameCache.StoreIfCreated;
         bool oldPreview = TimelineFrameCache.PreviewEnabled, oldExport = TimelineFrameCache.ExportEnabled;
         var oldViewport = TimelineFrameCache.TestViewport;
@@ -114,8 +117,10 @@ internal static class SimpleTachiePixelChecks
             using (capture) batch = new(tracker, capture!.Model);
             using (batch)
             {
-                var cloneFace = batch.CloneScene.Timeline.Items.OfType<TachieFaceItem>().Single();
-                var cloneTachie = batch.CloneScene.Timeline.Items.OfType<TachieItem>()
+                // The clone's copy of the fixture's timeline: the root, or the scene the root shows.
+                var cloneTimeline = layout == "scene" ? batch.CloneScene.Scenes.Timelines.Single(timeline => timeline.ID == fixture.Timeline.ID) : batch.CloneScene.Timeline;
+                var cloneFace = cloneTimeline.Items.OfType<TachieFaceItem>().Single();
+                var cloneTachie = cloneTimeline.Items.OfType<TachieItem>()
                     .Single(item => item.CharacterName == face.CharacterName);
                 Check(ReferenceEquals(cloneFace.Character, cloneTachie.Character),
                     "The cloned face was not rebound to the cloned tachie's character");
@@ -124,7 +129,7 @@ internal static class SimpleTachiePixelChecks
                 TimelineFrameCache.Clear();
                 foreach (int frame in frames)
                 {
-                    var result = IdleFramePreRenderer.PrimeBatchFrame(tracker, fixture.Scene, batch, frame, view,
+                    var result = IdleFramePreRenderer.PrimeBatchFrame(tracker, scene, batch, frame, view,
                         () => true, CancellationToken.None, out var reason);
                     Check(result == IdleFramePreRenderer.IdleFrameResult.Rendered, $"Simple idle frame {frame}: {result}: {reason}");
                 }
@@ -158,8 +163,9 @@ internal static class SimpleTachiePixelChecks
                 Check(TimelineFrameCache.Hits > restoredHits && Pixels().SequenceEqual(baseline[0]), "Ready simple video did not recover with matching pixels");
             }
             // Overwriting the selected upper face must reject its frames immediately, without disabling the
-            // default face's range. Use a new plain-image case for this assertion; the GIF's own time stays separate.
-            if (!hidden && !video)
+            // default face's range. Use a new plain-image case for this assertion; the GIF's own time stays separate. A
+            // scene item's frames depend on every file of its scene, so there they all change.
+            if (!hidden && !video && layout != "scene")
             {
                 Check(tracker.TryCapture(75, out var unaffected, out var reason), reason);
                 string key;

@@ -10,6 +10,7 @@ using YukkuriMovieMaker.Commons;
 using YukkuriMovieMaker.Player.Video;
 using YukkuriMovieMaker.Plugin;
 using YukkuriMovieMaker.Plugin.Voice;
+using YukkuriMovieMaker.Project;
 using YukkuriMovieMaker.Project.Items;
 
 internal static class AnimationTachieChecks
@@ -17,13 +18,15 @@ internal static class AnimationTachieChecks
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     internal static void Run(Assembly host)
     {
-        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback", "metadata-budget", "output-lifetime", "idle-inactive", "preserved-directory-time" })
+        // The nested layouts (group, composite, scene) take the "pixels" case's frames through a group control, a composite
+        // group's source and another scene's source.
+        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback", "metadata-budget", "output-lifetime", "idle-inactive", "preserved-directory-time" }.Concat(TachieLayouts.Nested))
         {
             Exception? failure = null;
             using var finished = new ManualResetEventSlim();
             var worker = new Thread(() =>
             {
-                try { using var fixture = new Case(host, name == "hidden-vowels"); RunCase(fixture, name, host); }
+                try { using var fixture = new Case(host, name == "hidden-vowels", TachieLayouts.Nested.Contains(name) ? name : "root"); RunCase(fixture, name, host); }
                 catch (Exception error) { failure = error; }
                 finally { finished.Set(); }
             }) { IsBackground = true, Name = "Animation tachie " + name };
@@ -154,6 +157,7 @@ internal static class AnimationTachieChecks
                 "Upper-case vowel accepted by the host was omitted from dependencies");
         int[] frames = [0, 29, 30, 31, 35, 40, 45, 50, 59, 60, 74, 89, 90, 104, 119, 120, 149, 150];
         var reference = frames.ToDictionary(frame => frame, frame => { test.Update(frame); return test.Pixels(); });
+        if (TachieLayouts.Nested.Contains(name)) Check(reference[0].Any(value => value != 0), "The " + name + " layout drew nothing");
         if (name == "hidden-vowels")
         {
             Check(!reference[29].SequenceEqual(reference[30]), "No-speech visibility did not change");
@@ -164,9 +168,9 @@ internal static class AnimationTachieChecks
             test.Warm(frame);
             Check(test.Pixels().SequenceEqual(reference[frame]), "Animation cached pixels differ at " + frame);
         }
-        using var tracker = new KeyDependencyTracker(test.Fixture.Scene);
+        using var tracker = new KeyDependencyTracker(test.Scene);
         int rendered = 0;
-        var result = IdleFramePreRenderer.PrimeLiveFrame(tracker, test.Fixture.Scene, test.Source, _ => rendered++,
+        var result = IdleFramePreRenderer.PrimeLiveFrame(tracker, test.Scene, test.Source, _ => rendered++,
             30, test.View, () => true, CancellationToken.None);
         Check(result == IdleFramePreRenderer.IdleFrameResult.Normal && rendered == 0, "Idle tachie started a competing calculation");
         Check(AnimationTachieDependencies.SessionResource.Contains("animation-blink-session://", StringComparison.Ordinal), "Blink session salt missing");
@@ -231,6 +235,7 @@ internal static class AnimationTachieChecks
     private sealed class Case : IDisposable
     {
         internal readonly AnimationTachieFixture Fixture;
+        internal readonly Scene Scene;
         internal readonly GraphicsDevices Devices = new();
         internal readonly IGraphicsDevicesAndContext Context;
         internal readonly ITimelineSource Source;
@@ -240,7 +245,7 @@ internal static class AnimationTachieChecks
         private readonly bool oldPreview = TimelineFrameCache.PreviewEnabled, oldExport = TimelineFrameCache.ExportEnabled, oldGpu = TimelineFrameCache.GpuRetentionEnabled;
         private readonly Func<object, TimelineFrameCache.PreviewViewport?>? oldViewport = TimelineFrameCache.TestViewport;
         private readonly FrameCacheStore? oldStore = TimelineFrameCache.StoreIfCreated;
-        internal Case(Assembly host, bool vowels)
+        internal Case(Assembly host, bool vowels, string layout)
         {
             harmony.Patch(typeof(PluginAssemblyLoader).TypeInitializer!, prefix: new(typeof(AnimationTachieChecks), nameof(SkipLoader)));
             ProbeLoader.Stub(ProbeLoader.Assemblies(host).Append(Assembly.LoadFrom(Path.Combine(Path.GetDirectoryName(host.Location)!, AnimationTachieDependencies.AssemblyName + ".dll"))));
@@ -264,12 +269,13 @@ internal static class AnimationTachieChecks
             }
             Fixture.Timeline.Items = Fixture.Timeline.Items.Where(item => item is TachieItem).ToImmutableList().AddRange(voices);
             Fixture.Timeline.RefreshTimelineLengthAndMaxLayer();
+            Scene = TachieLayouts.Apply(layout, Fixture.Timeline, Fixture.Scene);
             Context = Devices.CreateContext();
-            Source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!, Instance, null, [Context, Fixture.Scene, null], null)!;
+            Source = (ITimelineSource)Activator.CreateInstance(host.GetType("YukkuriMovieMaker.Player.Video.TimelineSource", true)!, Instance, null, [Context, Scene, null], null)!;
             var dc = Context.DeviceContext;
             View = new(321, 181, Matrix3x2.Identity, new Vector2(160.5f, 90.5f), 96, 96,
                 new Vortice.DCommon.PixelFormat(Vortice.DXGI.Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),
-                dc.AntialiasMode, dc.TextAntialiasMode, dc.PrimitiveBlend, dc.UnitMode, Fixture.Scene.ID, Fixture.Timeline.ID, Stopwatch.GetTimestamp(), false);
+                dc.AntialiasMode, dc.TextAntialiasMode, dc.PrimitiveBlend, dc.UnitMode, Scene.ID, Scene.Timeline.ID, Stopwatch.GetTimestamp(), false);
             Store = new(Path.Combine(Fixture.Root, "store"), 64L << 20, 0);
             TimelineFrameCache.Enabled = false; TimelineFrameCache.GpuRetentionEnabled = false;
             Check(TimelineFrameCache.TryInstall(host, harmony, out var reason), reason);

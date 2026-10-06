@@ -89,11 +89,27 @@ internal static class SimpleTachieKeyChecks
             character.TachieType = typeof(SimpleTachieKeyChecks);
             Check(!Describe().For(0).Cacheable, "An external tachie type was admitted");
             character.TachieType = plugin.GetType();
-            timeline.Items = timeline.Items.Add(new GroupItem { Frame = 0, Length = 90, Layer = 10 });
-            Check(!Describe().For(0).Cacheable, "Unverified grouped tachie time mapping was admitted");
-            Console.WriteLine("Simple tachie keys: verified code, default/voice/upper faces, hidden layers/no voice, selective overwrites, unknown parameters/MVID/contracts and groups passed.");
+            CheckGroups(Describe, timeline, tachie, files);
+            Console.WriteLine("Simple tachie keys: verified code, default/voice/upper faces, hidden layers/no voice, selective overwrites, unknown parameters/MVID/contracts, groups and composite groups passed.");
         }
         finally { HostFeatures.Decide(host, features); Directory.Delete(root, recursive: true); }
+    }
+    // In a group (its effects applied to the tachie) and a composite group (drawn by the group's own source, which picks
+    // the faces of the same frame while the group is shown): keyed with the group, the same faces. Apart from Run:
+    // GroupItem.IsComposite is newer than the oldest builds Run starts on.
+    private static void CheckGroups(Func<FrameDependencyIndex> describe, Timeline timeline, TachieItem tachie, string[] files)
+    {
+        string ungrouped = describe().For(35).Content;
+        tachie.Layer = 6;
+        var group = new GroupItem { Frame = 0, Length = 90, Layer = 5, GroupRange = 1 };
+        timeline.Items = timeline.Items.Add(group);
+        var index = describe();
+        Check(new[] { 0, 25, 35, 45 }.All(frame => index.For(frame).Cacheable) && index.For(35).Files.Contains(files[1])
+            && index.For(25).Files.Contains(files[2]) && index.For(35).Content != ungrouped, "A tachie in a group was not keyed with its faces and group");
+        string grouped = index.For(35).Content;
+        group.IsComposite = true;
+        index = describe();
+        Check(index.For(35).Cacheable && index.For(35).Files.Contains(files[1]) && index.For(35).Content != grouped, "A tachie in a composite group was not keyed with its group");
     }
     private static void Set(object parameter, string property, object value) => parameter.GetType().GetProperty(property)!.SetValue(parameter, value);
     private sealed class ForeignFace : Animatable, ITachieFaceParameter

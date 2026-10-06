@@ -70,7 +70,7 @@ internal static class SimpleTachieDependencies
         ranges = [];
         var character = item.Character;
         if (!Character(character) || !Parameter(item.TachieItemParameter, character.TachieType, "ItemParameter")
-            || item.Length <= 0 || timeline.Items.Any(candidate => candidate is GroupItem)) return false;
+            || item.Length <= 0) return false;
         var pickerType = typeof(Scene).Assembly.GetType("YukkuriMovieMaker.Player.Video.CompositeItemPicker");
         var faceType = typeof(Scene).Assembly.GetType("YukkuriMovieMaker.Project.Items.IFaceItem");
         var pick = pickerType?.GetMethod("PickFaceItems", [typeof(Timeline), typeof(int)]);

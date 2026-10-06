@@ -191,7 +191,6 @@ internal static class PsdTachieDependencies
         files = [];
         var character = item.Character;
         if (!Character(character) || !(ReadinessInstalled?.Invoke() == true) || item.Length <= 0
-            || timeline.Items.Any(candidate => candidate is GroupItem)
             || !Parameter(item.TachieItemParameter, character.TachieType, "PsdTachieItemParameter")) return false;
         var faces = timeline.Items.Where(candidate => ReferenceEquals(FrameCacheKey.GetCharacter(candidate), character))
             .Where(candidate => candidate is VoiceItem or TachieFaceItem).ToArray();
@@ -206,24 +205,23 @@ internal static class PsdTachieDependencies
         files = [Path.GetFullPath(path)];
         return true;
     }
-    internal static bool ContainsNative(Scene scene, int frame) => scene.Timeline.Items.OfType<TachieItem>()
-        .Any(item => item.Frame <= frame && frame < (long)item.Frame + item.Length
-            && item.Character?.TachieType?.FullName == PluginName);
+    internal static bool ContainsNative(Scene scene, int frame) => NestedTimelineSources.MayDraw(scene, frame, PluginName);
+    // Every PSD tachie the frame drew (in `timelineSource` and the sources inside it: groups, transitions, scenes) holds
+    // the keyed file and settings; every one of the root timeline at the frame was drawn.
     internal static bool SafeSource(object timelineSource, Scene scene, int frame, KeyCapture? capture = null)
     {
         try
         {
-            var active = scene.Timeline.Items.OfType<TachieItem>().Where(item => item.Frame <= frame && frame < (long)item.Frame + item.Length
-                && item.Character?.TachieType?.FullName == PluginName).ToArray();
-            if (active.Length == 0) return true;
-            if (!(ReadinessInstalled?.Invoke() == true) || timelineSource.GetType().FullName != "YukkuriMovieMaker.Player.Video.TimelineSource"
-                || timelineSource.GetType().GetField("timelineResources", Instance)?.GetValue(timelineSource) is not IDictionary resources) return false;
-            foreach (var item in active)
+            if (!NestedTimelineSources.AnyTachie(scene, PluginName)) return true;
+            if (!(ReadinessInstalled?.Invoke() == true)) return false;
+            var drawn = new List<(TachieItem Item, object Source)>();
+            if (!NestedTimelineSources.TryTachieSources(timelineSource, drawn)) return false;
+            if (NestedTimelineSources.TachieItems(scene.Timeline).Any(item => NestedTimelineSources.Shows(item, frame)
+                && item.Character?.TachieType?.FullName == PluginName && !drawn.Any(pair => ReferenceEquals(pair.Item, item)))) return false;
+            foreach (var (item, core) in drawn)
             {
-                if (!Character(item.Character) || resources[item] is not { } effected) return false;
-                var core = effected.GetType().GetProperty("Source", Instance)?.GetValue(effected);
-                if (core?.GetType().FullName != "YukkuriMovieMaker.Player.Video.Items.TachieSource"
-                    || !ReferenceEquals(core.GetType().GetField("item", Instance)?.GetValue(core), item)) return false;
+                if (item.Character?.TachieType?.FullName != PluginName) continue;
+                if (!Character(item.Character) || !ReferenceEquals(core.GetType().GetField("item", Instance)?.GetValue(core), item)) return false;
                 var native = core.GetType().GetField("source", Instance)?.GetValue(core);
                 if (native?.GetType().FullName != AssemblyName + ".PsdTachieSource" || native.GetType().Assembly != item.Character.TachieType.Assembly) return false;
                 object? Field(string name) => native.GetType().GetField(name, Instance)?.GetValue(native);

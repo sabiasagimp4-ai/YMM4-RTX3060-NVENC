@@ -167,11 +167,11 @@ internal static class FrameCacheKey
                         simple = SimpleTachieDependencies.TryRanges(simpleItem, timeline, out fileRanges);
                     bool animation = false;
                     string[] animationFiles = [];
-                    if (root && item is TachieItem animationItem)
+                    if (item is TachieItem animationItem)
                         animation = AnimationTachieDependencies.TryFiles(animationItem, timeline, out animationFiles);
                     bool psd = false;
                     string[] psdFiles = [];
-                    if (root && item is TachieItem psdItem)
+                    if (item is TachieItem psdItem)
                         psd = PsdTachieDependencies.TryFiles(psdItem, timeline, out psdFiles);
                     bool supportedTachie = simple || animation || psd;
                     bool animationCharacter = AnimationTachieDependencies.Character(GetCharacter(item));
