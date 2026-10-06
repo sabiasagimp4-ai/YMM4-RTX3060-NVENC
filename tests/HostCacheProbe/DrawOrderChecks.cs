@@ -94,7 +94,8 @@ internal static class DrawOrderChecks
                 Order(swapped: true);
                 var reusedSwapped = Reused("swapped", () => TimelineFrameCache.Hits);
                 Order(swapped: false);
-                var restored = Reused("first (from the store)", () => TimelineFrameCache.RamHits);
+                // Not the live output (the last key was the swapped order's): restored from the store (RAM or GPU).
+                var restored = Reused("first, again", () => TimelineFrameCache.Hits);
                 Check(reused.AsSpan().SequenceEqual(reference) && reusedSwapped.AsSpan().SequenceEqual(swapped) && restored.AsSpan().SequenceEqual(reference),
                     $"Draw order ({layers}): a cached frame differs from the host's render of its order");
             }
