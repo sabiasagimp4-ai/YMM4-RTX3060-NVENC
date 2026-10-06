@@ -293,7 +293,7 @@ jobs:
           $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
           ffmpeg -v error -f lavfi -i testsrc=size=320x180:rate=30 -t 2 -c:v libx264 -pix_fmt yuv420p -y $env:PROBE_VIDEO
           # For the FFmpeg reader: key frames every half second, and the same clip in MPEG-TS (seeks there can land late).
-          $ffmpegClip = [IO.Path]::ChangeExtension($env:PROBE_VIDEO, $null) + '-ffmpeg'
+          $ffmpegClip = Join-Path ([IO.Path]::GetDirectoryName($env:PROBE_VIDEO)) ([IO.Path]::GetFileNameWithoutExtension($env:PROBE_VIDEO) + '-ffmpeg')
           ffmpeg -v error -f lavfi -i testsrc=size=320x180:rate=30 -t 4 -c:v libx264 -g 15 -bf 2 -pix_fmt yuv420p -y "$ffmpegClip.mp4"
           ffmpeg -v error -i "$ffmpegClip.mp4" -c copy -f mpegts -y "$ffmpegClip.m2ts"
       - name: Build the plugin like a release
