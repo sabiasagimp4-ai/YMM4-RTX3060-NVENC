@@ -53,13 +53,17 @@ internal sealed class FrameDependencyIndex
     private readonly bool nestedCulture;
     private readonly long[] boundaries;
     private readonly bool potentialOrderAmbiguity;
+    // DrawOrderAlignment is installed: items that tie in YMM4's draw order (layer, always-on-top) are drawn in the order
+    // of the item list, which the content then names; otherwise their frames render normally.
+    private readonly bool orderedTies;
     private readonly Dictionary<int, Dependencies> segments = [];
     private Dependencies? whole;
 
     internal FrameDependencyIndex(string globalHash, IEnumerable<string> globalFiles, string nestedHash,
         IEnumerable<string> nestedFiles, IEnumerable<Entry> entries, bool nestedUncacheable = false, bool nestedSession = false,
-        bool nestedCulture = false, string culture = "")
+        bool nestedCulture = false, string culture = "", bool orderedTies = false)
     {
+        this.orderedTies = orderedTies;
         this.nestedUncacheable = nestedUncacheable;
         this.nestedSession = nestedSession;
         this.nestedCulture = nestedCulture;
@@ -140,7 +144,7 @@ internal sealed class FrameDependencyIndex
             lock (segments)
                 return whole ??= Create(Enumerable.Range(0, entries.Length), wide: true,
                     entries.SelectMany(entry => entry.FrameFiles ?? []), potentialOrderAmbiguity,
-                    entries.SelectMany(entry => entry.FileRanges ?? []).SelectMany(range => range.Files)) with { Shown = null };
+                    entries.SelectMany(entry => entry.FileRanges ?? []).SelectMany(range => range.Files), AllTies()) with { Shown = null };
         }
     }
 
@@ -154,19 +158,25 @@ internal sealed class FrameDependencyIndex
         var visited = new HashSet<long>();
         bool wide = false;
         bool ambiguousOrder = false;
+        var ties = new SortedSet<string>(StringComparer.Ordinal);
         while (pending.Count != 0)
         {
             long at = pending.Dequeue();
             if (!visited.Add(at)) continue;
-            var orders = new HashSet<(int Layer, bool AlwaysOnTop)>();
+            var orders = new Dictionary<(int Layer, bool AlwaysOnTop), List<int>>();
             for (int i = 0; i < entries.Length; i++)
             {
                 if (!entries[i].Contains(at)) continue;
                 // TimelineSource orders a resource dictionary by top/Z/layer. Equal
                 // sort values retain insertion order, which prefetch/parallel creation
                 // and seek history can change. We cannot certify Z ties before render;
-                // overlapping equal layers/top states conservatively render normally.
-                if (entries[i].Layer is int layer && !orders.Add((layer, entries[i].AlwaysOnTop))) ambiguousOrder = true;
+                // overlapping equal layers/top states render normally, unless
+                // DrawOrderAlignment orders them by the item list (named below).
+                if (entries[i].Layer is int layer)
+                {
+                    if (!orders.TryGetValue((layer, entries[i].AlwaysOnTop), out var group)) orders[(layer, entries[i].AlwaysOnTop)] = group = [];
+                    group.Add(i);
+                }
                 // An item a transition also draws at its first frame - 1 shows its image of that frame too.
                 if (entries[i].FrameFiles is { } files) shown.Add(files[(int)(at - entries[i].Frame)]);
                 foreach (var range in entries[i].FileRanges ?? []) if (range.Contains(at)) ranged.AddRange(range.Files);
@@ -174,24 +184,39 @@ internal sealed class FrameDependencyIndex
                 wide |= entries[i].IsWide;
                 if (entries[i].IsTransition) pending.Enqueue((long)entries[i].Frame - 1);
             }
+            foreach (var group in orders.Values.Where(group => group.Count > 1))
+            {
+                if (!orderedTies) ambiguousOrder = true;
+                else ties.Add(Tie(group));
+            }
         }
         // A wide frame reads the whole project, but root items only draw the images of their frames.
         if (wide) return shown.Count == 0 && !ambiguousOrder ? Whole
             : Create(Enumerable.Range(0, entries.Length), wide: true, shown, ambiguousOrder || potentialOrderAmbiguity,
-                entries.SelectMany(entry => entry.FileRanges ?? []).SelectMany(range => range.Files));
-        return Create(included, wide: false, shown, ambiguousOrder, ranged);
+                entries.SelectMany(entry => entry.FileRanges ?? []).SelectMany(range => range.Files), AllTies());
+        return Create(included, wide: false, shown, ambiguousOrder, ranged, ties);
     }
 
+    // The items of one tie in the order DrawOrderAlignment draws them (the item list: entries are in list order).
+    private string Tie(IEnumerable<int> group) => string.Join(",", group.Order().Select(i => entries[i].Hash));
+
+    // A wide frame reads every root item: every tie that can occur (orderedTies; otherwise it is ambiguous).
+    private IEnumerable<string> AllTies() => !orderedTies || !potentialOrderAmbiguity ? []
+        : entries.Select((entry, index) => (entry, index)).Where(x => x.entry.Layer is not null && x.entry.Length > 0)
+            .GroupBy(x => (x.entry.Layer, x.entry.AlwaysOnTop)).Where(group => group.Count() > 1)
+            .Select(group => Tie(group.Select(x => x.index))).Order(StringComparer.Ordinal);
+
     private Dependencies Create(IEnumerable<int> included, bool wide, IEnumerable<string> shown, bool ambiguousOrder = false,
-        IEnumerable<string>? ranged = null)
+        IEnumerable<string>? ranged = null, IEnumerable<string>? ties = null)
     {
         var hashes = included.Select(i => entries[i].Hash).Order(StringComparer.Ordinal).ToArray();
         var content = new StringBuilder(Version).Append("|global:").Append(globalHash)
             .Append("|nested:").Append(wide ? nestedHash : "-").Append("|items:").Append(hashes.Length);
         foreach (var hash in hashes) content.Append('|').Append(hash);
+        foreach (string tie in ties ?? []) content.Append("|order:").Append(tie);
         var files = globalFiles.Concat(included.SelectMany(i => entries[i].Files)).Concat(shown).Concat(ranged ?? []);
         if (wide) files = files.Concat(nestedFiles);
-        bool cacheable = !ambiguousOrder && !included.Any(i => entries[i].Uncacheable) && !(wide && nestedUncacheable);
+        bool cacheable = (!ambiguousOrder || orderedTies) && !included.Any(i => entries[i].Uncacheable) && !(wide && nestedUncacheable);
         bool session = included.Any(i => entries[i].Session) || wide && nestedSession;
         bool culture = included.Any(i => entries[i].Culture) || wide && nestedCulture;
         string[] images = Distinct(shown);

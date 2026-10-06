@@ -34,6 +34,7 @@ FEATURES = [
     ('rulerBars', 'キャッシュバー'),
     ('identityRandom', 'ランダム系の効果'),
     ('randomTextOrder', '文字のランダム順の表示'),
+    ('sameLayerOrder', '同じレイヤーの重なり'),
     ('simpleTachie', 'シンプル立ち絵'),
     ('lipSync', '口パクの完成判定'),
     ('animationTachie', '動く立ち絵'),

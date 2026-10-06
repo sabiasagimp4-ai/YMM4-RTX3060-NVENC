@@ -80,6 +80,7 @@ internal static class HostIntegration
                     // Keyed where the values come from the model: YMM4's code or the plugin's alignment (RandomSeedAlignment).
                     ["identityRandom"] = features.IdentityRandom && RandomSeedAlignment.EffectsByModel(host),
                     ["randomTextOrder"] = features.IdentityRandom && RandomSeedAlignment.TextOrderByItem,
+                    ["sameLayerOrder"] = DrawOrderAlignment.Installed,
                     ["simpleTachie"] = features.SimpleTachie, ["lipSync"] = features.LipSync,
                     ["animationTachie"] = features.AnimationTachie, ["psdTachie"] = features.PsdTachie,
                     ["decoders"] = features.VerifiedDecoders?.Order(StringComparer.Ordinal).ToArray(),

@@ -236,6 +236,24 @@ static void DrawOrderSafety()
             any |= ambiguous; compared++;
         }
         Check(FrameDependencyIndex.HasPotentialOrderAmbiguity(entries) == any, "Whole-timeline ambiguity oracle mismatch");
+
+        // DrawOrderAlignment draws ties in item-list order: every frame is cacheable, and names each tie (the items of one
+        // layer and always-on-top state shown together) in list order, so that reordering the list changes exactly
+        // the frames with ties.
+        var ordered = new FrameDependencyIndex("global", [], "nested", [], entries, orderedTies: true);
+        var reversed = new FrameDependencyIndex("global", [], "nested", [], entries.Reverse().ToArray(), orderedTies: true);
+        for (int frame = -25; frame <= 105; frame++)
+        {
+            var shown = entries.Where(e => e.Frame <= frame && frame < (long)e.Frame + e.Length).ToArray();
+            var ties = shown.GroupBy(e => (e.Layer, e.AlwaysOnTop)).Where(g => g.Count() > 1)
+                .Select(g => "|order:" + string.Join(",", g.Select(e => e.Hash))).ToArray();
+            string content = ordered.For(frame).Content;
+            Check(ordered.For(frame).Cacheable, $"Ordered ties must be cacheable: example {example}, frame {frame}");
+            Check(ties.All(content.Contains) && content.Split("|order:").Length - 1 == ties.Length,
+                $"Ordered ties must be named in list order: example {example}, frame {frame}");
+            Check((reversed.For(frame).Content != content) == (ties.Length != 0),
+                $"Reordering the list must change exactly the frames with ties: example {example}, frame {frame}");
+        }
     }
     var a = new FrameDependencyIndex.Entry(0, 10, false, false, "a", [], Layer: 1);
     var b = a with { Frame = 5, Hash = "b" };
@@ -244,7 +262,15 @@ static void DrawOrderSafety()
     Check(!after.For(12).Cacheable && after.For(15).Cacheable, "Transition must inherit ambiguity at its before frame only");
     var nested = new FrameDependencyIndex("global", [], "nested", [], [a, transition with { IsWide = true }], nestedUncacheable: true);
     Check(nested.For(2).Cacheable && !nested.For(12).Cacheable, "Uncertified nested rendering must only reject wide frames");
-    Console.WriteLine($"Order certificates: {compared:N0} generated interval states, boundary/transition/nested propagation passed.");
+    var orderedAfter = new FrameDependencyIndex("global", [], "nested", [], [a, b, transition], orderedTies: true);
+    Check(orderedAfter.For(12).Cacheable && orderedAfter.For(12).Content.Contains("|order:a,b", StringComparison.Ordinal)
+        && !orderedAfter.For(15).Content.Contains("|order:", StringComparison.Ordinal), "A transition must name the tie at its before frame");
+    var scene = transition with { Frame = 20, IsWide = true, IsTransition = false, Hash = "scene" };
+    var orderedWide = new FrameDependencyIndex("global", [], "nested", [], [a, b, scene], orderedTies: true);
+    var swappedWide = new FrameDependencyIndex("global", [], "nested", [], [b, a, scene], orderedTies: true);
+    Check(orderedWide.For(22).Cacheable && orderedWide.For(22) == orderedWide.Whole && orderedWide.Whole.Content.Contains("|order:a,b", StringComparison.Ordinal)
+        && swappedWide.Whole.Content != orderedWide.Whole.Content, "A wide frame must name every tie of the timeline");
+    Console.WriteLine($"Order certificates: {compared:N0} generated interval states, boundary/transition/nested propagation, ordered ties passed.");
 }
 static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
 static void Wait(Func<bool> predicate, string message)

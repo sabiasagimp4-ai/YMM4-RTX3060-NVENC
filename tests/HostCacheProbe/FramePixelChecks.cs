@@ -127,7 +127,7 @@ internal static class FramePixelChecks
             Console.WriteLine("Actual host automatic source cache: hit/parity/invalidation/GPU cleanup OK");
             CheckExportStore(host, context);
             Check(TimelineFrameCache.GpuBytes == 0, "Export store checks leaked global GPU reservation");
-            DrawOrderMeasurements.Run(host, context);
+            DrawOrderChecks.Run(host, context);
             if (features.DecoderVerified("YukkuriMovieMaker.Plugin.FileSource.WIC"))
             {
                 if (ImageSequence.TimeMappingAvailable) CheckImageSequence(host, context, harmony);

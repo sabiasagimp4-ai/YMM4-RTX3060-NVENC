@@ -1087,10 +1087,25 @@ internal static class Program
         Check(FrameCacheKey.TryDescribe(scene, FrameCacheKey.CaptureSourceReaderTypes(), out _, out _, out var frames, out string reason), reason);
         Check(frames!.For(5).Cacheable && !frames.For(10).Cacheable && !frames.For(19).Cacheable && frames.For(20).Cacheable,
             "Same-layer overlap must bypass only its affected frames");
+        // With DrawOrderAlignment (installed with the cache) the tie is drawn in item-list order, which keys its frames.
+        var harmony = new Harmony("ymm.cachechecks.draw-order");
+        try
+        {
+            Check(DrawOrderAlignment.TryInstall(typeof(Scene).Assembly, harmony, out reason) && DrawOrderAlignment.Installed, reason);
+            Check(FrameCacheKey.TryDescribe(scene, FrameCacheKey.CaptureSourceReaderTypes(), out _, out _, out var ordered, out reason), reason);
+            timeline.Items = [second, first];
+            Check(FrameCacheKey.TryDescribe(scene, FrameCacheKey.CaptureSourceReaderTypes(), out _, out _, out var swapped, out reason), reason);
+            timeline.Items = [first, second];
+            Check(ordered!.For(10).Cacheable && ordered.For(19).Cacheable && ordered.For(10).Content != swapped!.For(10).Content
+                && ordered.For(5).Content == swapped.For(5).Content && ordered.For(20).Content == swapped.For(20).Content,
+                "An aligned tie must be cacheable and keyed by the item-list order of its frames only");
+        }
+        finally { DrawOrderAlignment.Uninstall(harmony); }
+        Check(!DrawOrderAlignment.Installed, "DrawOrderAlignment stayed installed");
         second.Layer = 2;
         Check(FrameCacheKey.TryDescribe(scene, FrameCacheKey.CaptureSourceReaderTypes(), out _, out _, out frames, out reason), reason);
         Check(frames!.For(15).Cacheable, "Distinct layers must remain cacheable");
-        Console.WriteLine("Host order certificate: overlapping ties bypass, disjoint frames and distinct layers reuse.");
+        Console.WriteLine("Host order certificate: overlapping ties bypass (keyed by the list order when aligned), disjoint frames and distinct layers reuse.");
     }
     private sealed class ForeignShapeItem : ShapeItem { }
     // Readers in the plugin assemblies YMM4 ships (its folder) are built in, so a project with a file or a font

@@ -350,8 +350,9 @@ internal static class FrameCacheKey
             // key does not hold: frames that read audio render normally.
             audioForeign |= paths.Any(IsMidi);
             // Nested frames cannot be certified if a referenced timeline can draw ties
-            // in resource insertion order. Wide dependencies conservatively include it.
-            nestedUncacheable |= timelines.Where(timeline => !ReferenceEquals(timeline, scene.Timeline)).Any(timeline =>
+            // in resource insertion order. Wide dependencies conservatively include it. With DrawOrderAlignment the
+            // ties are drawn in item-list order, which the serialized nested timelines name.
+            nestedUncacheable |= !DrawOrderAlignment.Installed && timelines.Where(timeline => !ReferenceEquals(timeline, scene.Timeline)).Any(timeline =>
                 FrameDependencyIndex.HasPotentialOrderAmbiguity(timeline.Items.OfType<IVideoItem>().Select(item =>
                     new FrameDependencyIndex.Entry(item.Frame, item.Length, false, false, string.Empty, [],
                         Layer: item.Layer, AlwaysOnTop: item.IsAlwaysOnTop))));
@@ -639,7 +640,7 @@ internal static class FrameCacheKey
         }
         return new FrameDependencyIndex(FrameDependencyIndex.Hash(global), characterPaths,
             FrameDependencyIndex.Hash(nested + "\n" + string.Join("\n", nestedResources)), nestedPaths, entries, nestedUncacheable, nestedSession,
-            nestedCulture, CultureIdentity());
+            nestedCulture, CultureIdentity(), DrawOrderAlignment.Installed);
     }
 
     internal static Character? GetCharacter(IItem item) => item switch
