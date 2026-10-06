@@ -18,6 +18,11 @@ internal static class AnimationTachieChecks
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     internal static void Run(Assembly host)
     {
+        if (!HostFeatures.For(host).AnimationTachie)
+        {
+            Console.WriteLine("Animation tachie checks skipped: the animation tachie is not cached on this build");
+            return;
+        }
         // The nested layouts (group, composite, scene) take the "pixels" case's frames through a group control, a composite
         // group's source and another scene's source.
         foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback", "metadata-budget", "output-lifetime", "idle-inactive", "preserved-directory-time", "differential", "same-layer-faces" }.Concat(TachieLayouts.Nested))

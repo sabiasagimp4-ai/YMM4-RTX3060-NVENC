@@ -230,24 +230,33 @@ internal static class HostIntegration
             SimpleTachie = evaluation.Has(HostContracts.SimpleTachie), LipSync = evaluation.Has(HostContracts.LipSync),
             AnimationTachie = evaluation.Has(HostContracts.AnimationTachie), PsdTachie = evaluation.Has(HostContracts.PsdTachie) };
 
-    // The features the contracts allow, of which the tachie ones only with the bundled tachie assembly that was read
-    // (its MVID), as their gates require. problems gets why a tachie feature the contracts allow is off.
+    // The features the contracts allow. The contracts read the bundled tachie assemblies whole: a tachie feature they
+    // allow names those files (their MVIDs), which its gates then accept as they accept the read build's.
+    // problems gets why a tachie feature the contracts allow is off.
     internal static HostFeatures FeaturesFrom(HostContracts.Evaluation evaluation, string directory, IDictionary<string, string> problems)
     {
         var features = FeaturesFrom(evaluation);
-        bool Bundled(bool enabled, string feature, string assembly, Guid read)
+        var accepted = new Dictionary<string, Guid>(StringComparer.Ordinal);
+        bool Bundled(bool enabled, string feature, params string[] assemblies)
         {
             if (!enabled) return false;
-            try { if (HostFingerprint.ReadMvid(Path.Combine(directory, assembly + ".dll")) == read) return true; }
+            try
+            {
+                var files = assemblies.ToDictionary(assembly => assembly, assembly => HostFingerprint.ReadMvid(Path.Combine(directory, assembly + ".dll")));
+                foreach (var (assembly, mvid) in files) accepted[assembly] = mvid;
+                return true;
+            }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or BadImageFormatException or InvalidOperationException) { }
-            problems[feature] = "同梱の立ち絵が確かめたものと異なります";
+            problems[feature] = "同梱の立ち絵を読めません";
             return false;
         }
         return features with
         {
-            SimpleTachie = Bundled(features.SimpleTachie, HostContracts.SimpleTachie, SimpleTachieDependencies.AssemblyName, SimpleTachieDependencies.ReadBuild),
-            AnimationTachie = Bundled(features.AnimationTachie, HostContracts.AnimationTachie, AnimationTachieDependencies.AssemblyName, AnimationTachieDependencies.ReadBuild),
-            PsdTachie = Bundled(features.PsdTachie, HostContracts.PsdTachie, PsdTachieDependencies.AssemblyName, PsdTachieDependencies.ReadBuild),
+            SimpleTachie = Bundled(features.SimpleTachie, HostContracts.SimpleTachie, SimpleTachieDependencies.AssemblyName),
+            AnimationTachie = Bundled(features.AnimationTachie, HostContracts.AnimationTachie, AnimationTachieDependencies.AssemblyName),
+            PsdTachie = Bundled(features.PsdTachie, HostContracts.PsdTachie, PsdTachieDependencies.AssemblyName,
+                PsdTachieDependencies.FileSourceName, PsdTachieDependencies.ParserName),
+            TachieAssemblies = accepted,
         };
     }
 

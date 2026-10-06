@@ -17,8 +17,7 @@ internal static class SimpleTachieDependencies
 
     internal static bool Verified(Type? plugin) => plugin?.FullName == PluginName
         && plugin.Assembly.GetName().Name == AssemblyName
-        && plugin.Assembly.ManifestModule.ModuleVersionId == ReadBuild
-        && HostFeatures.For(typeof(Scene).Assembly).SimpleTachie
+        && HostFeatures.For(typeof(Scene).Assembly) is { SimpleTachie: true } features && features.TachieAssembly(plugin.Assembly, ReadBuild)
         && FrameCacheKey.IsBundledPluginAssembly(AssemblyName, plugin.Assembly.Location, Path.GetDirectoryName(typeof(Scene).Assembly.Location));
 
     private static bool Parameter(object? value, Type plugin, string name, bool optional = false) => value is null ? optional

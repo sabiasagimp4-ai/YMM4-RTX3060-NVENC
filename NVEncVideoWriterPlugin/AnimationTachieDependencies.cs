@@ -33,8 +33,8 @@ internal static class AnimationTachieDependencies
     private const long MaximumListingCharacters = 8L << 20; // 16 MiB of UTF-16 listing content, besides bounded table metadata.
 
     internal static bool Verified(Type? plugin) => plugin?.FullName == PluginName
-        && plugin.Assembly.GetName().Name == AssemblyName && plugin.Assembly.ManifestModule.ModuleVersionId == ReadBuild
-        && HostFeatures.For(typeof(Scene).Assembly).AnimationTachie
+        && plugin.Assembly.GetName().Name == AssemblyName
+        && HostFeatures.For(typeof(Scene).Assembly) is { AnimationTachie: true } features && features.TachieAssembly(plugin.Assembly, ReadBuild)
         && FrameCacheKey.IsBundledPluginAssembly(AssemblyName, plugin.Assembly.Location, Path.GetDirectoryName(typeof(Scene).Assembly.Location));
 
     private static bool Parameter(object? parameter, Type plugin, string name, bool optional = false) => parameter is null ? optional
@@ -50,8 +50,8 @@ internal static class AnimationTachieDependencies
     internal static bool StableBlink(Character character) => Character(character) && AlignBlink(character.TachieType.Assembly);
 
     // The audited build (its MVID), loaded or used by a character.
-    internal static bool AlignBlink(Assembly assembly) => assembly.GetName().Name == AssemblyName && assembly.ManifestModule.ModuleVersionId == ReadBuild
-        && BlinkSeedAlignment.Stable(assembly, AssemblyName + ".AnimationTachieSource", "Update");
+    internal static bool AlignBlink(Assembly assembly) => assembly.GetName().Name == AssemblyName
+        && HostFeatures.For(typeof(Scene).Assembly).TachieAssembly(assembly, ReadBuild) && BlinkSeedAlignment.Stable(assembly, AssemblyName + ".AnimationTachieSource", "Update");
 
     // All potential parts are dependencies. This deliberately trades fine invalidation for a smaller audited subset.
     internal static bool TryFiles(TachieItem item, Timeline timeline, out string[] files)

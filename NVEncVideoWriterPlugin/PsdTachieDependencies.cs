@@ -36,9 +36,11 @@ internal static class PsdTachieDependencies
     private static readonly ConcurrentDictionary<Type, PropertyInfo[]> settingsProperties = new();
     private static PropertyInfo[] PropertiesOf(Type type) => settingsProperties.GetOrAdd(type,
         static value => value.GetProperties(BindingFlags.Public | BindingFlags.Instance));
-    private static readonly (string Name, Guid Mvid)[] auxiliaryModules = [
-        ("YukkuriMovieMaker.Plugin.FileSource.Psd", new("277031aa-0de0-415b-a9df-12a390227ec4")),
-        ("PsdParser", new("d16c5a72-6eff-48f4-8735-0e5ce6ec73df")) ];
+    internal const string FileSourceName = "YukkuriMovieMaker.Plugin.FileSource.Psd", ParserName = "PsdParser";
+    private static readonly Guid FileSourceBuild = new("277031aa-0de0-415b-a9df-12a390227ec4"), ParserBuild = new("d16c5a72-6eff-48f4-8735-0e5ce6ec73df");
+    private static readonly (string Name, Guid Mvid)[] auxiliaryModules = [(FileSourceName, FileSourceBuild), (ParserName, ParserBuild)];
+    // The bundled assemblies of the read build, or the files of this build the contracts verified.
+    private static bool Audited(Assembly assembly, Guid read) => HostFeatures.For(typeof(Scene).Assembly).TachieAssembly(assembly, read);
 
     private static long assemblyGeneration;
     private sealed record ModuleVerdict(long Generation, bool Valid);
@@ -49,7 +51,7 @@ internal static class PsdTachieDependencies
     internal static bool Verified(Type? plugin)
     {
         if (plugin?.FullName != PluginName || NameOf(plugin.Assembly) != AssemblyName
-            || plugin.Assembly.ManifestModule.ModuleVersionId != ReadBuild || !HostFeatures.For(typeof(Scene).Assembly).PsdTachie
+            || !HostFeatures.For(typeof(Scene).Assembly).PsdTachie || !Audited(plugin.Assembly, ReadBuild)
             || !FrameCacheKey.IsBundledPluginAssembly(AssemblyName, plugin.Assembly.Location, Path.GetDirectoryName(typeof(Scene).Assembly.Location))) return false;
         // Assemblies and module metadata are immutable. Invalidate on every new loaded assembly,
         // including duplicate-name loads; collectible dependencies cannot use this fast path.
@@ -63,7 +65,7 @@ internal static class PsdTachieDependencies
             var candidates = loaded.Where(candidate => NameOf(candidate) == name).Take(2).ToArray();
             if (candidates.Length > 1) return false;
             var assembly = candidates.FirstOrDefault() ?? Assembly.LoadFrom(Path.Combine(directory, name + ".dll"));
-            if (assembly.IsCollectible || assembly.ManifestModule.ModuleVersionId != mvid
+            if (assembly.IsCollectible || !Audited(assembly, mvid)
                 || !string.Equals(Path.GetFullPath(assembly.Location), Path.Combine(directory, name + ".dll"), StringComparison.OrdinalIgnoreCase)) return false;
         }
         Volatile.Write(ref state.Verdict, new(generation, true));
@@ -102,7 +104,7 @@ internal static class PsdTachieDependencies
     internal static string Snapshot(object value)
     {
         var assembly = value.GetType().Assembly;
-        if (value.GetType().FullName != AssemblyName + ".PsdFileSettings" || assembly.ManifestModule.ModuleVersionId != ReadBuild)
+        if (value.GetType().FullName != AssemblyName + ".PsdFileSettings" || !Audited(assembly, ReadBuild))
             throw new NotSupportedException("Unaudited PSD settings");
         var state = snapshots.GetValue(value, static settings =>
         {
@@ -191,7 +193,7 @@ internal static class PsdTachieDependencies
     internal static bool StableBlink(Character character) => Character(character) && AlignBlink(character.TachieType.Assembly);
 
     // The audited build (its MVID), loaded or used by a character.
-    internal static bool AlignBlink(Assembly assembly) => NameOf(assembly) == AssemblyName && assembly.ManifestModule.ModuleVersionId == ReadBuild
+    internal static bool AlignBlink(Assembly assembly) => NameOf(assembly) == AssemblyName && Audited(assembly, ReadBuild)
         && BlinkSeedAlignment.Stable(assembly, AssemblyName + ".PsdTachieSource", "ApplyAnimation");
     internal static bool TryFiles(TachieItem item, Timeline timeline, out string[] files)
     {
@@ -235,8 +237,7 @@ internal static class PsdTachieDependencies
                 if (!Equals(Field("filePath"), PathOf(item.Character)) || Field("psdFile") is not { } file || Field("psdRoot") is not { } root
                     || !ReferenceEquals(Field("psdFileSettings"), shared) || Field("normalizedPsdFileSettings") is not { } actual
                     || Field("disposedValue") is not false || Field("bitmap") is not ID2D1Bitmap bitmap) return false;
-                if (file.GetType().Assembly.ManifestModule.ModuleVersionId != new Guid("d16c5a72-6eff-48f4-8735-0e5ce6ec73df")
-                    || root.GetType().Assembly.ManifestModule.ModuleVersionId != new Guid("277031aa-0de0-415b-a9df-12a390227ec4")
+                if (!Audited(file.GetType().Assembly, ParserBuild) || !Audited(root.GetType().Assembly, FileSourceBuild)
                     || file.GetType().GetField("disposedValue", Instance)?.GetValue(file) is not false) return false;
                 // The host absorbs CPU compositing errors and substitutes an empty bitmap. That is not a completed PSD.
                 var header = file.GetType().GetProperty("Header")!.GetValue(file)!;

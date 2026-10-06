@@ -30,6 +30,17 @@ internal static class Program
         bool unread = args.Contains("--unread");
         bool known = HostIntegration.VerifyHost(host, out var hostReason);
         if (!unread) Check(known, "Host binary verification failed: " + hostReason);
+        // An unread build runs every mode (the tachie checks too) with the features its contracts allow.
+        HostFeatures? unreadFeatures = null;
+        if (unread)
+        {
+            var evaluation = HostContracts.Evaluate(HostContracts.Describe(hostDir));
+            Console.WriteLine($"Contracts verdict: same code as {evaluation.Baseline ?? "no read build"}; features: {string.Join(", ", evaluation.Features.Order(StringComparer.Ordinal))}");
+            var problems = new SortedDictionary<string, string>(evaluation.Problems.ToDictionary(p => p.Key, p => p.Value), StringComparer.Ordinal);
+            unreadFeatures = evaluation.Baseline is null ? null : HostIntegration.FeaturesFrom(evaluation, hostDir, problems);
+            foreach (var (feature, problem) in problems) Console.WriteLine($"  off {feature}: {problem}");
+            if (unreadFeatures is not null) HostFeatures.Decide(host, unreadFeatures);
+        }
         if (args.Contains("--psd-duplicate-parser") || args.Contains("--psd-duplicate-source"))
         {
             PsdTachieChecks.RunDuplicate(host, parser: args.Contains("--psd-duplicate-parser"));
@@ -112,15 +123,7 @@ internal static class Program
             return 0;
         }
         HostFeatures? features;
-        if (unread)
-        {
-            var evaluation = HostContracts.Evaluate(HostContracts.Describe(hostDir));
-            Console.WriteLine($"Contracts verdict: same code as {evaluation.Baseline ?? "no read build"}; features: {string.Join(", ", evaluation.Features.Order(StringComparer.Ordinal))}");
-            var problems = new SortedDictionary<string, string>(evaluation.Problems.ToDictionary(p => p.Key, p => p.Value), StringComparer.Ordinal);
-            features = evaluation.Baseline is null ? null : HostIntegration.FeaturesFrom(evaluation, hostDir, problems);
-            foreach (var (feature, problem) in problems) Console.WriteLine($"  off {feature}: {problem}");
-            if (features is not null) HostFeatures.Decide(host, features);
-        }
+        if (unread) features = unreadFeatures;
         else
         {
             HostIntegrationChecks.CheckContracts(host, hostDir);

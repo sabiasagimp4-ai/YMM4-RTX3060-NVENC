@@ -44,6 +44,11 @@ internal static class PsdTachieChecks
 
     internal static void Run(Assembly host)
     {
+        if (!HostFeatures.For(host).PsdTachie)
+        {
+            Console.WriteLine("PSD tachie checks skipped: the PSD tachie is not cached on this build");
+            return;
+        }
         // The nested layouts (group, composite, scene) take the "pixels" case's frames through a group control, a composite
         // group's source and another scene's source.
         foreach (string name in new[] { "pixels", "hidden-vowels", "notify", "inplace-offset", "inplace-layers", "sidecar", "overwrite", "timeout", "settings-budget", "composite-failure", "preobserved-overwrite", "serializer-defaults", "idle-inactive", "snapshot-encoding", "foreign-enumerable" }.Concat(TachieLayouts.Nested))

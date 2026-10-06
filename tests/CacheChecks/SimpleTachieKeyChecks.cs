@@ -12,10 +12,11 @@ internal static class SimpleTachieKeyChecks
     internal static void Run()
     {
         var plugin = PluginLoader.TachiePlugins.Single(value => value.GetType().FullName == SimpleTachieDependencies.PluginName);
-        if (!HostFeatures.For(typeof(Scene).Assembly).SimpleTachie || plugin.GetType().Assembly.ManifestModule.ModuleVersionId != SimpleTachieDependencies.ReadBuild)
+        if (!SimpleTachieDependencies.Verified(plugin.GetType()))
         {
-            // Another YMM4 build (ymm4-compat): its bundled simple tachie is not the read one, and its frames render normally.
-            Check(!SimpleTachieDependencies.Verified(plugin.GetType()), "A simple tachie that was not read was verified");
+            // Another YMM4 build (ymm4-compat) whose features were not decided: its frames render normally.
+            Check(!HostFeatures.For(typeof(Scene).Assembly).SimpleTachie || plugin.GetType().Assembly.ManifestModule.ModuleVersionId != SimpleTachieDependencies.ReadBuild,
+                "The read simple tachie was not verified");
             Console.WriteLine("Simple tachie keys skipped: the bundled plugin is not the read one (its frames are not cached)");
             return;
         }

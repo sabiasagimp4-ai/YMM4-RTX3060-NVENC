@@ -14,12 +14,21 @@ internal sealed record HostFeatures(string Basis, bool Preview, bool SelectionRe
     internal bool LipSync { get; init; }
     internal bool AnimationTachie { get; init; }
     internal bool PsdTachie { get; init; }
+    // The bundled tachie assemblies (by name) of a build that was not read, whose code the contracts found to be that of
+    // a read or reviewed build: the MVIDs of those files. Null for the read build (its MVIDs are the read ones).
+    internal IReadOnlyDictionary<string, Guid>? TachieAssemblies { get; init; }
     // YMM4 4.56.1.0, the build whose renderer, preview player, controllers and video sources were read.
     internal static readonly Guid ReadBuild = Guid.Parse("23e5b5b5-adcf-43b7-b976-b6b63f8dadea");
     // Its video factory/wrapper/resource and call-site witnesses match the read 4.56.1.0 contract.
     private static readonly Guid OlderWrappedBuild = Guid.Parse("5c07056d-022e-4d0f-a83d-ae0fa3b393f5");
     private static HostFeatures? decided;
     private static Assembly? decidedHost;
+
+    // Whether `assembly` is a bundled tachie assembly whose code was verified: the read build (`read`, its MVID), or the
+    // file of this build the contracts verified.
+    internal bool TachieAssembly(Assembly assembly, Guid read) => assembly.ManifestModule.ModuleVersionId == read
+        || TachieAssemblies is { } accepted && assembly.GetName().Name is { } name && accepted.TryGetValue(name, out var mvid)
+            && mvid == assembly.ManifestModule.ModuleVersionId;
 
     internal bool DecoderVerified(Type type) => DecoderVerified(type.Assembly.GetName().Name ?? string.Empty);
 
