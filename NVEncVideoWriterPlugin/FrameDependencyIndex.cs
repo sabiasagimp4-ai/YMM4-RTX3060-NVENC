@@ -25,9 +25,12 @@ internal sealed class FrameDependencyIndex
     // Culture: it formats numbers with the rendering thread's culture, so its frames are only keyed on a thread whose
     // culture matches the description's (Culture below).
     // FrameFiles: the file it shows at each of its frames (index: frame - Frame), besides Files.
+    // FaceGroup: a face or voice of a character's tachie, named by its character and layer. A tachie shows the faces of
+    // its frame by layer, and those of one layer in item-list order (TimelineSource.UpdateResources), so the frames
+    // where two of one group are shown are keyed by their list order.
     internal readonly record struct Entry(int Frame, int Length, bool IsTransition, bool IsWide, string Hash, string[] Files,
         bool Uncacheable = false, bool Session = false, bool Culture = false, string[]? FrameFiles = null,
-        int? Layer = null, bool AlwaysOnTop = false, FileRange[]? FileRanges = null)
+        int? Layer = null, bool AlwaysOnTop = false, FileRange[]? FileRanges = null, string? FaceGroup = null)
     {
         internal bool Contains(long frame) => Frame <= frame && frame < (long)Frame + Length;
     }
@@ -164,6 +167,7 @@ internal sealed class FrameDependencyIndex
             long at = pending.Dequeue();
             if (!visited.Add(at)) continue;
             var orders = new Dictionary<(int Layer, bool AlwaysOnTop), List<int>>();
+            var faces = new Dictionary<string, List<int>>(StringComparer.Ordinal);
             for (int i = 0; i < entries.Length; i++)
             {
                 if (!entries[i].Contains(at)) continue;
@@ -175,6 +179,11 @@ internal sealed class FrameDependencyIndex
                 if (entries[i].Layer is int layer)
                 {
                     if (!orders.TryGetValue((layer, entries[i].AlwaysOnTop), out var group)) orders[(layer, entries[i].AlwaysOnTop)] = group = [];
+                    group.Add(i);
+                }
+                if (entries[i].FaceGroup is { } face)
+                {
+                    if (!faces.TryGetValue(face, out var group)) faces[face] = group = [];
                     group.Add(i);
                 }
                 // An item a transition also draws at its first frame - 1 shows its image of that frame too.
@@ -189,6 +198,7 @@ internal sealed class FrameDependencyIndex
                 if (!orderedTies) ambiguousOrder = true;
                 else ties.Add(Tie(group));
             }
+            foreach (var group in faces.Values.Where(group => group.Count > 1)) ties.Add(FaceTie(group));
         }
         // A wide frame reads the whole project, but root items only draw the images of their frames.
         if (wide) return shown.Count == 0 && !ambiguousOrder ? Whole
@@ -200,11 +210,20 @@ internal sealed class FrameDependencyIndex
     // The items of one tie in the order DrawOrderAlignment draws them (the item list: entries are in list order).
     private string Tie(IEnumerable<int> group) => string.Join(",", group.Order().Select(i => entries[i].Hash));
 
-    // A wide frame reads every root item: every tie that can occur (orderedTies; otherwise it is ambiguous).
-    private IEnumerable<string> AllTies() => !orderedTies || !potentialOrderAmbiguity ? []
-        : entries.Select((entry, index) => (entry, index)).Where(x => x.entry.Layer is not null && x.entry.Length > 0)
-            .GroupBy(x => (x.entry.Layer, x.entry.AlwaysOnTop)).Where(group => group.Count() > 1)
-            .Select(group => Tie(group.Select(x => x.index))).Order(StringComparer.Ordinal);
+    private string FaceTie(IEnumerable<int> group) => "face:" + Tie(group);
+
+    // A wide frame reads every root item: every tie that can occur (draw order: with orderedTies; otherwise it is
+    // ambiguous), and every face group of more than one face.
+    private IEnumerable<string> AllTies()
+    {
+        var indexed = entries.Select((entry, index) => (entry, index)).Where(x => x.entry.Length > 0).ToArray();
+        var draw = !orderedTies || !potentialOrderAmbiguity ? []
+            : indexed.Where(x => x.entry.Layer is not null).GroupBy(x => (x.entry.Layer, x.entry.AlwaysOnTop)).Where(group => group.Count() > 1)
+                .Select(group => Tie(group.Select(x => x.index)));
+        var faces = indexed.Where(x => x.entry.FaceGroup is not null).GroupBy(x => x.entry.FaceGroup, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1).Select(group => FaceTie(group.Select(x => x.index)));
+        return draw.Concat(faces).Order(StringComparer.Ordinal).ToArray();
+    }
 
     private Dependencies Create(IEnumerable<int> included, bool wide, IEnumerable<string> shown, bool ambiguousOrder = false,
         IEnumerable<string>? ranged = null, IEnumerable<string>? ties = null)

@@ -332,6 +332,32 @@ internal static class PsdTachieChecks
         var result = IdleFramePreRenderer.PrimeLiveFrame(idleTracker, test.Scene, test.Source, _ => rendered++,
             30, test.View, () => true, CancellationToken.None);
         Check(result == IdleFramePreRenderer.IdleFrameResult.Normal && rendered == 0, "Idle PSD started a competing envelope");
+        if (name == "pixels") CheckStableBlink(test, idleTracker, reference);
+    }
+
+    // The blinking is seeded alike in every run (BlinkSeedAlignment): frames are not keyed for this run's objects, so
+    // a clone of the scene renders a frame without a voice (no lip-sync calculation) while paused, under the live key
+    // and with the live pixels.
+    private static void CheckStableBlink(Case test, KeyDependencyTracker tracker, IReadOnlyDictionary<int, byte[]> reference)
+    {
+        Check(PsdTachieDependencies.StableBlink(test.Fixture.Characters[0]), "The audited PSD tachie's blink seed was not aligned");
+        Check(SpinWait.SpinUntil(() => { if (!tracker.TryCapture(0, out var c, out _)) return false; c!.Dispose(); return true; }, TimeSpan.FromSeconds(5)),
+            "The PSD scene did not become ready");
+        Check(!tracker.IsSessionKeyed(0) && !tracker.IsSessionKeyed(30), "PSD tachie frames were still keyed for this run");
+        Check(tracker.TryCapture(0, out var capture, out var reason), reason);
+        using (capture)
+        using (var batch = new IdleFramePreRenderer.BatchRenderer(tracker, capture!.Model))
+        {
+            TimelineFrameCache.Enabled = true; TimelineFrameCache.Clear();
+            IdleFramePreRenderer.IdleFrameResult idle = default;
+            Check(SpinWait.SpinUntil(() => (idle = IdleFramePreRenderer.PrimeBatchFrame(tracker, test.Scene, batch, 0, test.View, () => true,
+                CancellationToken.None, out reason)) == IdleFramePreRenderer.IdleFrameResult.Rendered, TimeSpan.FromSeconds(10)),
+                "A PSD frame without a voice was not rendered while paused: " + idle + "; " + reason);
+            Check(IdleFramePreRenderer.PrimeBatchFrame(tracker, test.Scene, batch, 30, test.View, () => true, CancellationToken.None, out _)
+                == IdleFramePreRenderer.IdleFrameResult.Normal, "A PSD frame with a voice was rendered while paused");
+            long hits = TimelineFrameCache.Hits; test.Update(0);
+            Check(TimelineFrameCache.Hits == hits + 1 && test.Pixels().SequenceEqual(reference[0]), "The paused PSD clone's frame was not the live picture");
+        }
     }
     private static void CheckTimeout(Case test, Assembly host)
     {

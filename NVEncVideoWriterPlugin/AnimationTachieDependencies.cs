@@ -1,6 +1,8 @@
 using System.Collections;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Text;
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using YukkuriMovieMaker.Commons;
@@ -20,13 +22,14 @@ internal static class AnimationTachieDependencies
     internal static readonly Guid ReadBuild = new("8e5a1d93-983b-40cd-94f9-d3160cc7ea12");
     private const BindingFlags Instance = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     private static readonly string[] Parts = ["Body", "Eye", "Mouth", "Hair", "Eyebrow", "Complexion", "Back1", "Back2", "Back3", "Etc1", "Etc2", "Etc3"];
-    private sealed record Witness(string[] Paths);
+    // Paths: the part paths of the item, faces and defaults. Inis: the attached INI files the key holds.
+    private sealed record Witness(string[] Paths, HashSet<string> Inis);
     private static readonly ConditionalWeakTable<TachieItem, Witness> witnesses = new();
     private static readonly ConcurrentDictionary<string, byte> changedListings = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, string> firstListings = new(StringComparer.OrdinalIgnoreCase);
     private static readonly object listingGate = new();
     private static long listingCharacters;
-    private static readonly ConcurrentDictionary<Type, (PropertyInfo Blend, PropertyInfo Opacity, PropertyInfo PlaceOn)> configAccess = new();
+    private static readonly ConcurrentDictionary<Type, (PropertyInfo Blend, PropertyInfo Opacity, PropertyInfo PlaceOn, FieldInfo Ini)> configAccess = new();
     private const long MaximumListingCharacters = 8L << 20; // 16 MiB of UTF-16 listing content, besides bounded table metadata.
 
     internal static bool Verified(Type? plugin) => plugin?.FullName == PluginName
@@ -42,6 +45,14 @@ internal static class AnimationTachieDependencies
         && Parameter(character.TachieDefaultItemParameter, type, "ItemParameter")
         && Parameter(character.TachieDefaultFaceParameter, type, "FaceParameter", optional: true);
 
+    // Whether the character's tachie blinks alike in every run (BlinkSeedAlignment); otherwise its frames are keyed for
+    // this run (SessionResource).
+    internal static bool StableBlink(Character character) => Character(character) && AlignBlink(character.TachieType.Assembly);
+
+    // The audited build (its MVID), loaded or used by a character.
+    internal static bool AlignBlink(Assembly assembly) => assembly.GetName().Name == AssemblyName && assembly.ManifestModule.ModuleVersionId == ReadBuild
+        && BlinkSeedAlignment.Stable(assembly, AssemblyName + ".AnimationTachieSource", "Update");
+
     // All potential parts are dependencies. This deliberately trades fine invalidation for a smaller audited subset.
     internal static bool TryFiles(TachieItem item, Timeline timeline, out string[] files)
     {
@@ -49,14 +60,13 @@ internal static class AnimationTachieDependencies
         var character = item.Character;
         if (!Character(character) || !(ReadinessInstalled?.Invoke() == true) || item.Length <= 0
             || !Parameter(item.TachieItemParameter, character.TachieType, "ItemParameter")) return false;
-        if ((bool)item.TachieItemParameter.GetType().GetProperty("IsDifferentialComposite")!.GetValue(item.TachieItemParameter)!) return false;
         var parameters = new List<object> { item.TachieItemParameter, character.TachieDefaultItemParameter };
         if (character.TachieDefaultFaceParameter is { } defaultFace) parameters.Add(defaultFace);
         var faces = timeline.Items.Where(candidate => ReferenceEquals(FrameCacheKey.GetCharacter(candidate), character))
             .Where(candidate => candidate is VoiceItem or TachieFaceItem).ToArray();
-        // The host sorts selected faces by layer; an equal layer is not represented in the ordinary sorted item key.
-        if (faces.GroupBy(face => face.Layer).Any(group => group.Count() > 1
-            && group.Any(a => group.Any(b => !ReferenceEquals(a, b) && a.Frame < (long)b.Frame + b.Length && b.Frame < (long)a.Frame + a.Length)))) return false;
+        // The host sorts the shown faces by layer, those of one layer in item-list order, which keys the frame
+        // (FrameDependencyIndex.Entry.FaceGroup). Differential composite takes each part from the first face that sets
+        // it, else the item: every part of every face and of the item is a dependency below.
         foreach (var face in faces)
         {
             object? parameter = face is VoiceItem voice ? voice.TachieFaceParameter : ((TachieFaceItem)face).TachieFaceParameter;
@@ -74,12 +84,13 @@ internal static class AnimationTachieDependencies
                     result.UnionWith(listed);
                 }
         files = result.ToArray();
-        witnesses.AddOrUpdate(item, new(paths.ToArray()));
+        witnesses.AddOrUpdate(item, new(paths.ToArray(), result.Where(IsIni).ToHashSet(StringComparer.OrdinalIgnoreCase)));
         return true;
     }
 
-    // Image lists and INI existence are read synchronously. Watcher delivery can lag a host file read.
-    // The first list is never replaced: an already-created native source can retain its old parts count.
+    // Image lists are read synchronously. Watcher delivery can lag a host file read. The first list of images is never
+    // replaced: an already-created native source can retain its old parts count. The attached INI files (X.ini beside
+    // X.png, read by LayerConfig) are listed too, as dependencies; SafeSource compares what a source read with them.
     internal static bool Listing(string path, out string[] files, out int count) => ListingCore(path, out files, out count);
 
     private static bool ListingCore(string path, out string[] files, out int count)
@@ -101,8 +112,11 @@ internal static class AnimationTachieDependencies
             return name.Equals(stem, StringComparison.OrdinalIgnoreCase) || suffix is "a" or "i" or "u" or "e" or "o"
                 || suffix.Length != 0 && suffix.All(char.IsAsciiDigit);
         }).Take(1025).Select(Path.GetFullPath).Order(StringComparer.OrdinalIgnoreCase).ToArray();
-        if (list.Length > 1024 || list.Distinct(StringComparer.OrdinalIgnoreCase).Count() != list.Length || list.Any(file => !Path.GetExtension(file).Equals(".png", StringComparison.OrdinalIgnoreCase)))
+        if (list.Length > 1024 || list.Distinct(StringComparer.OrdinalIgnoreCase).Count() != list.Length
+            || list.Any(file => !Path.GetExtension(file).Equals(".png", StringComparison.OrdinalIgnoreCase) && !IsIni(file)))
         { if (firstListings.ContainsKey(path)) changedListings.TryAdd(path, 0); return false; }
+        var inis = list.Where(IsIni).ToArray();
+        list = list.Where(file => !IsIni(file)).ToArray();
         string listing = string.Join("\n", list);
         if (!firstListings.TryGetValue(path, out string? first))
             lock (listingGate)
@@ -120,14 +134,49 @@ internal static class AnimationTachieDependencies
         while (numbered < 1024 && set.Contains(Path.Combine(directory, stem + "." + numbered + ".png"))) numbered++;
         if (numbered == 1024) return false;
         count = numbered + 1;
-        files = list;
+        files = [.. list, .. inis];
         return true;
     }
 
-    internal static bool ContainsNative(Scene scene, int frame) => NestedTimelineSources.MayDraw(scene, frame, PluginName);
+    private static bool IsIni(string file) => Path.GetExtension(file).Equals(".ini", StringComparison.OrdinalIgnoreCase);
+
+    // The settings LayerConfig.Load reads from `ini` starting from its defaults (Shift-JIS, "key=value" before a ';',
+    // blend and opacity parsed with the thread's culture). False when the culture changes a number, so that the result
+    // does not depend on the thread that read it.
+    internal static bool TryReadIni(string ini, out (int Blend, double Opacity, string? PlaceOn) config)
+    {
+        config = (0, 100.0, null);
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        foreach (string line in File.ReadAllLines(ini, Encoding.GetEncoding("shift-jis")))
+        {
+            string[] pair = line.Split(";")[0].Split("=");
+            if (pair.Length != 2) continue;
+            switch (pair[0])
+            {
+                case "blend":
+                    bool local = int.TryParse(pair[1], NumberStyles.Integer, CultureInfo.CurrentCulture, out int blend);
+                    if (local != int.TryParse(pair[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int invariant) || blend != invariant) return false;
+                    if (local) config.Blend = blend;
+                    break;
+                case "opacity":
+                    bool parsed = double.TryParse(pair[1], NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out double opacity);
+                    if (parsed != double.TryParse(pair[1], NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.InvariantCulture, out double neutral)
+                        || BitConverter.DoubleToInt64Bits(opacity) != BitConverter.DoubleToInt64Bits(neutral)) return false;
+                    if (parsed) config.Opacity = opacity;
+                    break;
+                case "placeon":
+                    config.PlaceOn = pair[1];
+                    break;
+            }
+        }
+        return true;
+    }
+
+    internal static bool MayStartLipSync(Scene scene, int frame) => NestedTimelineSources.MayStartLipSync(scene, frame, PluginName);
 
     // Every animation tachie the frame drew (in `timelineSource` and the sources inside it: groups, transitions, scenes)
-    // has its files as keyed and default part settings; every one of the root timeline at the frame was drawn.
+    // has its files as keyed and the part settings its attached INI files say now; every one of the root timeline at
+    // the frame was drawn.
     internal static bool SafeSource(object timelineSource, Scene scene, int frame)
     {
         try
@@ -145,6 +194,7 @@ internal static class AnimationTachieDependencies
                 if (!Listing(path, out _, out count)) return false;
                 verifiedCounts.Add(path, count); return true;
             }
+            var inis = new Dictionary<string, (int, double, string?)?>(StringComparer.OrdinalIgnoreCase);
             foreach (var (item, coreSource) in drawn)
             {
                 if (item.Character?.TachieType?.FullName != PluginName) continue;
@@ -160,10 +210,22 @@ internal static class AnimationTachieDependencies
                     total++;
                     var config = layer.GetType().GetProperty("Config")!.GetValue(layer)!;
                     var access = configAccess.GetOrAdd(config.GetType(), static type =>
-                        (type.GetProperty("blend")!, type.GetProperty("opacity")!, type.GetProperty("placeon")!));
-                    if ((int)access.Blend.GetValue(config)! != 0
-                        || (double)access.Opacity.GetValue(config)! != 100
-                        || !string.IsNullOrWhiteSpace((string?)access.PlaceOn.GetValue(config))) return false;
+                        (type.GetProperty("blend")!, type.GetProperty("opacity")!, type.GetProperty("placeon")!,
+                            type.GetField("iniPath", Instance) ?? throw new MissingFieldException(type.FullName, "iniPath")));
+                    // The settings the layer read must be those of its INI as it is now, read from the defaults:
+                    // LayerConfig.Load keeps values an earlier INI set, and reads a file only when the part changes.
+                    (int Blend, double Opacity, string? PlaceOn) expected = (0, 100.0, null);
+                    if (access.Ini.GetValue(config) is string ini && File.Exists(ini))
+                    {
+                        // An INI the key does not hold (created after the description).
+                        if (!witness.Inis.Contains(Path.GetFullPath(ini))) return false;
+                        if (!inis.TryGetValue(ini, out var read)) inis[ini] = read = TryReadIni(ini, out var value) ? value : null;
+                        if (read is not { } current) return false;
+                        expected = current;
+                    }
+                    if ((int)access.Blend.GetValue(config)! != expected.Blend
+                        || BitConverter.DoubleToInt64Bits((double)access.Opacity.GetValue(config)!) != BitConverter.DoubleToInt64Bits(expected.Opacity)
+                        || !string.Equals((string?)access.PlaceOn.GetValue(config), expected.PlaceOn, StringComparison.Ordinal)) return false;
                 }
                 if (total != 13) return false;
                 foreach (string part in new[] { "eye", "mouth" })

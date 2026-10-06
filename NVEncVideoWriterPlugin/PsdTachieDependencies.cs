@@ -186,6 +186,13 @@ internal static class PsdTachieDependencies
             && ReferenceEquals(Settings(input.Character), input.Settings) && Snapshot(input.Settings) == input.Json); }
         catch { return false; }
     }
+    // Whether the character's tachie blinks alike in every run (BlinkSeedAlignment); otherwise its frames are keyed for
+    // this run (SessionResource).
+    internal static bool StableBlink(Character character) => Character(character) && AlignBlink(character.TachieType.Assembly);
+
+    // The audited build (its MVID), loaded or used by a character.
+    internal static bool AlignBlink(Assembly assembly) => NameOf(assembly) == AssemblyName && assembly.ManifestModule.ModuleVersionId == ReadBuild
+        && BlinkSeedAlignment.Stable(assembly, AssemblyName + ".PsdTachieSource", "ApplyAnimation");
     internal static bool TryFiles(TachieItem item, Timeline timeline, out string[] files)
     {
         files = [];
@@ -194,8 +201,7 @@ internal static class PsdTachieDependencies
             || !Parameter(item.TachieItemParameter, character.TachieType, "PsdTachieItemParameter")) return false;
         var faces = timeline.Items.Where(candidate => ReferenceEquals(FrameCacheKey.GetCharacter(candidate), character))
             .Where(candidate => candidate is VoiceItem or TachieFaceItem).ToArray();
-        if (faces.GroupBy(face => face.Layer).Any(group => group.Count() > 1 && group.Any(a => group.Any(b =>
-            !ReferenceEquals(a, b) && a.Frame < (long)b.Frame + b.Length && b.Frame < (long)a.Frame + a.Length)))) return false;
+        // Faces of one layer come in item-list order (keyed by FrameDependencyIndex.Entry.FaceGroup).
         foreach (var face in faces)
             if (!Parameter(face is VoiceItem voice ? voice.TachieFaceParameter : ((TachieFaceItem)face).TachieFaceParameter,
                 character.TachieType, "PsdTachieFaceParameter", optional: true)) return false;
@@ -205,7 +211,7 @@ internal static class PsdTachieDependencies
         files = [Path.GetFullPath(path)];
         return true;
     }
-    internal static bool ContainsNative(Scene scene, int frame) => NestedTimelineSources.MayDraw(scene, frame, PluginName);
+    internal static bool MayStartLipSync(Scene scene, int frame) => NestedTimelineSources.MayStartLipSync(scene, frame, PluginName);
     // Every PSD tachie the frame drew (in `timelineSource` and the sources inside it: groups, transitions, scenes) holds
     // the keyed file and settings; every one of the root timeline at the frame was drawn.
     internal static bool SafeSource(object timelineSource, Scene scene, int frame, KeyCapture? capture = null)

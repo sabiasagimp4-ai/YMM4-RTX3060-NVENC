@@ -63,10 +63,12 @@ internal static class NestedTimelineSources
         return true;
     }
 
-    // Whether the root frame can draw a tachie item of the plugin `pluginName`: one of the root timeline's at the frame
-    // or at the frame before a transition shown there (transitions draw it), or any of another timeline while a scene
-    // item is shown.
-    internal static bool MayDraw(Scene scene, int frame, string pluginName)
+    // Whether rendering the root frame can start a lip-sync calculation for a tachie of the plugin `pluginName`. YMM4
+    // starts one for a tachie whose character speaks in a voice item shown at the frame (TachieSource.EnsureVolumeEnvelope
+    // with the active voice): a tachie of the root timeline and a voice of its character shown at the frame, or at the
+    // frame before a transition shown there (transitions draw it), or, while a scene item is shown, a tachie and a voice
+    // of one character anywhere in another timeline.
+    internal static bool MayStartLipSync(Scene scene, int frame, string pluginName)
     {
         var items = scene.Timeline.Items;
         var frames = new HashSet<long> { frame };
@@ -74,10 +76,12 @@ internal static class NestedTimelineSources
         while (pending.TryDequeue(out long at))
             foreach (var transition in items.OfType<TransitionItem>())
                 if (Shows(transition, at) && frames.Count < 1024 && frames.Add((long)transition.Frame - 1)) pending.Enqueue((long)transition.Frame - 1);
-        if (TachieItems(scene.Timeline).Any(item => item.Character?.TachieType?.FullName == pluginName && frames.Any(at => Shows(item, at)))) return true;
+        bool Speaks(Timeline timeline, Func<IItem, bool> shown) => TachieItems(timeline).Any(tachie =>
+            tachie.Character?.TachieType?.FullName == pluginName && shown(tachie) && timeline.Items.OfType<VoiceItem>().Any(voice =>
+                (ReferenceEquals(voice.Character, tachie.Character) || voice.CharacterName == tachie.CharacterName) && shown(voice)));
+        if (frames.Any(at => Speaks(scene.Timeline, item => Shows(item, at)))) return true;
         return items.OfType<SceneItem>().Any(item => frames.Any(at => Shows(item, at)))
-            && scene.Scenes.Timelines.Where(timeline => !ReferenceEquals(timeline, scene.Timeline))
-                .Any(timeline => TachieItems(timeline).Any(item => item.Character?.TachieType?.FullName == pluginName));
+            && scene.Scenes.Timelines.Where(timeline => !ReferenceEquals(timeline, scene.Timeline)).Any(timeline => Speaks(timeline, _ => true));
     }
 
     internal static bool Shows(IItem item, long frame) => item.Frame <= frame && frame < (long)item.Frame + item.Length;

@@ -266,6 +266,11 @@ internal static partial class TimelineFrameCache
             if (features.IdentityRandom) RandomSeedAlignment.TryInstall(host, harmony);
             // Items YMM4 leaves in no particular draw order (same layer, overlapping) are drawn in item-list order.
             DrawOrderAlignment.TryInstall(host, harmony, out _);
+            // The bundled tachie's blinking is seeded alike in every run: patched now when the audited plugin is loaded,
+            // else when a verified tachie is first described.
+            BlinkSeedAlignment.Use(harmony);
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                if (!assembly.IsDynamic) { AnimationTachieDependencies.AlignBlink(assembly); PsdTachieDependencies.AlignBlink(assembly); }
             reason = string.Empty;
             return true;
         }
@@ -273,6 +278,7 @@ internal static partial class TimelineFrameCache
         {
             RandomSeedAlignment.Uninstall(harmony);
             DrawOrderAlignment.Uninstall(harmony);
+            BlinkSeedAlignment.Uninstall(harmony);
             if (readinessAdded) FrameRenderReadiness.Uninstall(harmony);
             foreach (var target in patched)
                 try { harmony.Unpatch(target, HarmonyPatchType.All, harmony.Id); } catch { }

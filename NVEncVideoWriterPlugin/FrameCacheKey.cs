@@ -184,9 +184,15 @@ internal static class FrameCacheKey
                         || item is ShapeItem shape && !code.Knows(shape.ShapeType2)
                         || item is TransitionItem transition && transition.TransitionType is { } transitionType && !code.Knows(transitionType)
                         || GetCharacter(item) is { } character && foreignCharacters.Contains(character);
-                    bool session = animation || psd, culture = false;
-                    if (psd) { itemResources.Add(PsdTachieDependencies.Resource(psdInputs.Single(input => ReferenceEquals(input.Character, GetCharacter(item))))); itemResources.Add(PsdTachieDependencies.SessionResource + "/" + RuntimeHelpers.GetHashCode(item)); }
-                    if (animation) itemResources.Add(AnimationTachieDependencies.SessionResource + "/" + RuntimeHelpers.GetHashCode(item));
+                    // Their blinking is seeded alike in every run where BlinkSeedAlignment is installed; otherwise their
+                    // frames are keyed for this run (and these objects) only.
+                    bool animationSession = animation && !AnimationTachieDependencies.StableBlink(((TachieItem)item).Character);
+                    bool psdSession = psd && !PsdTachieDependencies.StableBlink(((TachieItem)item).Character);
+                    bool session = animationSession || psdSession, culture = false;
+                    if (psd) itemResources.Add(PsdTachieDependencies.Resource(psdInputs.Single(input => ReferenceEquals(input.Character, GetCharacter(item)))));
+                    if (psdSession) itemResources.Add(PsdTachieDependencies.SessionResource + "/" + RuntimeHelpers.GetHashCode(item));
+                    if (animationSession) itemResources.Add(AnimationTachieDependencies.SessionResource + "/" + RuntimeHelpers.GetHashCode(item));
+                    if ((animation || psd) && !session) itemResources.Add(BlinkSeedAlignment.Resource);
                     string[]? frameFiles = null;
                     try
                     {
@@ -636,7 +642,8 @@ internal static class FrameCacheKey
             entries[i] = new(item.Frame, item.Length, item is TransitionItem, wide, FrameDependencyIndex.Hash(identity),
                 rootDependencies[i].Paths.ToArray(), rootDependencies[i].Uncacheable, rootDependencies[i].Session, rootDependencies[i].Culture,
                 rootDependencies[i].FrameFiles, item is IVideoItem ? item.Layer : null,
-                item is IVideoItem video && video.IsAlwaysOnTop, rootDependencies[i].FileRanges);
+                item is IVideoItem video && video.IsAlwaysOnTop, rootDependencies[i].FileRanges,
+                item is VoiceItem or TachieFaceItem && GetCharacter(item) is { } character ? RuntimeHelpers.GetHashCode(character) + "/" + item.Layer : null);
         }
         return new FrameDependencyIndex(FrameDependencyIndex.Hash(global), characterPaths,
             FrameDependencyIndex.Hash(nested + "\n" + string.Join("\n", nestedResources)), nestedPaths, entries, nestedUncacheable, nestedSession,

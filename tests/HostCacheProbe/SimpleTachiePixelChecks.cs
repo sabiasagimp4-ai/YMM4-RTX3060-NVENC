@@ -17,7 +17,8 @@ internal static class SimpleTachiePixelChecks
         var viewport = TimelineFrameCache.TestViewport;
         var store = TimelineFrameCache.StoreIfCreated;
         // The nested layouts take the plain case through a group control, a composite group's source and another scene's.
-        foreach (var (hidden, video, layout) in new[] { (false, false, "root"), (true, false, "root"), (false, true, "root") }
+        // "same-layer-faces": a second face on the upper face's layer, both shown at 60..74.
+        foreach (var (hidden, video, layout) in new[] { (false, false, "root"), (true, false, "root"), (false, true, "root"), (false, false, "same-layer-faces") }
             .Concat(TachieLayouts.Nested.Select(layout => (false, false, layout))))
         {
             Exception? failure = null;
@@ -38,8 +39,9 @@ internal static class SimpleTachiePixelChecks
         Console.WriteLine("Simple tachie pixels: speech boundaries, highest face, no-speech hiding, looping GIF, idle clones, selective overwrite bypass, groups, composite groups and scenes passed.");
     }
 
-    private static void RunCase(Assembly host, bool hidden, bool video, string layout)
+    private static void RunCase(Assembly host, bool hidden, bool video, string variant)
     {
+        string layout = TachieLayouts.Nested.Contains(variant) ? variant : "root";
         using var fixture = new SimpleTachieFixture(hidden);
         if (video)
         {
@@ -56,6 +58,15 @@ internal static class SimpleTachiePixelChecks
         var face = new TachieFaceItem(fixture.Characters[0]) { Frame = 45, Length = 30, Layer = 20 };
         SimpleTachieFixture.Set(face.TachieFaceParameter, "Face", upper);
         fixture.Timeline.Items = fixture.Timeline.Items.Where(item => item is TachieItem).ToImmutableList().AddRange(voices).Add(face);
+        TachieFaceItem? second = null;
+        if (variant == "same-layer-faces")
+        {
+            string blue = Path.Combine(fixture.Root, "second.png");
+            File.WriteAllBytes(blue, FramePixelChecks.Png(80, 100, (_, _) => (30, 40, 230, 255)));
+            second = new TachieFaceItem(fixture.Characters[0]) { Frame = 60, Length = 30, Layer = 20 };
+            SimpleTachieFixture.Set(second.TachieFaceParameter, "Face", blue);
+            fixture.Timeline.Items = fixture.Timeline.Items.Add(second);
+        }
         fixture.Timeline.RefreshTimelineLengthAndMaxLayer();
         var scene = TachieLayouts.Apply(layout, fixture.Timeline, fixture.Scene);
         using var devices = new GraphicsDevices();
@@ -119,7 +130,7 @@ internal static class SimpleTachiePixelChecks
             {
                 // The clone's copy of the fixture's timeline: the root, or the scene the root shows.
                 var cloneTimeline = layout == "scene" ? batch.CloneScene.Scenes.Timelines.Single(timeline => timeline.ID == fixture.Timeline.ID) : batch.CloneScene.Timeline;
-                var cloneFace = cloneTimeline.Items.OfType<TachieFaceItem>().Single();
+                var cloneFace = cloneTimeline.Items.OfType<TachieFaceItem>().First();
                 var cloneTachie = cloneTimeline.Items.OfType<TachieItem>()
                     .Single(item => item.CharacterName == face.CharacterName);
                 Check(ReferenceEquals(cloneFace.Character, cloneTachie.Character),
@@ -162,6 +173,27 @@ internal static class SimpleTachiePixelChecks
                 long restoredHits = TimelineFrameCache.Hits; Update(0);
                 Check(TimelineFrameCache.Hits > restoredHits && Pixels().SequenceEqual(baseline[0]), "Ready simple video did not recover with matching pixels");
             }
+            if (second is not null)
+            {
+                // Of one layer, the first face in the item list is shown: swapping them changes the frames showing both.
+                Check(baseline[60].SequenceEqual(baseline[45]) || !baseline[60].SequenceEqual(baseline[75]), "The first face of one layer was not the one shown");
+                Check(tracker.TryCapture(60, out var first, out var reason), reason);
+                string firstKey; using (first) firstKey = first!.Key;
+                fixture.Timeline.Items = fixture.Timeline.Items.Remove(face).Remove(second).Add(second).Add(face);
+                TimelineFrameCache.Enabled = false; Update(60); var swapped = Pixels();
+                Check(!swapped.SequenceEqual(baseline[60]), "Swapping the faces of one layer did not change the picture");
+                Check(SpinWait.SpinUntil(() => tracker.TryCapture(60, out var next, out _) && Dispose(next!) != firstKey, TimeSpan.FromSeconds(10)),
+                    "Swapping the faces of one layer did not change the key");
+                TimelineFrameCache.Enabled = true;
+                Check(SpinWait.SpinUntil(() =>
+                {
+                    Update(60); TimelineFrameCache.CompletePendingStore(player);
+                    long previous = TimelineFrameCache.Hits; Update(60);
+                    return TimelineFrameCache.Hits > previous;
+                }, TimeSpan.FromSeconds(10)), "The swapped face frame never became reusable: " + TimelineFrameCache.Status);
+                Check(Pixels().SequenceEqual(swapped), "The swapped face frame was cached with another picture");
+                fixture.Timeline.Items = fixture.Timeline.Items.Remove(face).Remove(second).Add(face).Add(second);
+            }
             // Overwriting the selected upper face must reject its frames immediately, without disabling the
             // default face's range. Use a new plain-image case for this assertion; the GIF's own time stays separate. A
             // scene item's frames depend on every file of its scene, so there they all change.
@@ -188,6 +220,8 @@ internal static class SimpleTachiePixelChecks
         }
         Check(TimelineFrameCache.GpuBytes == 0 && TimelineFrameCache.ReadbackPoolBytes == 0, "Simple pixel checks leaked GPU resources");
     }
+
+    private static string Dispose(KeyCapture capture) { using (capture) return capture.Key; }
 
     private static int rejectedGifUpdates;
     private static void RejectGifCompletion(object __0, ref Exception? __3)

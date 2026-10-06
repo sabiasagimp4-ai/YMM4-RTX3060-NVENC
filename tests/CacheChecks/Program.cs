@@ -51,6 +51,7 @@ internal static class Program
         CheckBundledReaders();
         CheckBundledTachie();
         SimpleTachieKeyChecks.Run();
+        AttachedIniChecks.Run();
         CheckFramePreparesOwnFiles();
         CheckFingerprintCancellation();
         CheckUnverifiableFiles();

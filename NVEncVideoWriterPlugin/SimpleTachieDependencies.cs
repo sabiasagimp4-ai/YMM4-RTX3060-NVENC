@@ -90,10 +90,10 @@ internal static class SimpleTachieDependencies
             var active = ((System.Collections.IEnumerable)pick.Invoke(picker, [timeline, at])!).Cast<IItem>()
                 .Where(face => ReferenceEquals(FrameCacheKey.GetCharacter(face), character))
                 .OrderByDescending(face => face.Layer).ToArray();
-            // Equal layers lose their ordering in the ordinary per-item hash. Unknown face parameters must never
-            // inherit the exemption previously intended only for frames whose tachie was bypassed.
-            if (active.GroupBy(face => face.Layer).Any(group => group.Count() > 1)
-                || active.Any(face => face.GetType() != typeof(VoiceItem) && face.GetType() != typeof(TachieFaceItem))
+            // Faces of one layer come in item-list order, as in the host (stable sort), which keys the frame
+            // (FrameDependencyIndex.Entry.FaceGroup). Unknown face parameters must never inherit the exemption
+            // previously intended only for frames whose tachie was bypassed.
+            if (active.Any(face => face.GetType() != typeof(VoiceItem) && face.GetType() != typeof(TachieFaceItem))
                 || active.Any(face => !Parameter(FaceParameter(face), character.TachieType, "FaceParameter", optional: true))) return false;
             bool hidden = (bool)item.TachieItemParameter.GetType().GetProperty("IsHiddenWhenNoSpeech")!.GetValue(item.TachieItemParameter)!;
             string? selected = null;

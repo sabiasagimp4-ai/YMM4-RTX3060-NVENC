@@ -13,6 +13,7 @@
     <Compile Include="../../NVEncVideoWriterPlugin/FrameRenderReadiness.cs" Link="FrameRenderReadiness.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/HostFeatures.cs" Link="HostFeatures.cs" />
     <Compile Include="../../NVEncVideoWriterPlugin/RandomSeedAlignment.cs" Link="RandomSeedAlignment.cs" />
+    <Compile Include="../../NVEncVideoWriterPlugin/BlinkSeedAlignment.cs" Link="BlinkSeedAlignment.cs" />
     <Compile Include="../../tools/HostShapeReport/ShapeRules.cs" Link="ShapeRules.cs" />
   </ItemGroup>
 </Project>

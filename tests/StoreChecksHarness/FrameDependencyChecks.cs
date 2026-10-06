@@ -121,6 +121,22 @@ internal static class FrameDependencyChecks
         try { _ = Index(faces with { FileRanges = [new(599, 1, ["outside.png"])] }); } catch (ArgumentException) { rejected = true; }
         Check(rejected, "A face range outside the item must be rejected");
 
+        // Faces of one character and layer are shown in item-list order: the frames where two are shown are keyed by
+        // that order (always cacheable), other frames are not, and a wide frame names every such group.
+        var upper = new Entry(800, 20, false, false, "FACE1", [], FaceGroup: "c/3");
+        var lower = new Entry(810, 20, false, false, "FACE2", [], FaceGroup: "c/3");
+        var otherLayer = new Entry(810, 20, false, false, "FACE3", [], FaceGroup: "c/4");
+        var faceOrder = Index(upper, lower, otherLayer);
+        var swappedFaces = Index(lower, upper, otherLayer);
+        Check(faceOrder.For(815).Cacheable && faceOrder.For(815).Content.Contains("|order:face:FACE1,FACE2", StringComparison.Ordinal)
+            && swappedFaces.For(815).Content.Contains("|order:face:FACE2,FACE1", StringComparison.Ordinal),
+            "Faces of one layer shown together must be keyed by their list order");
+        Check(faceOrder.For(805).Content == swappedFaces.For(805).Content && faceOrder.For(825).Content == swappedFaces.For(825).Content
+            && !faceOrder.For(805).Content.Contains("|order:", StringComparison.Ordinal), "Frames showing one face of a group must not name the order");
+        var faceScene = Index(upper, lower, d with { Frame = 815, Length = 2 });
+        Check(faceScene.For(816).Content.Contains("|order:face:FACE1,FACE2", StringComparison.Ordinal)
+            && faceScene.Whole.Content.Contains("|order:face:FACE1,FACE2", StringComparison.Ordinal), "A wide frame must name every face group");
+
         // An item formatting numbers with the thread's culture marks its frames (and a transition after it).
         var number = new Entry(500, 10, false, false, "U", [], Culture: true);
         var withNumber = Index(a, number, t with { Frame = 510, Length = 5 });
@@ -148,7 +164,7 @@ internal static class FrameDependencyChecks
         var clock = System.Diagnostics.Stopwatch.StartNew();
         for (int f = 0; f < 50_000; f++) frames += big.For(f).Files.Length;
         clock.Stop();
-        Console.WriteLine($"Frame dependencies: overlap, end frame, transitions (recursive), wide scene frames, partial invalidation, image sequences, culture; 50k lookups over 5k items {clock.Elapsed.TotalMilliseconds:F0} ms.");
+        Console.WriteLine($"Frame dependencies: overlap, end frame, transitions (recursive), wide scene frames, partial invalidation, image sequences, face order, culture; 50k lookups over 5k items {clock.Elapsed.TotalMilliseconds:F0} ms.");
     }
 
     private static void Check(bool condition, string message)

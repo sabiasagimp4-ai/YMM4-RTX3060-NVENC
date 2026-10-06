@@ -20,13 +20,13 @@ internal static class AnimationTachieChecks
     {
         // The nested layouts (group, composite, scene) take the "pixels" case's frames through a group control, a composite
         // group's source and another scene's source.
-        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback", "metadata-budget", "output-lifetime", "idle-inactive", "preserved-directory-time" }.Concat(TachieLayouts.Nested))
+        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback", "metadata-budget", "output-lifetime", "idle-inactive", "preserved-directory-time", "differential", "same-layer-faces" }.Concat(TachieLayouts.Nested))
         {
             Exception? failure = null;
             using var finished = new ManualResetEventSlim();
             var worker = new Thread(() =>
             {
-                try { using var fixture = new Case(host, name == "hidden-vowels", TachieLayouts.Nested.Contains(name) ? name : "root"); RunCase(fixture, name, host); }
+                try { using var fixture = new Case(host, name); RunCase(fixture, name, host); }
                 catch (Exception error) { failure = error; }
                 finally { finished.Set(); }
             }) { IsBackground = true, Name = "Animation tachie " + name };
@@ -70,11 +70,19 @@ internal static class AnimationTachieChecks
         if (name == "rollback") { test.CheckInstallRollback(host); return; }
         if (name == "retained-ini")
         {
+            // An attached INI is a dependency, and frames drawn with what it says are cached; a source that kept
+            // the settings of an INI deleted since is not.
             string ini = Path.ChangeExtension(test.Fixture.Images[0], ".ini");
             File.WriteAllText(ini, "blend=4\nopacity=25\nplaceon=face\n");
-            TimelineFrameCache.Enabled = false; test.Update(30);
-            Check(!AnimationTachieDependencies.TryFiles(test.Fixture.Tachies[0], test.Fixture.Timeline, out _), "Existing INI was admitted");
+            TimelineFrameCache.Enabled = false; test.Update(10);
+            var plain = test.Pixels();
+            Check(AnimationTachieDependencies.TryFiles(test.Fixture.Tachies[0], test.Fixture.Timeline, out var withIni)
+                && withIni.Contains(Path.GetFullPath(ini), StringComparer.OrdinalIgnoreCase), "An existing INI was not a dependency");
+            test.Warm(10);
+            Check(test.Pixels().SequenceEqual(plain), "A frame with an attached INI was cached with another picture");
+            TimelineFrameCache.Enabled = false;
             File.Delete(ini);
+            TimelineFrameCache.Clear();
             Check(AnimationTachieDependencies.TryFiles(test.Fixture.Tachies[0], test.Fixture.Timeline, out _), "The PNG-only description did not recover");
             Check(!AnimationTachieDependencies.SafeSource(test.Source, test.Fixture.Scene, 30), "Deleted INI left an unsafe source admitted");
             TimelineFrameCache.Enabled = true;
@@ -155,8 +163,21 @@ internal static class AnimationTachieChecks
             Check(AnimationTachieDependencies.TryFiles(test.Fixture.Tachies[0], test.Fixture.Timeline, out var files)
                 && files.Contains(Path.Combine(test.Fixture.Root, "mouth.A.png"), StringComparer.OrdinalIgnoreCase),
                 "Upper-case vowel accepted by the host was omitted from dependencies");
-        int[] frames = [0, 29, 30, 31, 35, 40, 45, 50, 59, 60, 74, 89, 90, 104, 119, 120, 149, 150];
+        int[] frames = [0, 29, 30, 31, 35, 40, 45, 50, 59, 60, 74, 89, 90, 99, 100, 104, 119, 120, 149, 150];
         var reference = frames.ToDictionary(frame => frame, frame => { test.Update(frame); return test.Pixels(); });
+        if (test.Faces.Length != 0)
+        {
+            // Both faces are shown at 60..99: differential composite takes the lower face's etc part, the plain tachie
+            // only the upper face's parts; of one layer, the first in the item list is the upper one.
+            Check(!reference[45].SequenceEqual(reference[0]), "The upper face did not change the picture");
+            if (name == "differential")
+            {
+                AnimationTachieFixture.Set(test.Fixture.Tachies[0].TachieItemParameter, "IsDifferentialComposite", false);
+                TimelineFrameCache.Enabled = false; test.Update(74);
+                Check(!test.Pixels().SequenceEqual(reference[74]), "Differential composite did not change the picture");
+                AnimationTachieFixture.Set(test.Fixture.Tachies[0].TachieItemParameter, "IsDifferentialComposite", true);
+            }
+        }
         if (TachieLayouts.Nested.Contains(name)) Check(reference[0].Any(value => value != 0), "The " + name + " layout drew nothing");
         if (name == "hidden-vowels")
         {
@@ -168,12 +189,54 @@ internal static class AnimationTachieChecks
             test.Warm(frame);
             Check(test.Pixels().SequenceEqual(reference[frame]), "Animation cached pixels differ at " + frame);
         }
+        if (name == "same-layer-faces")
+        {
+            // Swapping the faces of one layer in the item list swaps which one is shown: the frames showing both change
+            // their key and picture, the others neither.
+            var (upper, lower) = (test.Faces[0], test.Faces[1]);
+            Check(FrameCacheKey.TryDescribe(test.Scene, FrameCacheKey.CaptureSourceReaderTypes(), out _, out _, out var before, out var reason), reason);
+            var items = test.Fixture.Timeline.Items;
+            test.Fixture.Timeline.Items = items.Remove(upper).Remove(lower).Add(lower).Add(upper);
+            Check(FrameCacheKey.TryDescribe(test.Scene, FrameCacheKey.CaptureSourceReaderTypes(), out _, out _, out var after, out reason), reason);
+            Check(before!.For(74).Content != after!.For(74).Content && before.For(45).Content == after.For(45).Content,
+                "Swapping faces of one layer did not change exactly the frames showing both");
+            TimelineFrameCache.Enabled = false; test.Update(74); var swapped = test.Pixels();
+            Check(!swapped.SequenceEqual(reference[74]), "Swapping faces of one layer did not change the picture");
+            test.Warm(74);
+            Check(test.Pixels().SequenceEqual(swapped), "A swapped face frame was not cached with its own picture");
+        }
         using var tracker = new KeyDependencyTracker(test.Scene);
         int rendered = 0;
         var result = IdleFramePreRenderer.PrimeLiveFrame(tracker, test.Scene, test.Source, _ => rendered++,
             30, test.View, () => true, CancellationToken.None);
         Check(result == IdleFramePreRenderer.IdleFrameResult.Normal && rendered == 0, "Idle tachie started a competing calculation");
         Check(AnimationTachieDependencies.SessionResource.Contains("animation-blink-session://", StringComparison.Ordinal), "Blink session salt missing");
+        if (name == "pixels") CheckStableBlink(test, tracker, reference);
+    }
+
+    // The blinking is seeded alike in every run (BlinkSeedAlignment): frames are not keyed for this run's objects, so
+    // a clone of the scene renders a frame without a voice (no lip-sync calculation) while paused, under the live key
+    // and with the live pixels.
+    private static void CheckStableBlink(Case test, KeyDependencyTracker tracker, IReadOnlyDictionary<int, byte[]> reference)
+    {
+        Check(AnimationTachieDependencies.StableBlink(test.Fixture.Characters[0]), "The audited animation tachie's blink seed was not aligned");
+        Check(SpinWait.SpinUntil(() => { if (!tracker.TryCapture(0, out var c, out _)) return false; c!.Dispose(); return true; }, TimeSpan.FromSeconds(5)),
+            "The tachie scene did not become ready");
+        Check(!tracker.IsSessionKeyed(0) && !tracker.IsSessionKeyed(30), "Animation tachie frames were still keyed for this run");
+        Check(tracker.TryCapture(0, out var capture, out var reason), reason);
+        using (capture)
+        using (var batch = new IdleFramePreRenderer.BatchRenderer(tracker, capture!.Model))
+        {
+            TimelineFrameCache.Enabled = true; TimelineFrameCache.Clear();
+            IdleFramePreRenderer.IdleFrameResult idle = default;
+            Check(SpinWait.SpinUntil(() => (idle = IdleFramePreRenderer.PrimeBatchFrame(tracker, test.Scene, batch, 0, test.View, () => true,
+                CancellationToken.None, out reason)) == IdleFramePreRenderer.IdleFrameResult.Rendered, TimeSpan.FromSeconds(5)),
+                "A frame without a voice was not rendered while paused: " + idle + "; " + reason);
+            Check(IdleFramePreRenderer.PrimeBatchFrame(tracker, test.Scene, batch, 30, test.View, () => true, CancellationToken.None, out _)
+                == IdleFramePreRenderer.IdleFrameResult.Normal, "A frame with a voice was rendered while paused");
+            long hits = TimelineFrameCache.Hits; test.Update(0);
+            Check(TimelineFrameCache.Hits == hits + 1 && test.Pixels().SequenceEqual(reference[0]), "The paused clone's frame was not the live picture");
+        }
     }
 
     private static void CheckTimeout(Case test, Assembly host)
@@ -236,6 +299,8 @@ internal static class AnimationTachieChecks
     {
         internal readonly AnimationTachieFixture Fixture;
         internal readonly Scene Scene;
+        // "differential" and "same-layer-faces": two faces of the first character, both shown at 60..99.
+        internal readonly TachieFaceItem[] Faces = [];
         internal readonly GraphicsDevices Devices = new();
         internal readonly IGraphicsDevicesAndContext Context;
         internal readonly ITimelineSource Source;
@@ -245,8 +310,10 @@ internal static class AnimationTachieChecks
         private readonly bool oldPreview = TimelineFrameCache.PreviewEnabled, oldExport = TimelineFrameCache.ExportEnabled, oldGpu = TimelineFrameCache.GpuRetentionEnabled;
         private readonly Func<object, TimelineFrameCache.PreviewViewport?>? oldViewport = TimelineFrameCache.TestViewport;
         private readonly FrameCacheStore? oldStore = TimelineFrameCache.StoreIfCreated;
-        internal Case(Assembly host, bool vowels, string layout)
+        internal Case(Assembly host, string name)
         {
+            bool vowels = name == "hidden-vowels";
+            string layout = TachieLayouts.Nested.Contains(name) ? name : "root";
             harmony.Patch(typeof(PluginAssemblyLoader).TypeInitializer!, prefix: new(typeof(AnimationTachieChecks), nameof(SkipLoader)));
             ProbeLoader.Stub(ProbeLoader.Assemblies(host).Append(Assembly.LoadFrom(Path.Combine(Path.GetDirectoryName(host.Location)!, AnimationTachieDependencies.AssemblyName + ".dll"))));
             Fixture = new(vowels);
@@ -268,6 +335,25 @@ internal static class AnimationTachieChecks
                 }
             }
             Fixture.Timeline.Items = Fixture.Timeline.Items.Where(item => item is TachieItem).ToImmutableList().AddRange(voices);
+            if (name is "differential" or "same-layer-faces")
+            {
+                // The upper face (40..99) sets the body, the lower one (60..119) only an etc part. Of one layer, the
+                // first in the item list is shown.
+                string green = Path.Combine(Fixture.Root, "body-green.png"), marker = Path.Combine(Fixture.Root, "etc-marker.png");
+                File.WriteAllBytes(green, FramePixelChecks.Png(80, 100, (x, _) => (20, (byte)(120 + x), 40, 255)));
+                File.WriteAllBytes(marker, FramePixelChecks.Png(80, 100, (x, y) => (250, 250, 250, (byte)(x < 20 && y < 20 ? 255 : 0))));
+                var upper = new TachieFaceItem(Fixture.Characters[0]) { Frame = 40, Length = 60, Layer = 21 };
+                var lower = new TachieFaceItem(Fixture.Characters[0]) { Frame = 60, Length = 60, Layer = name == "differential" ? 20 : 21 };
+                AnimationTachieFixture.Set(upper.TachieFaceParameter, "Body", Fixture.Images[1]);
+                if (name == "differential")
+                {
+                    AnimationTachieFixture.Set(lower.TachieFaceParameter, "Etc1", marker);
+                    AnimationTachieFixture.Set(Fixture.Tachies[0].TachieItemParameter, "IsDifferentialComposite", true);
+                }
+                else AnimationTachieFixture.Set(lower.TachieFaceParameter, "Body", green);
+                Faces = [upper, lower];
+                Fixture.Timeline.Items = Fixture.Timeline.Items.Add(upper).Add(lower);
+            }
             Fixture.Timeline.RefreshTimelineLengthAndMaxLayer();
             Scene = TachieLayouts.Apply(layout, Fixture.Timeline, Fixture.Scene);
             Context = Devices.CreateContext();

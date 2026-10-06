@@ -82,6 +82,7 @@ internal static class Program
             Check(FrameRenderReadiness.CoverageProblem is null && FrameRenderReadiness.Coverage.Count == 0, "Uninstall kept host coverage state");
             Console.WriteLine("Render readiness host binding: MF2/MF-legacy/FFmpeg/WIC/wrapper/unverified sources and late-loaded coverage OK");
             RandomSeedChecks.Run();
+            BlinkSeedChecks.Run();
             return 0;
         }
         finally
