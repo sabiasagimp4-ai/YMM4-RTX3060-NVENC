@@ -149,7 +149,9 @@ internal static class FramePixelChecks
                 Check(TimelineFrameCache.GpuBytes == 0, "Preview delivery checks leaked global GPU reservation");
                 IdleRandomChecks.Run(host, context);
                 Check(TimelineFrameCache.GpuBytes == 0, "Idle random checks leaked global GPU reservation");
-                VoiceCachePixelChecks.Run(host, context);
+                // The voice checks prime idle frames, which need Scenes(bool) (4.49 and later) for the clone.
+                if (HostCompat.ScenesTakeUndoFlag) VoiceCachePixelChecks.Run(host, context);
+                else Console.WriteLine("Voice cache checks skipped: no idle pre-render on this build");
                 Check(TimelineFrameCache.GpuBytes == 0, "Voice cache checks leaked global GPU reservation");
                 OperationSequenceChecks.Run(host, context);
                 Check(TimelineFrameCache.GpuBytes == 0, "Operation sequences leaked global GPU reservation");
