@@ -172,12 +172,17 @@ internal static class IdleRandomChecks
         try
         {
             ITimelineSource New(Scene s) { var source = Create(host, context, s); renderers.Add(source); return source; }
+            // A first render of the effect warms the device up (its first frame can differ by a pixel from later ones).
+            Render(New(new Scene(copyTimeline, copyScenes, [])), copyTimeline, dc, viewport);
             var baseline = Render(New(scene), timeline, dc, viewport);
             int moving = Enumerable.Range(1, Frames - 1).Count(frame => !baseline[frame].SequenceEqual(baseline[frame - 1]));
-            int sameSecond = Same(Render(New(scene), timeline, dc, viewport), baseline);
+            var second = Render(New(scene), timeline, dc, viewport);
+            int sameSecond = Same(second, baseline);
             int sameCopy = Same(Render(New(new Scene(copyTimeline, copyScenes, [])), copyTimeline, dc, viewport), baseline);
             // A third renderer after the others ran (their code recompiled by .NET by then): still the same values.
-            int sameThird = Same(Render(New(scene), timeline, dc, viewport), baseline);
+            var third = Render(New(scene), timeline, dc, viewport);
+            int sameThird = Same(third, baseline);
+            string Differing(byte[][] frames) => string.Join(",", Enumerable.Range(0, Frames).Where(frame => !frames[frame].SequenceEqual(baseline[frame])));
             bool identity = HostFeatures.For(host).IdentityRandom && RandomSeedAlignment.EffectsByModel(host);
             bool keyed = identity && (!rendererSeeded || item is not TextItem || RandomSeedAlignment.TextOrderByItem);
             using var tracker = new KeyDependencyTracker(scene);
@@ -187,7 +192,8 @@ internal static class IdleRandomChecks
                 return Enumerable.Range(0, Frames).All(tracker.IsSessionKeyed);
             }, TimeSpan.FromSeconds(keyed ? 20 : 2));
             string summary = $"{name}: {moving} of {Frames - 1} frames change, another renderer draws {Frames - sameSecond} other frames "
-                + $"(a third {Frames - sameThird}), a copy of the project {Frames - sameCopy}";
+                + $"(a third {Frames - sameThird}), a copy of the project {Frames - sameCopy}"
+                + (sameSecond == Frames && sameThird == Frames ? "" : $" [other frames: second {Differing(second)}; third {Differing(third)}; second and third differ in {Frames - Same(second, third)}]");
             Check(sameCopy < Frames, summary + "; the copy should draw other values (identity-seeded)");
             if (keyed)
             {
