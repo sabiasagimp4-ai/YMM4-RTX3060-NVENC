@@ -24,6 +24,10 @@ internal static class IdleRandomChecks
     internal static void Run(Assembly host, IGraphicsDevicesAndContext context)
     {
         Console.WriteLine("Random seeds: " + string.Join("; ", RandomSeedAlignment.Coverage));
+        // YMM4's shader effects (the mosaics) read their shaders from pack://application: resources, which WPF's
+        // Application type registers when it is initialized (no Application object is created here).
+        _ = System.IO.Packaging.PackUriHelper.UriSchemePack;
+        System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(System.Windows.Application).TypeHandle);
         foreach (var (name, item, rendererSeeded) in Kinds(host)) CheckKind(host, context, name, item, rendererSeeded);
         string root = Path.Combine(Path.GetTempPath(), "ymm-idle-random-" + Guid.NewGuid().ToString("N"));
         var store = new FrameCacheStore(root, 64L << 20, 0);
@@ -141,6 +145,11 @@ internal static class IdleRandomChecks
         yield return ("random rotation", rotating, oldEffects);
         yield return ("random text order", new TextItem { Frame = 0, Length = Frames, Layer = 0, Text = "ABCDEFGHIJKL", Font = "Arial",
             DisplayInterval = 50, DisplayDirection = TypewriterAnimationDirection.Random }, true);
+        if (!ShadersReadable(out string problem))
+        {
+            Console.WriteLine("Mosaic checks skipped: YMM4's shader resources cannot be read in this process: " + problem);
+            yield break;
+        }
         foreach (string type in new[] { "Delaunay", "Voronoi" })
         {
             var mosaic = new YukkuriMovieMaker.Project.Effects.MosaicEffect { MosaicType = Enum.Parse<YukkuriMovieMaker.Project.Effects.MosaicType>(type) };
@@ -149,6 +158,22 @@ internal static class IdleRandomChecks
             var shape = new ShapeItem { Frame = 0, Length = Frames, Layer = 0 };
             shape.VideoEffects = shape.VideoEffects.Add(mosaic);
             yield return ($"{type} mosaic", shape, false);
+        }
+    }
+
+    private static bool ShadersReadable(out string problem)
+    {
+        try
+        {
+            var uri = new Uri("pack://application:,,,/YukkuriMovieMaker;component/Resources/Shader/DelaunayMosaic.cso");
+            using var stream = System.Windows.Application.GetResourceStream(uri)?.Stream;
+            problem = stream is null ? "no resource stream" : string.Empty;
+            return stream is not null;
+        }
+        catch (Exception error) when (error is UriFormatException or IOException or InvalidOperationException or NotSupportedException)
+        {
+            problem = error.GetBaseException().Message;
+            return false;
         }
     }
 
