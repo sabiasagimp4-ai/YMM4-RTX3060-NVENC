@@ -172,7 +172,9 @@ internal static class AnimationTachieDependencies
         return true;
     }
 
-    internal static bool MayStartLipSync(Scene scene, int frame) => NestedTimelineSources.MayStartLipSync(scene, frame, PluginName);
+    // Idle pre-rendering leaves a frame where a lip-sync calculation could start to the host (the calculation slots stay
+    // with playback); its other tachie frames are rendered by the clone.
+    internal static bool LeaveToHost(Scene scene, int frame) => NestedTimelineSources.MayStartLipSync(scene, frame, PluginName);
 
     // Every animation tachie the frame drew (in `timelineSource` and the sources inside it: groups, transitions, scenes)
     // has its files as keyed and the part settings its attached INI files say now; every one of the root timeline at
@@ -185,7 +187,7 @@ internal static class AnimationTachieDependencies
             if (!(ReadinessInstalled?.Invoke() == true)) return false;
             var drawn = new List<(TachieItem Item, object Source)>();
             if (!NestedTimelineSources.TryTachieSources(timelineSource, drawn)) return false;
-            if (NestedTimelineSources.TachieItems(scene.Timeline).Any(item => NestedTimelineSources.Shows(item, frame)
+            if (NestedTimelineSources.TachieItems(scene.Timeline).Any(item => NestedTimelineSources.Drawn(scene.Timeline, item, frame)
                 && item.Character?.TachieType?.FullName == PluginName && !drawn.Any(pair => ReferenceEquals(pair.Item, item)))) return false;
             var verifiedCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             bool CheckListing(string path, out int count)

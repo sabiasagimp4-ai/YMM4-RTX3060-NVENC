@@ -72,11 +72,7 @@ internal static class NestedTimelineSources
     internal static bool MayStartLipSync(Scene scene, int frame, string pluginName)
     {
         var items = scene.Timeline.Items;
-        var frames = new HashSet<long> { frame };
-        var pending = new Queue<long>(frames);
-        while (pending.TryDequeue(out long at))
-            foreach (var transition in items.OfType<TransitionItem>())
-                if (Shows(transition, at) && frames.Count < 1024 && frames.Add((long)transition.Frame - 1)) pending.Enqueue((long)transition.Frame - 1);
+        var frames = TransitionFrames(scene.Timeline, frame);
         bool Speaks(Timeline timeline, Func<IItem, bool> shown) => TachieItems(timeline).Any(tachie =>
             tachie.Character?.TachieType?.FullName == pluginName && shown(tachie) && timeline.Items.OfType<VoiceItem>().Any(voice =>
                 (ReferenceEquals(voice.Character, tachie.Character) || voice.CharacterName == tachie.CharacterName) && shown(voice)));
@@ -85,7 +81,34 @@ internal static class NestedTimelineSources
             && scene.Scenes.Timelines.Where(timeline => !ReferenceEquals(timeline, scene.Timeline)).Any(timeline => Speaks(timeline, _ => true));
     }
 
+    // Whether the root frame can draw a tachie item of the plugin `pluginName` at all: one of the root timeline's at the
+    // frame or at the frame before a transition shown there, or any of another timeline while a scene item is shown.
+    internal static bool MayDraw(Scene scene, int frame, string pluginName)
+    {
+        var frames = TransitionFrames(scene.Timeline, frame);
+        if (TachieItems(scene.Timeline).Any(item => item.Character?.TachieType?.FullName == pluginName && frames.Any(at => Shows(item, at)))) return true;
+        return scene.Timeline.Items.OfType<SceneItem>().Any(item => frames.Any(at => Shows(item, at)))
+            && scene.Scenes.Timelines.Where(timeline => !ReferenceEquals(timeline, scene.Timeline))
+                .Any(timeline => TachieItems(timeline).Any(item => item.Character?.TachieType?.FullName == pluginName));
+    }
+
+    // The frame and, through the transitions shown there (recursively), the frames before them that it also draws.
+    private static HashSet<long> TransitionFrames(Timeline timeline, int frame)
+    {
+        var frames = new HashSet<long> { frame };
+        var pending = new Queue<long>(frames);
+        while (pending.TryDequeue(out long at))
+            foreach (var transition in timeline.Items.OfType<TransitionItem>())
+                if (Shows(transition, at) && frames.Count < 1024 && frames.Add((long)transition.Frame - 1)) pending.Enqueue((long)transition.Frame - 1);
+        return frames;
+    }
+
     internal static bool Shows(IItem item, long frame) => item.Frame <= frame && frame < (long)item.Frame + item.Length;
+
+    // Whether the root timeline's renderer draws `item` at `frame`, as CompositeItemPicker picks it: shown there, the
+    // item not hidden, nor its layer.
+    internal static bool Drawn(Timeline timeline, IItem item, long frame) =>
+        Shows(item, frame) && !item.IsHidden && timeline.LayerSettings.IsVisibles[item.Layer];
 
     // Whether any timeline of the project holds a tachie item of the plugin `pluginName`.
     internal static bool AnyTachie(Scene scene, string pluginName) =>

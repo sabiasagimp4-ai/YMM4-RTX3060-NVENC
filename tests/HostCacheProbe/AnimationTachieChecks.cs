@@ -25,7 +25,7 @@ internal static class AnimationTachieChecks
         }
         // The nested layouts (group, composite, scene) take the "pixels" case's frames through a group control, a composite
         // group's source and another scene's source.
-        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback", "metadata-budget", "output-lifetime", "idle-inactive", "preserved-directory-time", "differential", "same-layer-faces" }.Concat(TachieLayouts.Nested))
+        foreach (string name in new[] { "pixels", "hidden-vowels", "timeout", "retained-ini", "changed-list", "overwrite", "rollback", "metadata-budget", "output-lifetime", "idle-inactive", "preserved-directory-time", "differential", "same-layer-faces", "hidden-layer" }.Concat(TachieLayouts.Nested))
         {
             Exception? failure = null;
             using var finished = new ManualResetEventSlim();
@@ -168,6 +168,8 @@ internal static class AnimationTachieChecks
             Check(AnimationTachieDependencies.TryFiles(test.Fixture.Tachies[0], test.Fixture.Timeline, out var files)
                 && files.Contains(Path.Combine(test.Fixture.Root, "mouth.A.png"), StringComparer.OrdinalIgnoreCase),
                 "Upper-case vowel accepted by the host was omitted from dependencies");
+        // A tachie on a hidden layer is not drawn; the frames of the others are still cached.
+        if (name == "hidden-layer") test.Fixture.Timeline.LayerSettings.IsVisibles[test.Fixture.Tachies[1].Layer] = false;
         int[] frames = [0, 29, 30, 31, 35, 40, 45, 50, 59, 60, 74, 89, 90, 99, 100, 104, 119, 120, 149, 150];
         var reference = frames.ToDictionary(frame => frame, frame => { test.Update(frame); return test.Pixels(); });
         if (test.Faces.Length != 0)

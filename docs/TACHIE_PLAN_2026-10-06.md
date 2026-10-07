@@ -88,7 +88,7 @@
 | 5 | 同じキャラ・同じレイヤーの表情が同時に表示されるフレームに、その一覧の順をキーに入れ、3 種の除外をやめた | `FrameDependencyIndex.Entry.FaceGroup` |
 | 6 | 付属 INI を依存に入れ、各 layer の設定が今の INI を既定値から読み直した値と同じこと、カルチャで数値が変わらないこと、キーの記述後に作られた INI でないことを確かめる。画像一覧の同一性は PNG だけで判定する | `AnimationTachieDependencies.TryReadIni`・`SafeSource` |
 | 7 | まばたきの種の `GetHashCode` の 1 か所を FNV-1a に置き換え、置き換えられたときは起動の間だけのキーをやめた | `BlinkSeedAlignment` |
-| 8 | 停止中の先読みは、そのキャラのボイスが重なるフレームだけ見送る | `NestedTimelineSources.MayStartLipSync` |
+| 8 | 停止中の先読みは、動く立ち絵のキャラのボイスが重なるフレームだけ見送る。PSD 立ち絵は、複製の描画器が PSD をもう一つ読み込むため、描き得るフレームを見送る（従来どおり） | `NestedTimelineSources.MayStartLipSync`・`MayDraw` |
 | 9 | MVID の固定値に加えて、契約の照合で確かめた版のファイルの MVID を受け入れる。4.56.0.0〜4.56.0.1・4.55.1.0〜4.55.1.1 は 3 種と口パク、4.54.0.1 はシンプル立ち絵を確認済みにした。4.55.0.x（非同期・session なし）、4.54.0.1 以前の動く・PSD 立ち絵（描画中に音声を読む）、4.54.0.0 以前のシンプル立ち絵（表情の画像の選び方が違う）は対象外 | `HostFeatures.TachieAssemblies`、`HostReviewedBuilds.cs` |
 | 10 | README・`CACHE_BEHAVIOR.md`・`HOST_CONTRACTS.md` を更新 | — |
 

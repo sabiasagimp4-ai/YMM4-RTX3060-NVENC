@@ -213,7 +213,9 @@ internal static class PsdTachieDependencies
         files = [Path.GetFullPath(path)];
         return true;
     }
-    internal static bool MayStartLipSync(Scene scene, int frame) => NestedTimelineSources.MayStartLipSync(scene, frame, PluginName);
+    // Idle pre-rendering leaves a frame that can draw a PSD tachie to the host: every renderer loads the whole PSD file
+    // (PsdTachieSource), so a clone of the scene would hold another copy of it.
+    internal static bool LeaveToHost(Scene scene, int frame) => NestedTimelineSources.MayDraw(scene, frame, PluginName);
     // Every PSD tachie the frame drew (in `timelineSource` and the sources inside it: groups, transitions, scenes) holds
     // the keyed file and settings; every one of the root timeline at the frame was drawn.
     internal static bool SafeSource(object timelineSource, Scene scene, int frame, KeyCapture? capture = null)
@@ -224,7 +226,7 @@ internal static class PsdTachieDependencies
             if (!(ReadinessInstalled?.Invoke() == true)) return false;
             var drawn = new List<(TachieItem Item, object Source)>();
             if (!NestedTimelineSources.TryTachieSources(timelineSource, drawn)) return false;
-            if (NestedTimelineSources.TachieItems(scene.Timeline).Any(item => NestedTimelineSources.Shows(item, frame)
+            if (NestedTimelineSources.TachieItems(scene.Timeline).Any(item => NestedTimelineSources.Drawn(scene.Timeline, item, frame)
                 && item.Character?.TachieType?.FullName == PluginName && !drawn.Any(pair => ReferenceEquals(pair.Item, item)))) return false;
             foreach (var (item, core) in drawn)
             {
