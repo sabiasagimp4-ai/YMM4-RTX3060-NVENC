@@ -24,7 +24,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: cache-development-${{ github.ref }}
+  # A full_check run (one job, about an hour) and the usual checks do not cancel each other.
+  group: cache-development-${{ github.ref }}-${{ inputs.full_check && 'full' || 'checks' }}
   cancel-in-progress: true
 
 env:
