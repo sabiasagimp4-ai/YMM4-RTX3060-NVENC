@@ -117,7 +117,7 @@ function Answer-Dialogs($process) {
 
 # Keep the exception evidence; a modal dialog makes coordinate-based playback/edit evidence invalid.
 function Assert-NoHostException($process) {
-    foreach ($window in @(Windows-Of $process) | Where-Object { $_.Title -match '^An exception occurred|^例外' }) {
+    foreach ($window in @(Windows-Of $process) | Where-Object { $_.Title -match ('^An exception occurred|^' + (U '\u4F8B\u5916')) }) {
         $dialog = $ae::FromHandle($window.Handle)
         Texts $dialog 'host-exception'
         $copy = $dialog.FindFirst($scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition ($ae::NameProperty, 'Copy details to clipboard')))

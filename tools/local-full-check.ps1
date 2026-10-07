@@ -18,7 +18,10 @@ Four parts, after a common setup (YMM4 4.56.1.0 downloaded, the plugin package b
 Each step runs as its own process and the script keeps going after a failure, so one report shows every result. A
 second run of the same commit resumes: steps that passed are taken from the earlier run (-Fresh starts over). YMM4 is
 downloaded into <WorkDir>\ymm4 and never into the repository; nothing is committed, pushed or installed into a YMM4
-someone uses. The working tree must have no local changes (the results are those of the commit).
+someone uses. The working tree must have no local changes (the results are those of the commit). Two steps change
+a tracked source file for a moment and restore it byte for byte, as the workflows do: the negative control (latest)
+breaks a guard in NVEncVideoWriterPlugin\TimelineFrameCache.cs to see the checks catch it, and rtx-check's VUI
+experiment patches NvencNative\NvencNative.cpp.
 
 Needs: .NET SDK 10, Visual Studio Build Tools with the C++ workload, Git for Windows (its bash), jq, Python 3,
 ffmpeg and ffprobe on PATH, about 20 GB free, and the NVIDIA driver (unless -NoNvenc).
@@ -743,7 +746,7 @@ if ($versionRows.Count -gt 0) {
     foreach ($group in @($versionRows | Group-Object { $_.Id.Substring(1, $_.Id.LastIndexOf('-') - 1) } | Sort-Object { [version]$_.Name } -Descending)) {
         $cells = foreach ($kind in @('scan', 'start', 'keys', 'probe', 'animation', 'psd')) {
             $found = @($group.Group | Where-Object { $_.Id -eq "v$($group.Name)-$kind" })
-            if ($found.Count -eq 0) { '—' } else { $found[-1].Status }
+            if ($found.Count -eq 0) { '-' } else { $found[-1].Status }
         }
         $minutes = [Math]::Round((@($group.Group | Measure-Object Minutes -Sum).Sum), 1)
         $startRow = @($group.Group | Where-Object { $_.Id -eq "v$($group.Name)-start" }) | Select-Object -Last 1
