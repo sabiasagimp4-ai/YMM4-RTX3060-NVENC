@@ -109,3 +109,33 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\rtx-check.ps1 -Ymm4Dir
 | leftovers | 一時ファイルの残骸がないこと、追跡ファイルが変わっていないこと | #6 |
 
 一つの手順が失敗しても、残りは続けて実行する。スクリプトはYMM4のフォルダーへプラグインを入れず、YMM4も起動しない（試験はそのDLLを読み込んで使う）。指定したフォルダーのYMM4が起動中なら、実行を断る。pushはしない。
+
+## C. すべての検査をRTX 3060のPCで行う（`tools/local-full-check.ps1`）
+
+CIで行う検査と `rtx-check.ps1` を、1台のPCでまとめて行う。所要時間は数時間（YMM4の版の数による）。途中で止まっても、同じコミットでもう一度実行すれば、通った手順を飛ばして続きから再開する。
+
+| 部分 | 内容 |
+| --- | --- |
+| setup | YMM4 4.56.1.0を更新サーバーから取得し、プラグインをリリースと同じ手順で作る（`build.ps1`） |
+| latest | `cache-development` ワークフローのWindowsの検査すべて（4.56.1.0と、対応する最も古い4.47.0.0での読み込み）。画素の比較は、このPCのGPUで行う |
+| rtx | `tools/rtx-check.ps1`（NVENCでの出力、速度、色変換、VUI、プレビュー性能） |
+| gui | YMM4を起動してプロジェクトを開き、描画キャッシュのツールを使う（`tools/ci/gui-smoke.ps1`）。負荷試験（30秒のフルHDの再生、シーク、編集、消去）とtraceの検査も行う |
+| versions | プラグインが対応するYMM4のすべての版（4.47.0.0以降）で、`ymm4-compat` ワークフローと同じこと（ファイルの照合、プラグインを入れた起動、キャッシュの検査）を行い、版ごとの表を作る |
+
+- YMM4は `-WorkDir`（既定 `C:\ymm4-full-check`）の下へ、YMM4自身の更新と同じ手順で取得する。版は古い順に1つのフォルダーで確かめ、変わったファイルだけを取得する。普段使うYMM4には触れない。
+- 結果は `<WorkDir>\runs\<コミット>\summary.md` にまとめる。版ごとの表もこのフォルダーに作り、リポジトリには書かない。commitもpushもしない。
+- guiとversionsはYMM4のウィンドウを開く。guiはマウスとキーボードも使う。実行中はPCを使わない。
+- guiは決まった画面座標をクリックする。画面が1600×900（拡大率100%）のときだけ実行し、それ以外ではSKIPにする。
+- YMM4を閉じ、追跡ファイルに変更のない状態で実行する（結果をそのコミットのものにするため）。
+
+準備はBと同じ。加えて `jq` を入れる（`winget install jqlang.jq`）。20 GBほどの空きが要る。
+
+```powershell
+cd C:\work\YMM4-RTX3060-NVENC
+git pull
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\local-full-check.ps1
+```
+
+一部だけ行うとき：`-Parts latest,rtx`、版を選ぶとき：`-Versions 4.55.1.1,4.54.0.1`、最初からやり直すとき：`-Fresh`。
+
+GitHub Actionsでは、`cache-development` を入力 `full_check` をオンにして手動で実行すると、このスクリプトを `-NoNvenc` で1つの版について実行する（スクリプト自体が動くことの確認）。
