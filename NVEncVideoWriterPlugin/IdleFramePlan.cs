@@ -39,3 +39,38 @@ internal static class IdleFramePlan
         return true;
     }
 }
+
+// When the pre-renderer runs: a change of the timeline's current frame is playback or a seek, and a playing player
+// draws the frames just ahead of the playhead itself.
+internal static class IdleSchedule
+{
+    internal enum FrameChange { None, Playback, Seek }
+
+    // While playing the frame advances by itself: a step forward of up to two seconds (at least 60 frames, for fast
+    // playback between two observations) is playback; a jump back (a loop, a click on the ruler) or further forward
+    // is a seek. Paused, every change is a seek.
+    internal static FrameChange Classify(int previous, int frame, bool playing, double fps)
+    {
+        if (frame == previous) return FrameChange.None;
+        long step = (long)frame - previous;
+        double limit = Math.Max(60, double.IsFinite(fps) ? 2 * fps : 0);
+        return playing && step > 0 && step <= limit ? FrameChange.Playback : FrameChange.Seek;
+    }
+
+    // The frames ahead of the playhead the player reaches while a worker renders one frame, plus one: a worker leaves
+    // them to the player (it would finish them too late).
+    internal static int Lead(double fps, double frameMilliseconds)
+    {
+        if (!double.IsFinite(fps) || fps <= 0) return 1;
+        double played = fps * (double.IsFinite(frameMilliseconds) ? Math.Max(0, frameMilliseconds) : 0) / 1000;
+        return (int)Math.Clamp(Math.Ceiling(played) + 1, 1, 600);
+    }
+
+    // A frame the playing player draws before a worker could: at the playhead or within the lead after it. Frames
+    // before the playhead (reached after the plan wraps to the start) are kept for the next playback.
+    internal static bool LeftToPlayer(int frame, int playhead, int lead) => frame >= playhead && frame - (long)playhead <= lead;
+
+    // A worker's frame time, smoothed (the first sample is taken as it is).
+    internal static double Smooth(double previous, double sample) =>
+        !double.IsFinite(sample) || sample < 0 ? previous : previous <= 0 || !double.IsFinite(previous) ? sample : previous * 0.8 + sample * 0.2;
+}

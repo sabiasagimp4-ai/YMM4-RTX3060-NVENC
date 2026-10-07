@@ -225,15 +225,19 @@ internal static class FramePixelChecks
         var fresh = new FrameCacheToolSettings();
         fresh.Initialize();
         Check(!fresh.PreviewCache && !fresh.ExportCache && fresh.NvencOutput, "New settings: caches off, NVENC output on");
-        Check(fresh.AutomaticRamBudget && fresh.RamLimitMiB == 2048 && fresh.CacheFramesWhenIdle && fresh.IdleDelaySeconds == 8,
+        Check(fresh.AutomaticRamBudget && fresh.RamLimitMiB == 2048 && fresh.CacheFramesWhenIdle && fresh.IdleDelaySeconds == 1,
             "New memory/idle defaults");
         fresh.RamLimitMiB = -1;
         Check(fresh.RamLimitMiB == 64, "RAM minimum setting");
         fresh.RamLimitMiB = int.MaxValue;
         Check(fresh.RamLimitMiB == 16384, "RAM maximum setting");
+        fresh.IdleDelaySeconds = 0.1;
+        Check(fresh.IdleDelaySeconds == 0.1, "The shortest wait after an edit is 0.1 s");
+        fresh.IdleDelaySeconds = 0.01;
+        Check(fresh.IdleDelaySeconds == 0.1, "A wait below 0.1 s is raised to it");
         fresh.IdleDelaySeconds = double.NaN;
         fresh.IdleOrder = (IdleCacheOrder)int.MaxValue;
-        Check(fresh.IdleDelaySeconds == 8 && fresh.IdleOrder == IdleCacheOrder.FromCurrentTime, "Invalid idle settings fall back");
+        Check(fresh.IdleDelaySeconds == 1 && fresh.IdleOrder == IdleCacheOrder.FromCurrentTime, "Invalid idle settings fall back");
         var current = new FrameCacheToolSettings { SettingsVersion = 1, Enabled = true, PreviewCache = false, ExportCache = true, NvencOutput = false };
         current.Initialize();
         Check(!current.PreviewCache && current.ExportCache && !current.NvencOutput, "Current settings were changed on load");

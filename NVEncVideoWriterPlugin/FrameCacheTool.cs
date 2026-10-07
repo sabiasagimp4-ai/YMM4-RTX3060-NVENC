@@ -28,7 +28,7 @@ public sealed class FrameCacheToolSettings : SettingsBase<FrameCacheToolSettings
     private int settingsVersion;
     private bool automaticRamBudget = true, cacheFramesWhenIdle = true;
     private int ramLimitMiB = 2048;
-    private double idleDelaySeconds = 8;
+    private double idleDelaySeconds = 1;
     private IdleCacheOrder idleOrder;
     private int idleRangeStartFrame, idleRangeEndFrame;
     private int idleWorkers;
@@ -58,10 +58,12 @@ public sealed class FrameCacheToolSettings : SettingsBase<FrameCacheToolSettings
         set { if (value < 0) AutomaticGpuBudget = true; Set(ref gpuLimitMiB, Math.Clamp(value, -1, 8192)); }
     }
     public bool CacheFramesWhenIdle { get => cacheFramesWhenIdle; set => Set(ref cacheFramesWhenIdle, value); }
+    // The wait after an edit of the project before the pre-renderer starts again (seeks, playback and input that
+    // changes nothing in the preview do not wait).
     public double IdleDelaySeconds
     {
         get => idleDelaySeconds;
-        set => Set(ref idleDelaySeconds, double.IsFinite(value) ? Math.Clamp(value, 0.25, 120) : 8);
+        set => Set(ref idleDelaySeconds, double.IsFinite(value) ? Math.Clamp(value, 0.1, 120) : 1);
     }
     public IdleCacheOrder IdleOrder
     {
@@ -217,20 +219,20 @@ public sealed class PluginSettingsPanel : StackPanel
             new[] { -1, 0, 128, 256, 512, 1024, 2048, 4096, 8192 }.Append(settings.GpuLimitMiB).Distinct().Order()
                 .Select(value => (value == -1 ? "Auto（GPU予算から配分）" : value == 0 ? "使わない" : $"{value:N0} MiB", (object)value)));
         // The pre-renderer reads the timeline from the tool (IdleFramePreRenderer.SetTimelineToolInfo).
-        AddChoice("停止中の描画器", nameof(FrameCacheToolSettings.IdleWorkers),
+        AddChoice("先読みの描画器", nameof(FrameCacheToolSettings.IdleWorkers),
             new[] { 0, 1, 2, 4 }.Append(settings.IdleWorkers).Distinct().Order()
                 .Select(value => (value == 0 ? "Auto（コア数とVRAMから決定）" : $"{value} 本", (object)value)));
         var idle = new CheckBox
         {
-            Content = new TextBlock { Text = "停止中にフレームをキャッシュする（ツール「描画キャッシュ」を開いている間）", TextWrapping = TextWrapping.Wrap },
+            Content = new TextBlock { Text = "先回りしてフレームをキャッシュする（停止中・再生中・シークの後。ツール「描画キャッシュ」を開いている間）", TextWrapping = TextWrapping.Wrap },
             Margin = new Thickness(0, 8, 0, 0),
         };
         Bind(idle, nameof(FrameCacheToolSettings.CacheFramesWhenIdle));
         Children.Insert(at++, idle);
-        AddChoice("操作後の待ち時間", nameof(FrameCacheToolSettings.IdleDelaySeconds),
-            new double[] { 1, 2, 4, 8, 15, 30, 60, 120 }.Append(settings.IdleDelaySeconds).Distinct().Order()
+        AddChoice("編集後の待ち時間", nameof(FrameCacheToolSettings.IdleDelaySeconds),
+            new double[] { 0.1, 0.25, 0.5, 1, 2, 4, 8, 15, 30, 60, 120 }.Append(settings.IdleDelaySeconds).Distinct().Order()
                 .Select(value => ($"{value:g} 秒", (object)value)));
-        AddChoice("キャッシュする順序", nameof(FrameCacheToolSettings.IdleOrder),
+        AddChoice("停止中の順序", nameof(FrameCacheToolSettings.IdleOrder),
             [("現在位置から末尾、先頭へ", (object)IdleCacheOrder.FromCurrentTime),
              ("現在位置の前後から", (object)IdleCacheOrder.AroundCurrentTime),
              ("タイムラインの先頭から", (object)IdleCacheOrder.FromStart)]);

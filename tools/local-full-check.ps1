@@ -150,13 +150,49 @@ function Invoke-Native([string] $FilePath, [string[]] $Arguments, [int] $Timeout
     $result
 }
 
-# dotnet run of a project that references YMM4 (built against the reference YMM4, as the workflows do).
-function Invoke-HostProject([string] $Project, [string[]] $Arguments, [int] $TimeoutMinutes = 60) {
-    Invoke-Native 'dotnet' (@('run', '--project', $Project, '-c', 'Release', $refArg, '--no-launch-profile', '--') + $Arguments) $TimeoutMinutes
+# The test projects are built once (setup-build) and run without building again: a build that finds nothing to do
+# still takes several seconds per run (the reference lowering of the plugin runs every time).
+$hostProjects = @('tests\HostCacheProbe\HostCacheProbe.csproj', 'tests\CacheChecks\CacheChecks.csproj', 'tests\GuiSmoke\GuiSmoke.csproj')
+$plainProjects = @('tests\HostLoadChecks\HostLoadChecks.csproj', 'tests\StoreChecksHarness\StoreChecks.csproj', 'tests\ReadinessChecks\ReadinessChecks.csproj',
+    'tests\CacheAdversarialChecks\CacheAdversarialChecks.csproj', 'tests\FileLeaseChecks\FileLeaseChecks.csproj', 'tests\DescriptionJsonChecks\DescriptionJsonChecks.csproj')
+
+function Build-Project([string] $Project) {
+    $arguments = @('build', $Project, '-c', 'Release', '--nologo', '-v', 'q')
+    if ($hostProjects -contains $Project) { $arguments += $refArg }
+    Invoke-Native 'dotnet' $arguments
 }
 
-function Invoke-Project([string] $Project) {
-    Invoke-Native 'dotnet' @('run', '--project', $Project, '-c', 'Release', '--no-launch-profile')
+# dotnet run of a project that references YMM4 (built against the reference YMM4, as the workflows do).
+function Invoke-HostProject([string] $Project, [string[]] $Arguments, [int] $TimeoutMinutes = 60) {
+    Invoke-Native 'dotnet' (@('run', '--no-build', '--project', $Project, '-c', 'Release', $refArg, '--no-launch-profile', '--') + $Arguments) $TimeoutMinutes
+}
+
+# Several programs at once, each into its own part of the step's log; throws naming those that failed.
+function Invoke-Parallel([hashtable[]] $Runs, [int] $TimeoutMinutes = 60) {
+    $launched = foreach ($entry in $Runs) {
+        $log = Join-Path $logs ("$($script:stepId)-$($entry.Name).part")
+        $commandLine = ConvertTo-CommandLine $entry.Arguments
+        $process = Start-Process -FilePath $entry.FilePath -ArgumentList $commandLine -WorkingDirectory $root -NoNewWindow -PassThru `
+            -RedirectStandardOutput "$log.stdout" -RedirectStandardError "$log.stderr"
+        $null = $process.Handle
+        @{ Name = $entry.Name; Process = $process; Log = $log; CommandLine = "$($entry.FilePath) $commandLine" }
+    }
+    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+    $failed = @()
+    foreach ($item in $launched) {
+        $left = [int][Math]::Max(0, ($deadline - (Get-Date)).TotalMilliseconds)
+        $code = $null
+        if ($item.Process.WaitForExit($left)) { $code = $item.Process.ExitCode }
+        else { Start-Process -FilePath 'taskkill.exe' -ArgumentList "/PID $($item.Process.Id) /T /F" -NoNewWindow -Wait; $item.Process.WaitForExit(); $code = -1 }
+        $text = ''
+        foreach ($stream in @('stdout', 'stderr')) {
+            $file = "$($item.Log).$stream"
+            if (Test-Path -LiteralPath $file) { $text += [IO.File]::ReadAllText($file, $utf8); Remove-Item -LiteralPath $file }
+        }
+        Write-StepLog "> $($item.CommandLine)`r`n$text`r`n> exit code $code"
+        if ($code -ne 0) { $failed += $item.Name }
+    }
+    if ($failed.Count -gt 0) { throw "failed: $($failed -join ', ')" }
 }
 
 function Invoke-Python([string[]] $Arguments) { Invoke-Native $python (@($pythonArgs) + $Arguments) }
@@ -188,6 +224,7 @@ function Invoke-Step([string] $Part, [string] $Id, [string] $Title, [scriptblock
     }
     Write-Host "[$Id] $Title ..."
     [IO.File]::WriteAllText($progressFile, "$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss')) running $Id - $Title`r`n", $utf8)
+    $script:stepId = $Id
     $script:stepLog = Join-Path $logs "$Id.log"
     Remove-Item -LiteralPath $script:stepLog -ErrorAction SilentlyContinue
     [IO.File]::WriteAllText($script:stepLog, "# $Title`r`n", $utf8)
@@ -226,6 +263,48 @@ function Invoke-Fetch([string] $Version, [string] $Destination, [string] $Mode) 
     $env:YMM4_FETCH_PRUNE = '1'   # delete the files (outside user\) the version does not have
     try { Invoke-Native $bash @('tools/ci/fetch-ymm4.sh', $Version, ($Destination -replace '\\', '/'), $Mode) 120 }
     finally { Remove-Item Env:YMM4_FETCH_PRUNE -ErrorAction SilentlyContinue }
+}
+
+# The same download in the background, while the steps of another version run; Complete-Fetch waits for it and
+# records it as that version's download step.
+function Start-Fetch([string] $Version, [string] $Destination) {
+    $log = Join-Path $logs "v$Version-fetch.log"
+    [IO.File]::WriteAllText($log, "# YMM4 ${Version}: download (the files that changed), during the steps of the version before`r`n", $utf8)
+    $commandLine = ConvertTo-CommandLine @('tools/ci/fetch-ymm4.sh', $Version, ($Destination -replace '\\', '/'), '--app-ffmpeg')
+    $env:YMM4_FETCH_PRUNE = '1'
+    try {
+        $process = Start-Process -FilePath $bash -ArgumentList $commandLine -WorkingDirectory $root -NoNewWindow -PassThru `
+            -RedirectStandardOutput "$log.stdout" -RedirectStandardError "$log.stderr"
+        $null = $process.Handle
+    }
+    finally { Remove-Item Env:YMM4_FETCH_PRUNE -ErrorAction SilentlyContinue }
+    @{ Version = $Version; Process = $process; Log = $log; CommandLine = "$bash $commandLine"; Started = Get-Date }
+}
+
+function Complete-Fetch([hashtable] $Fetch) {
+    $id = "v$($Fetch.Version)-fetch"
+    $title = "YMM4 $($Fetch.Version): download (the files that changed)"
+    $code = $null
+    if ($Fetch.Process.WaitForExit(120 * 60000)) { $code = $Fetch.Process.ExitCode }
+    else { Start-Process -FilePath 'taskkill.exe' -ArgumentList "/PID $($Fetch.Process.Id) /T /F" -NoNewWindow -Wait; $Fetch.Process.WaitForExit(); $code = -1 }
+    $text = ''
+    foreach ($stream in @('stdout', 'stderr')) {
+        $file = "$($Fetch.Log).$stream"
+        if (Test-Path -LiteralPath $file) { $text += [IO.File]::ReadAllText($file, $utf8); Remove-Item -LiteralPath $file }
+    }
+    [IO.File]::AppendAllText($Fetch.Log, "> $($Fetch.CommandLine)`r`n$text`r`n> exit code $code`r`n", $utf8)
+    $status = 'PASS'
+    $note = 'downloaded while the version before was checked'
+    $tail = ''
+    if ($code -ne 0) {
+        $status = 'FAIL'
+        $note = "fetch-ymm4.sh exited with code $code"
+        $tail = (([IO.File]::ReadAllLines($Fetch.Log, $utf8)) | Select-Object -Last 60) -join "`n"
+    }
+    Add-Record ([pscustomobject]@{ Part = 'versions'; Id = $id; Title = $title; Status = $status
+        Minutes = [Math]::Round(((Get-Date) - $Fetch.Started).TotalMinutes, 1); Note = $note; Tail = $tail
+        Finished = (Get-Date).ToString('yyyy-MM-dd HH:mm'); Replayed = $false }) $true
+    $status -ne 'FAIL'
 }
 
 # The user folder of a YMM4 copy under <WorkDir>\ymm4 (the plugin and settings a start installed): YMM4 then starts as
@@ -334,6 +413,9 @@ $ready = (Invoke-Step 'setup' 'setup-package' 'build.ps1: native, plugin, load c
     Remove-Item -LiteralPath $zip
     Invoke-Native 'dotnet' @('build', 'tools\HostFingerprint', '-c', 'Release', '--nologo', '-v', 'q')
 } -Always) -and $ready
+$ready = (Invoke-Step 'setup' 'setup-build' 'The test projects, built once (the steps run them without building again)' {
+    foreach ($project in $hostProjects + $plainProjects) { Build-Project $project }
+} -Always) -and $ready
 [void](Invoke-Step 'setup' 'setup-media' 'Test clips for --video (ffmpeg)' {
     $clip = Join-Path $media 'probe-video-ffmpeg'
     if (-not (Test-Path -LiteralPath "$clip.m2ts")) {
@@ -354,7 +436,7 @@ if ($ready -and $Parts -contains 'latest') {
     } -Always
     if ($haveMinimum) {
         [void](Invoke-Step 'latest' 'latest-load-minimum' "The plugin loads on YMM4 $minimum (types load, missing members are guarded)" {
-            Invoke-Native 'dotnet' @('run', '--project', 'tests\HostLoadChecks\HostLoadChecks.csproj', '-c', 'Release', '--no-launch-profile', '--', $minDir, $pluginDll)
+            Invoke-Native 'dotnet' @('run', '--no-build', '--project', 'tests\HostLoadChecks\HostLoadChecks.csproj', '-c', 'Release', '--no-launch-profile', '--', $minDir, $pluginDll)
             $api = Invoke-Native 'dotnet' @($fingerprint, 'api', $pluginDll, $minDir)
             $list = Join-Path $run 'missing-on-minimum.txt'
             [IO.File]::WriteAllText($list, $api.Stdout, $utf8)
@@ -362,7 +444,7 @@ if ($ready -and $Parts -contains 'latest') {
         })
     } else { Skip-Step 'latest' 'latest-load-minimum' "The plugin loads on YMM4 $minimum" 'download failed' }
     [void](Invoke-Step 'latest' 'latest-load-reference' "The plugin loads on YMM4 $referenceVersion" {
-        Invoke-Native 'dotnet' @('run', '--project', 'tests\HostLoadChecks\HostLoadChecks.csproj', '-c', 'Release', '--no-launch-profile', '--', ($refDir + '\'), $pluginDll)
+        Invoke-Native 'dotnet' @('run', '--no-build', '--project', 'tests\HostLoadChecks\HostLoadChecks.csproj', '-c', 'Release', '--no-launch-profile', '--', ($refDir + '\'), $pluginDll)
     })
     [void](Invoke-Step 'latest' 'latest-native' 'NativeChecks (native invariants)' {
         Invoke-Native $msbuild @('NvencNative\NvencNative.vcxproj', '/t:Build', '/p:Configuration=Release', '/p:Platform=x64', '/m', '/nologo', '/v:minimal')
@@ -378,30 +460,33 @@ if ($ready -and $Parts -contains 'latest') {
         $mode = $check[0]
         [void](Invoke-Step 'latest' "latest-$mode" "HostCacheProbe --${mode}: $($check[1])" { Invoke-HostProject 'tests\HostCacheProbe\HostCacheProbe.csproj' @(($refDir + '\'), "--$mode") })
     }
-    foreach ($check in @(
-            @('store', 'tests\StoreChecksHarness\StoreChecks.csproj', 'StoreChecks (store, memory policy, idle traversal)'),
-            @('readiness', 'tests\ReadinessChecks\ReadinessChecks.csproj', 'ReadinessChecks (render readiness, blink seeds)'),
-            @('adversarial', 'tests\CacheAdversarialChecks\CacheAdversarialChecks.csproj', 'CacheAdversarialChecks (key oracle)'),
-            @('file-lease', 'tests\FileLeaseChecks\FileLeaseChecks.csproj', 'FileLeaseChecks (external file leases)'),
-            @('description-json', 'tests\DescriptionJsonChecks\DescriptionJsonChecks.csproj', 'DescriptionJsonChecks'))) {
-        $project = $check[1]
-        [void](Invoke-Step 'latest' "latest-$($check[0])" $check[2] { Invoke-Project $project })
-    }
+    # They use the CPU only, and none depends on another: all at once.
+    [void](Invoke-Step 'latest' 'latest-portable' 'StoreChecks, ReadinessChecks, CacheAdversarialChecks, FileLeaseChecks, DescriptionJsonChecks (at once)' {
+        Invoke-Parallel @(foreach ($project in $plainProjects | Where-Object { $_ -notlike '*HostLoadChecks*' }) {
+            @{ Name = [IO.Path]::GetFileNameWithoutExtension($project); FilePath = 'dotnet'
+                Arguments = @('run', '--no-build', '--project', $project, '-c', 'Release', '--no-launch-profile') }
+        })
+    })
     [void](Invoke-Step 'latest' 'latest-negative-control' 'Live-reuse regression rejects a deliberately removed validation guard (source restored)' {
         $path = Join-Path $root 'NVEncVideoWriterPlugin\TimelineFrameCache.cs'
         $original = [IO.File]::ReadAllBytes($path)
         $text = [IO.File]::ReadAllText($path)
         $broken = $text.Replace('ReferenceEquals(state.LastOutput, previousOutput) && StillCurrent(pending))', 'ReferenceEquals(state.LastOutput, previousOutput))')
         if ($broken -eq $text) { throw 'the mutation did not apply' }
+        $failure = $null
         try {
             [IO.File]::WriteAllText($path, $broken, $utf8)
-            $probe = Invoke-Logged $script:stepLog 'dotnet' @('run', '--project', 'tests\HostCacheProbe\HostCacheProbe.csproj', '-c', 'Release', $refArg, '--no-launch-profile', '--', ($refDir + '\'), '--gpu')
+            Build-Project 'tests\HostCacheProbe\HostCacheProbe.csproj'
+            $probe = Invoke-Logged $script:stepLog 'dotnet' @('run', '--no-build', '--project', 'tests\HostCacheProbe\HostCacheProbe.csproj', '-c', 'Release', $refArg, '--no-launch-profile', '--', ($refDir + '\'), '--gpu')
             if ($probe.ExitCode -eq 0 -or -not $probe.Text.Contains('Edit between capture and live lookup reused stale output')) {
-                throw 'the probe did not fail at the stale-live-output regression'
-            }
-            Write-StepLog 'The mutated build failed at the stale-live-output regression, as expected.'
+                $failure = 'the probe did not fail at the stale-live-output regression'
+            } else { Write-StepLog 'The mutated build failed at the stale-live-output regression, as expected.' }
         }
+        catch { $failure = $_.Exception.Message }
         finally { [IO.File]::WriteAllBytes($path, $original) }
+        # The later steps run the probe without building it: build it again from the restored source.
+        Build-Project 'tests\HostCacheProbe\HostCacheProbe.csproj'
+        if ($failure) { throw $failure }
     })
     [void](Invoke-Step 'latest' 'latest-cache-checks' 'CacheChecks: dependency keys against the real host' { Invoke-HostProject 'tests\CacheChecks\CacheChecks.csproj' @(($refDir + '\')) })
     foreach ($check in @(
@@ -472,11 +557,19 @@ if ($ready -and $Parts -contains 'gui') {
                 New-Item -ItemType Directory -Force -Path $smoke | Out-Null
                 Reset-User $guiHost
                 Invoke-HostProject 'tests\GuiSmoke\GuiSmoke.csproj' @(($guiHost + '\'), (Join-Path $smoke 'gui-smoke.ymmp'))
+                $trace = Join-Path $smoke 'gui-trace.jsonl'
                 try {
                     Invoke-Native $windowsPowerShell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $root 'tools\ci\gui-smoke.ps1'),
-                        '-HostDir', $guiHost, '-Project', (Join-Path $smoke 'gui-smoke.ymmp'), '-PluginDir', $pluginDir, '-ArtifactDirectory', $smoke) 30
+                        '-HostDir', $guiHost, '-Project', (Join-Path $smoke 'gui-smoke.ymmp'), '-PluginDir', $pluginDir, '-ArtifactDirectory', $smoke, '-TracePath', $trace) 30
                 }
                 finally { Remove-Screenshots $script:stepLog }
+                # What the pre-renderer did, paused and while the smoke test played (its frames in the trace).
+                $frames = @([IO.File]::ReadAllLines($trace, $utf8) | Where-Object { $_.Contains('"Stage":"idle-frame"') })
+                $playing = @($frames | Where-Object { $_.Contains('playing=True') })
+                $rendered = @($frames | Where-Object { $_.Contains('"Outcome":"Rendered"') })
+                $renderedPlaying = @($playing | Where-Object { $_.Contains('"Outcome":"Rendered"') })
+                $script:stepNote = "pre-render: $($rendered.Count) frames drawn ($($renderedPlaying.Count) while playing), $($frames.Count) visited"
+                Write-StepLog $script:stepNote
             })
             [void](Invoke-Step 'gui' 'gui-stress' 'GUI stress: 30 s Full-HD project played off/cold/warm, seeks, edits, purge (trace checked)' {
                 $stress = Join-Path $guiOut 'stress'
@@ -520,23 +613,31 @@ if ($ready -and $Parts -contains 'versions') {
         [IO.File]::WriteAllLines((Join-Path $run 'versions.txt'), $script:targets, $utf8)
         $script:stepNote = "$($script:targets.Count) versions, $($script:targets[0]) to $($script:targets[-1])"
     } -Always
-    $app = Join-Path $ymm4 'app'
-    foreach ($version in $targets) {
+    # Two folders: the next version downloads into one while the other is checked (each downloads only the files that
+    # changed since the version before it there).
+    $apps = @((Join-Path $ymm4 'app-a'), (Join-Path $ymm4 'app-b'))
+    $kinds = @('scan', 'start', 'keys', 'probe', 'animation', 'psd')
+    $queue = @($targets | Where-Object { $version = $_; @($kinds | Where-Object { -not (Test-Passed "v$version-$_") }).Count -gt 0 })
+    $prefetch = $null
+    for ($index = 0; $index -lt $targets.Count; $index++) {
+        $version = $targets[$index]
         $prefix = "v$version"
-        $stepIds = @('scan', 'start', 'keys', 'probe', 'animation', 'psd') | ForEach-Object { "$prefix-$_" }
-        $pending = @($stepIds | Where-Object { -not (Test-Passed $_) })
+        $stepIds = @($kinds | ForEach-Object { "$prefix-$_" })
+        $position = [Array]::IndexOf($queue, $version)
+        $app = $apps[[Math]::Max(0, $position) % 2]
         $fetched = $true
-        if ($pending.Count -gt 0) {
-            $fetched = Invoke-Step 'versions' "$prefix-fetch" "YMM4 ${version}: download (the files that changed)" {
-                Invoke-Fetch $version $app '--app-ffmpeg'
-                Reset-User $app
-            } -Always
+        if ($position -ge 0) {
+            if ($prefetch -and $prefetch.Version -eq $version) { $fetched = Complete-Fetch $prefetch }
+            else { $fetched = Invoke-Step 'versions' "$prefix-fetch" "YMM4 ${version}: download (the files that changed)" { Invoke-Fetch $version $app '--app-ffmpeg' } -Always }
+            $prefetch = $null
+            if ($position + 1 -lt $queue.Count) { $prefetch = Start-Fetch $queue[$position + 1] $apps[($position + 1) % 2] }
         }
         if (-not $fetched) {
             [IO.File]::WriteAllText((Join-Path $results "$version.scan.json"), '{"error":"download failed"}', $utf8)
             foreach ($id in $stepIds) { Skip-Step 'versions' $id "YMM4 ${version}" 'download failed' }
             continue
         }
+        if ($position -ge 0) { Reset-User $app }
         [void](Invoke-Step 'versions' "$prefix-scan" "YMM4 ${version}: files (runtime, references, APIs, contracts)" {
             $scan = Invoke-Logged $script:stepLog 'dotnet' @($fingerprint, 'scan', $app, $pluginDir)
             $text = $scan.Stdout
@@ -577,6 +678,7 @@ if ($ready -and $Parts -contains 'versions') {
             probe = Get-OutcomeOf @("$prefix-probe", "$prefix-animation", "$prefix-psd") }
         [IO.File]::WriteAllText((Join-Path $results "$version.tests.json"), ($tests | ConvertTo-Json -Compress), $utf8)
     }
+    if ($prefetch) { [void](Complete-Fetch $prefetch) }
     if ($listed) {
         [void](Invoke-Step 'versions' 'versions-report' 'The version table (tools\compat\ymm4_compat.py merge and render, into the run folder)' {
             $report = Join-Path $run 'report'

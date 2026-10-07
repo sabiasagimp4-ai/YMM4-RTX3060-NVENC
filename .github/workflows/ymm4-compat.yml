@@ -302,12 +302,17 @@ jobs:
         run: |
           dotnet build NVEncVideoWriterPlugin\NVEncVideoWriterPlugin.csproj -c Release "-p:YMM4DirPath=$env:REFERENCE_DIR" --nologo
           if ($LASTEXITCODE -ne 0) { throw 'Plugin build failed' }
+          # Built once: the steps run them with --no-build.
+          foreach ($project in 'tests\CacheChecks\CacheChecks.csproj', 'tests\HostCacheProbe\HostCacheProbe.csproj') {
+            dotnet build $project -c Release "-p:YMM4DirPath=$env:REFERENCE_DIR" --nologo -v q
+            if ($LASTEXITCODE -ne 0) { throw "Build of $project failed" }
+          }
       - name: Cache key checks (real host)
         id: keys
         if: steps.build.outcome == 'success'
         continue-on-error: true
         run: |
-          dotnet run --project tests\CacheChecks\CacheChecks.csproj -c Release "-p:YMM4DirPath=$env:REFERENCE_DIR" --no-launch-profile -- $env:YMM4_DIR
+          dotnet run --no-build --project tests\CacheChecks\CacheChecks.csproj -c Release "-p:YMM4DirPath=$env:REFERENCE_DIR" --no-launch-profile -- $env:YMM4_DIR
           if ($LASTEXITCODE -ne 0) { throw 'CacheChecks failed' }
       - name: Export hook and cache checks as an unread build (real host, WARP)
         id: probe
@@ -316,11 +321,11 @@ jobs:
         run: |
           $video = @()
           if (Test-Path $env:PROBE_VIDEO) { $video = @('--video', $env:PROBE_VIDEO) }
-          dotnet run --project tests\HostCacheProbe\HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:REFERENCE_DIR" --no-launch-profile -- $env:YMM4_DIR --unread --gpu @video
+          dotnet run --no-build --project tests\HostCacheProbe\HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:REFERENCE_DIR" --no-launch-profile -- $env:YMM4_DIR --unread --gpu @video
           if ($LASTEXITCODE -ne 0) { throw 'HostCacheProbe --unread failed' }
           # The animation and PSD tachie, where the contracts enable them (otherwise the checks say they are skipped).
           foreach ($mode in '--animation-tachie-check', '--psd-tachie-check') {
-            dotnet run --project tests\HostCacheProbe\HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:REFERENCE_DIR" --no-launch-profile -- $env:YMM4_DIR --unread $mode
+            dotnet run --no-build --project tests\HostCacheProbe\HostCacheProbe.csproj -c Release "-p:YMM4DirPath=$env:REFERENCE_DIR" --no-launch-profile -- $env:YMM4_DIR --unread $mode
             if ($LASTEXITCODE -ne 0) { throw "HostCacheProbe --unread $mode failed" }
           }
       - name: Record

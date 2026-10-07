@@ -143,7 +143,9 @@ internal static partial class IdleFramePreRenderer
         {
             if (workers[index] is null)
             {
-                var thread = new Thread(() => WorkerLoop(index)) { IsBackground = true, Name = "YMM4 idle pre-render " + index };
+                // Below YMM4's own threads: more workers must not make editing or the player's own frames slower.
+                var thread = new Thread(() => WorkerLoop(index))
+                    { IsBackground = true, Name = "YMM4 idle pre-render " + index, Priority = ThreadPriority.BelowNormal };
                 thread.SetApartmentState(ApartmentState.STA);
                 thread.Start();
                 workers[index] = thread;
