@@ -15,6 +15,10 @@ on:
         description: 'Also run tools/rtx-check.ps1 -NoNvenc under Windows PowerShell 5.1 and PowerShell 7'
         type: boolean
         default: false
+      full_check:
+        description: 'Only run tools/local-full-check.ps1 -NoNvenc on one YMM4 version (proves the script before an RTX PC runs it)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,6 +33,7 @@ env:
 
 jobs:
   portable:
+    if: ${{ !inputs.full_check }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,6 +47,7 @@ jobs:
       - run: dotnet run --project tests/DescriptionJsonChecks/DescriptionJsonChecks.csproj -c Release
 
   host:
+    if: ${{ !inputs.full_check || inputs.rtx_check }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,6 +81,7 @@ jobs:
 
   windows:
     needs: host
+    if: ${{ !inputs.full_check }}
     runs-on: windows-2022
     timeout-minutes: 30
     env:
@@ -366,5 +373,45 @@ jobs:
         with:
           name: rtx-check-${{ matrix.shell }}
           path: dist/rtx-check
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # tools/local-full-check.ps1 (every check, in one command, on an RTX PC) without its NVENC steps, on one YMM4 version:
+  # proves the script itself on Windows before it runs for hours on a PC. Only on request (workflow_dispatch with
+  # full_check), since it repeats the checks above.
+  full-check:
+    if: ${{ inputs.full_check }}
+    runs-on: windows-2022
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: ffmpeg, Media Foundation and a 1600x900 screen
+        run: |
+          $feature = Get-WindowsFeature Server-Media-Foundation
+          if ($feature -and -not $feature.Installed) { Install-WindowsFeature Server-Media-Foundation | Out-Null }
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { choco install ffmpeg -y --no-progress | Select-Object -Last 1 }
+          try { Set-DisplayResolution -Width 1600 -Height 900 -Force -ErrorAction Stop } catch { Write-Output "resolution unchanged: $($_.Exception.Message)" }
+      - name: tools/local-full-check.ps1 -NoNvenc
+        shell: powershell
+        run: |
+          $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + $env:Path
+          $work = Join-Path $env:RUNNER_TEMP 'full-check'
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools\local-full-check.ps1 -WorkDir $work -NoNvenc -PreviewRuns 1 -Versions 4.55.1.1
+          $code = $LASTEXITCODE
+          Get-ChildItem (Join-Path $work 'runs') -Filter summary.md -Recurse | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }
+          git status --short
+          New-Item -ItemType Directory -Force -Path dist\full-check | Out-Null
+          Get-ChildItem (Join-Path $work 'runs') -Directory | ForEach-Object {
+            Copy-Item -Path (Join-Path $_.FullName '*') -Destination dist\full-check -Recurse -Force -Exclude plugin, logs
+          }
+          exit $code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: full-check
+          path: dist/full-check
           if-no-files-found: ignore
           retention-days: 14

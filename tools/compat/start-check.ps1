@@ -52,7 +52,9 @@ New-Item -ItemType Directory -Path $settings -Force | Out-Null
 [IO.File]::WriteAllText((Join-Path $settings 'YukkuriMovieMaker.Settings.YMMSettings.json'),
     '{"Version":"' + $version + '","IsYMMPAssociationChecked":true,"IsYMMTAssociationChecked":true,"IsYMMEAssociationChecked":true}')
 
-$statusFile = Join-Path $env:RUNNER_TEMP "ymm4-status-$version.json"
+$temp = $env:RUNNER_TEMP   # on a PC (tools\local-full-check.ps1): the user's temporary folder
+if (-not $temp) { $temp = [IO.Path]::GetTempPath() }
+$statusFile = Join-Path $temp "ymm4-status-$version.json"
 Remove-Item $statusFile -ErrorAction SilentlyContinue
 $env:YMM4_RTX3060_NVENC_STATUS_FILE = $statusFile
 $result = [ordered]@{ fileVersion = $version; started = $false; mainWindow = $false; status = $null; exitCode = $null
