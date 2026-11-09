@@ -1,5 +1,132 @@
 {
  "versions": {
+  "4.57.0.0": {
+   "checked": "2026-11-09",
+   "plugin": "0.2.0-preview.5+6f99fa5",
+   "commit": "6f99fa5d62d92ecbaf0333cc6eb3de4cb3e2772c",
+   "run": "https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/42542349920",
+   "scan": {
+    "runtime": {
+     "tfm": "net10.0",
+     "selfContained": true,
+     "rollForward": null,
+     "frameworks": {
+      "Microsoft.NETCore.App": "10.0.14",
+      "Microsoft.WindowsDesktop.App": "10.0.14"
+     }
+    },
+    "plugin": {
+     "framework": ".NETCoreApp,Version=v10.0",
+     "references": [
+      {
+       "name": "YukkuriMovieMaker",
+       "required": "4.47.0.0",
+       "host": "4.57.0.0"
+      },
+      {
+       "name": "YukkuriMovieMaker.Plugin",
+       "required": "1.0.0.0",
+       "host": "1.0.0.0"
+      },
+      {
+       "name": "Vortice.Direct2D1",
+       "required": "2.1.8.0",
+       "host": "2.1.8.0"
+      },
+      {
+       "name": "SharpGen.Runtime",
+       "required": "2.0.0.0",
+       "host": "2.0.0.0"
+      },
+      {
+       "name": "Newtonsoft.Json",
+       "required": "13.0.0.0",
+       "host": "13.0.0.0"
+      },
+      {
+       "name": "Vortice.DXGI",
+       "required": "2.1.8.0",
+       "host": "2.1.8.0"
+      },
+      {
+       "name": "Vortice.DirectX",
+       "required": "2.1.8.0",
+       "host": "2.1.8.0"
+      },
+      {
+       "name": "Vortice.Direct3D11",
+       "required": "2.1.8.0",
+       "host": "2.1.8.0"
+      },
+      {
+       "name": "Vortice.Mathematics",
+       "required": "1.4.0.0",
+       "host": "1.4.0.0"
+      }
+     ],
+     "apiMissing": []
+    },
+    "assemblyVersion": "4.57.0.0",
+    "fileVersion": "4.57.0.0",
+    "knownBuild": null,
+    "contracts": {
+     "baseline": null,
+     "features": [],
+     "off": {
+      "animation-tachie": "lip-sync-readiness が使えないため",
+      "core": "変更 YukkuriMovieMaker.Settings.YMMSettings, 変更 YukkuriMovieMaker.Project.Character, 変更 YukkuriMovieMaker.Project.Items.VoiceItem, 変更 YukkuriMovieMaker.Project.Timeline",
+      "decoder:YukkuriMovieMaker.Plugin.FileSource.FFmpeg": "core が使えないため",
+      "decoder:YukkuriMovieMaker.Plugin.FileSource.MediaFoundation": "core が使えないため",
+      "decoder:YukkuriMovieMaker.Plugin.FileSource.WIC": "core が使えないため",
+      "identity-random": "core が使えないため",
+      "lip-sync-readiness": "core が使えないため",
+      "preview": "core が使えないため",
+      "psd-tachie": "lip-sync-readiness が使えないため",
+      "ruler-bars": "core が使えないため",
+      "selection-rects": "preview が使えないため",
+      "simple-tachie": "core が使えないため",
+      "wrapped-sources": "core が使えないため"
+     }
+    }
+   },
+   "start": {
+    "fileVersion": "4.57.0.0",
+    "started": true,
+    "mainWindow": true,
+    "status": {
+     "plugin": "0.2.0-preview.5",
+     "host": "4.57.0.0",
+     "verified": false,
+     "installed": true,
+     "exportHooked": true,
+     "exportProblem": "",
+     "cacheAvailable": false,
+     "features": null,
+     "status": "YMM4 4.57.0.0（未確認の版）: NVENC 出力（取消保護つき）を使えます。自動キャッシュは使いません: キャッシュが前提とする本体のコードが、検証済みの版と異なります（変更 YukkuriMovieMaker.Settings.YMMSettings, 変更 YukkuriMovieMaker.Project.Character, 変更 YukkuriMovieMaker.Project.Items.VoiceItem, 変更 YukkuriMovieMaker.Project.Timeline）。"
+    },
+    "exitCode": null,
+    "windows": [
+     "[HwndWrapper[YukkuriMovieMaker;;206940b9-6fd9-4a0b-8549-ea96264f12c1]] Check for updates",
+     "[YMM4SplashWindow] Starting YukkuriMovieMaker 4 ...",
+     "[HwndWrapper[YukkuriMovieMaker;;0fe81791-62b4-4fa0-a201-2081474b0231]] YukkuriMovieMaker v4.57.0.0 Lite"
+    ],
+    "dialogs": []
+   },
+   "tests": {
+    "probe": "success",
+    "build": "success",
+    "keys": "success"
+   },
+   "verdict": {
+    "load": "ok",
+    "nvenc": "ok",
+    "cache": "off",
+    "missing": [],
+    "note": "描画キャッシュが前提とする YMM4 のコードが、確かめた版と異なります",
+    "basis": null,
+    "api": ""
+   }
+  },
   "4.56.1.0": {
    "checked": "2026-10-06",
    "plugin": "0.2.0-preview.5",
@@ -12276,6 +12403,6 @@
    }
   }
  },
- "updated": "2026-10-06",
- "plugin": "0.2.0-preview.5"
+ "updated": "2026-11-09",
+ "plugin": "0.2.0-preview.5+6f99fa5"
 }

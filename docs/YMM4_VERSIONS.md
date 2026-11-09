@@ -1,6 +1,6 @@
 # YMM4 の版ごとの対応
 
-このページは `.github/workflows/ymm4-compat.yml` が自動で書き換えます（2026-10-06 更新、プラグイン 0.2.0-preview.5）。手で編集しないでください。
+このページは `.github/workflows/ymm4-compat.yml` が自動で書き換えます（2026-11-09 更新、プラグイン 0.2.0-preview.5 の後の開発版 6f99fa5）。手で編集しないでください。
 
 ## 確かめ方
 
@@ -16,6 +16,7 @@ CI のランナーには NVIDIA の GPU がないため、NVENC で実際にエ�
 
 | YMM4 | 読み込み | NVENC 出力 | 描画キャッシュ | 備考 | 確認 |
 | --- | :---: | :---: | :---: | --- | --- |
+| 4.57.0.0 | ○ | ○ | × | 描画キャッシュが前提とする YMM4 のコードが、確かめた版と異なります | 2026-11-09、0.2.0-preview.5 の後の開発版 6f99fa5、照合・起動・検査（[記録](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/42542349920)） |
 | 4.56.1.0 | ○ | ○ | ○ | コードを読んだ版 | 2026-10-06、0.2.0-preview.5、照合・起動（[記録](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37466226125)） |
 | 4.56.0.1 | ○ | ○ | △ | キャッシュで使わない機能: シンプル立ち絵、口パクの完成判定、動く立ち絵、PSD 立ち絵。コードを読んだ版（4.56.1.0 と同じ部分も使用） | 2026-10-06、0.2.0-preview.5、照合・起動（[記録](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37466226125)） |
 | 4.56.0.0 | ○ | ○ | △ | キャッシュで使わない機能: シンプル立ち絵、口パクの完成判定、動く立ち絵、PSD 立ち絵。コードを読んだ版（4.56.1.0 と同じ部分も使用） | 2026-10-06、0.2.0-preview.5、照合・起動（[記録](https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37466226125)） |
@@ -209,3 +210,4 @@ CI のランナーには NVIDIA の GPU がないため、NVENC で実際にエ�
 ## 実行記録
 
 - https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/37466226125
+- https://github.com/sabiasagimp4-ai/YMM4-RTX3060-NVENC/actions/runs/42542349920
